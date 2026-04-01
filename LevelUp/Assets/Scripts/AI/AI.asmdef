@@ -1,0 +1,17 @@
+{
+    "name": "LevelUp.AI",
+    "rootNamespace": "LevelUp.AI",
+    "references": [
+        "LevelUp.Utils",
+        "LevelUp.Core"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}
