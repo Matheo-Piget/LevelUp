@@ -1,29 +1,45 @@
 using System.Collections.Generic;
 using UnityEngine;
+using UnityEngine.InputSystem;
 using LevelUp.Core;
 using LevelUp.Utils;
 
 namespace LevelUp.UI
 {
     /// <summary>
-    /// Gère l'affichage de la main du joueur local : positionnement en éventail,
-    /// multi-sélection, drag & drop.
+    /// Main du joueur style Balatro : éventail avec arc prononcé,
+    /// hover lift smooth, drag-to-reorder, idle breathing, smooth lerp.
     /// </summary>
     public class HandView : MonoBehaviour
     {
         [SerializeField] private RectTransform? _handContainer;
         [SerializeField] private GameObject? _cardPrefab;
-        [SerializeField] private float _cardSpacing = 65f;
+        [SerializeField] private float _cardSpacing = 58f;
         [SerializeField] private float _maxHandWidth = 900f;
-        [SerializeField] private float _fanAngle = 4f;
         [SerializeField] private AnimationController? _animController;
 
         private readonly List<CardView> _cardViews = new();
         private readonly List<CardView> _selectedCards = new();
+        private readonly List<Vector2> _targetPositions = new();
+        private readonly List<float> _targetRotations = new();
+        private readonly List<Vector3> _targetScales = new();
         private CardView? _draggedCard;
+        private CardView? _hoveredCard;
         private Vector2 _dragOffset;
         private int _playerIndex;
         private bool _animatingDraw;
+        private int _hoveredIndex = -1;
+
+        // Drag-to-reorder
+        private bool _isReorderDrag;
+        private int _draggedOriginalIndex = -1;
+        private int _reorderInsertIndex = -1;
+
+        // Idle breathing
+        private float _breathTime;
+
+        // Deal cascade
+        private bool _animatingDeal;
 
         /// <summary>Carte unique sélectionnée (pour défausse).</summary>
         public CardView? SelectedCard => _selectedCards.Count == 1 ? _selectedCards[0] : null;
@@ -34,11 +50,17 @@ namespace LevelUp.UI
         /// <summary>Nombre de cartes dans la main.</summary>
         public int CardCount => _cardViews.Count;
 
+        /// <summary>Indique si la main est en cours de deal (cascade animation).</summary>
+        public bool IsAnimatingDeal => _animatingDeal;
+
         /// <summary>Événement déclenché quand une carte est sélectionnée.</summary>
         public event System.Action<CardModel>? OnCardSelected;
 
         /// <summary>Événement déclenché quand une carte est drag & drop sur une cible.</summary>
         public event System.Action<CardModel, Vector2>? OnCardDropped;
+
+        /// <summary>Événement déclenché quand les cartes sont réordonnées.</summary>
+        public event System.Action<int, int>? OnCardsReordered;
 
         private void OnEnable()
         {
@@ -50,32 +72,224 @@ namespace LevelUp.UI
             EventBus.Unsubscribe<HandChangedEvent>(OnHandChanged);
         }
 
+        private void Update()
+        {
+            _breathTime += Time.deltaTime;
+            UpdateHover();
+            LerpCardsToTarget();
+        }
+
         /// <summary>
-        /// Définit l'index du joueur local dont on affiche la main.
+        /// Détecte le hover en continu.
+        /// </summary>
+        private void UpdateHover()
+        {
+            if (_draggedCard != null || _handContainer == null) return;
+
+            Vector2 mousePos = Vector2.zero;
+            bool hasPointer = false;
+
+            if (Mouse.current != null)
+            {
+                mousePos = Mouse.current.position.ReadValue();
+                hasPointer = true;
+            }
+            else if (Touchscreen.current != null && Touchscreen.current.primaryTouch.press.isPressed)
+            {
+                mousePos = Touchscreen.current.primaryTouch.position.ReadValue();
+                hasPointer = true;
+            }
+
+            if (!hasPointer)
+            {
+                SetHoveredCard(-1);
+                return;
+            }
+
+            int newHovered = GetCardIndexAtPosition(mousePos);
+            SetHoveredCard(newHovered);
+        }
+
+        private void SetHoveredCard(int index)
+        {
+            if (index == _hoveredIndex) return;
+
+            if (_hoveredIndex >= 0 && _hoveredIndex < _cardViews.Count)
+            {
+                _cardViews[_hoveredIndex].SetHovered(false);
+            }
+
+            _hoveredIndex = index;
+            _hoveredCard = (index >= 0 && index < _cardViews.Count) ? _cardViews[index] : null;
+
+            if (_hoveredCard != null)
+            {
+                _hoveredCard.SetHovered(true);
+            }
+
+            RecalculateTargets();
+        }
+
+        /// <summary>
+        /// Lerp smooth + idle breathing.
+        /// </summary>
+        private void LerpCardsToTarget()
+        {
+            float speed = Constants.CardLerpSpeed;
+            float dt = Time.deltaTime * speed;
+
+            for (int i = 0; i < _cardViews.Count; i++)
+            {
+                CardView card = _cardViews[i];
+                if (card == _draggedCard) continue;
+                if (i >= _targetPositions.Count) break;
+
+                RectTransform rt = card.RectTransform;
+
+                // Idle breathing : sin wave légère par carte
+                float breathOffset = Mathf.Sin(_breathTime * 1.8f + i * 0.6f) * 2.5f;
+                float breathScale = 1f + Mathf.Sin(_breathTime * 1.2f + i * 0.4f) * 0.005f;
+
+                Vector2 targetPos = _targetPositions[i];
+                // N'appliquer le breathing que si pas hovered/selected
+                if (i != _hoveredIndex && !card.IsSelected)
+                {
+                    targetPos.y += breathOffset;
+                }
+
+                // Position
+                rt.anchoredPosition = Vector2.Lerp(rt.anchoredPosition, targetPos, dt);
+
+                // Rotation
+                float currentAngle = rt.localEulerAngles.z;
+                if (currentAngle > 180f) currentAngle -= 360f;
+                float newAngle = Mathf.Lerp(currentAngle, _targetRotations[i], dt);
+                rt.localRotation = Quaternion.Euler(0, 0, newAngle);
+
+                // Scale (avec breathing subtil)
+                Vector3 targetScale = _targetScales[i];
+                if (i != _hoveredIndex && !card.IsSelected)
+                {
+                    targetScale *= breathScale;
+                }
+                rt.localScale = Vector3.Lerp(rt.localScale, targetScale, dt);
+
+                // Z-order
+                if (i == _hoveredIndex)
+                {
+                    rt.SetAsLastSibling();
+                }
+                else
+                {
+                    rt.SetSiblingIndex(i);
+                }
+            }
+        }
+
+        /// <summary>
+        /// Calcule les positions cibles avec hover/selection lift et reorder gap.
+        /// </summary>
+        private void RecalculateTargets()
+        {
+            int count = _cardViews.Count;
+            _targetPositions.Clear();
+            _targetRotations.Clear();
+            _targetScales.Clear();
+
+            if (count == 0) return;
+
+            float spacing = _cardSpacing;
+            float totalWidth = (count - 1) * spacing;
+
+            if (totalWidth > _maxHandWidth && count > 1)
+            {
+                spacing = _maxHandWidth / (count - 1);
+                totalWidth = _maxHandWidth;
+            }
+
+            float startX = -totalWidth / 2f;
+            float fanAngle = Constants.HandFanAngle;
+            float angleStep = count > 1 ? fanAngle / (count - 1) : 0f;
+            float startAngle = fanAngle / 2f;
+            float arcHeight = Constants.HandArcHeight;
+
+            for (int i = 0; i < count; i++)
+            {
+                CardView card = _cardViews[i];
+
+                float x = startX + i * spacing;
+                float angle = startAngle - i * angleStep;
+
+                // Reorder gap : décaler les cartes pour montrer le point d'insertion
+                if (_isReorderDrag && _reorderInsertIndex >= 0 && card != _draggedCard)
+                {
+                    int visualIndex = i;
+                    if (visualIndex >= _reorderInsertIndex && visualIndex != _draggedOriginalIndex)
+                    {
+                        x += spacing * 0.5f;
+                    }
+                    if (visualIndex < _reorderInsertIndex && visualIndex != _draggedOriginalIndex)
+                    {
+                        x -= spacing * 0.1f;
+                    }
+                }
+
+                // Arc parabolique
+                float normalizedPos = count > 1 ? (float)i / (count - 1) - 0.5f : 0f;
+                float y = -(normalizedPos * normalizedPos) * arcHeight;
+
+                float scale = 1f;
+
+                // Hover lift
+                if (i == _hoveredIndex && !card.IsSelected && card != _draggedCard)
+                {
+                    y += Constants.HoverLiftY;
+                    angle = 0f;
+                    scale = Constants.HoverScale;
+                }
+                // Selection lift
+                else if (card.IsSelected && card != _draggedCard)
+                {
+                    y += Constants.SelectLiftY;
+                    scale = 1.08f;
+                }
+
+                // Voisins du hover
+                if (_hoveredIndex >= 0 && i != _hoveredIndex && !card.IsSelected && card != _draggedCard)
+                {
+                    int dist = Mathf.Abs(i - _hoveredIndex);
+                    if (dist == 1)
+                    {
+                        y += 8f;
+                        scale = 1.02f;
+                    }
+                }
+
+                _targetPositions.Add(new Vector2(x, y));
+                _targetRotations.Add(angle);
+                _targetScales.Add(Vector3.one * scale);
+            }
+        }
+
+        /// <summary>
+        /// Définit l'index du joueur local.
         /// </summary>
         public void SetPlayerIndex(int index)
         {
             _playerIndex = index;
         }
 
-        /// <summary>
-        /// Appelé quand la main du joueur change.
-        /// </summary>
         private void OnHandChanged(HandChangedEvent evt)
         {
             if (evt.PlayerIndex != _playerIndex) return;
-
-            // Si on est en train d'animer une pioche, ne pas reconstruire toute la main
-            // (on l'a déjà ajoutée visuellement)
-            if (_animatingDraw) return;
-
+            if (_animatingDraw || _animatingDeal) return;
             RefreshHand(evt.NewHand);
         }
 
         /// <summary>
-        /// Reconstruit l'affichage complet de la main.
+        /// Reconstruit la main. Si dealAnimation=true, anime un cascade deal.
         /// </summary>
-        public void RefreshHand(List<CardModel> cards)
+        public void RefreshHand(List<CardModel> cards, bool dealAnimation = false)
         {
             foreach (CardView view in _cardViews)
             {
@@ -83,6 +297,9 @@ namespace LevelUp.UI
             }
             _cardViews.Clear();
             _selectedCards.Clear();
+            _hoveredIndex = -1;
+            _hoveredCard = null;
+            _draggedCard = null;
 
             if (_cardPrefab == null || _handContainer == null) return;
 
@@ -97,11 +314,64 @@ namespace LevelUp.UI
                 }
             }
 
-            LayoutCards();
+            RecalculateTargets();
+
+            if (dealAnimation && _animController != null)
+            {
+                StartCoroutine(DealCascadeCoroutine());
+            }
+            else
+            {
+                ApplyTargetsInstantly();
+            }
         }
 
         /// <summary>
-        /// Ajoute une carte à la main avec animation depuis le deck.
+        /// Deal cascade : cartes arrivent une par une depuis le deck.
+        /// </summary>
+        private System.Collections.IEnumerator DealCascadeCoroutine()
+        {
+            _animatingDeal = true;
+
+            // Cacher toutes les cartes au début
+            for (int i = 0; i < _cardViews.Count; i++)
+            {
+                _cardViews[i].SetAlpha(0f);
+                _cardViews[i].RectTransform.localScale = Vector3.zero;
+            }
+
+            // Faire apparaître chaque carte avec un délai
+            for (int i = 0; i < _cardViews.Count; i++)
+            {
+                CardView card = _cardViews[i];
+                card.SetAlpha(1f);
+
+                if (_animController != null)
+                {
+                    // Position au deck, puis anime vers la main
+                    _animController.AnimateDrawToHand(card.RectTransform, null);
+                }
+                else
+                {
+                    if (i < _targetPositions.Count)
+                    {
+                        card.RectTransform.anchoredPosition = _targetPositions[i];
+                        card.RectTransform.localScale = _targetScales[i];
+                    }
+                }
+
+                yield return new WaitForSeconds(0.08f);
+            }
+
+            // Attendre que la dernière animation finisse
+            yield return new WaitForSeconds(Constants.AnimDrawDuration);
+
+            _animatingDeal = false;
+            RecalculateTargets();
+        }
+
+        /// <summary>
+        /// Ajoute une carte avec animation depuis le deck.
         /// </summary>
         public void AddCardWithAnimation(CardModel card)
         {
@@ -120,10 +390,8 @@ namespace LevelUp.UI
             cardView.Setup(card, true);
             _cardViews.Add(cardView);
 
-            // D'abord positionner les cartes existantes pour calculer la destination
-            LayoutCards();
+            RecalculateTargets();
 
-            // Lancer l'animation depuis le deck
             if (_animController != null)
             {
                 _animController.AnimateDrawToHand(cardView.RectTransform, () =>
@@ -137,54 +405,114 @@ namespace LevelUp.UI
             }
         }
 
-        /// <summary>
-        /// Positionne les cartes en éventail dans la main.
-        /// </summary>
-        private void LayoutCards()
+        private void ApplyTargetsInstantly()
         {
-            int count = _cardViews.Count;
-            if (count == 0) return;
-
-            float spacing = _cardSpacing;
-            float totalWidth = (count - 1) * spacing;
-
-            if (totalWidth > _maxHandWidth && count > 1)
+            for (int i = 0; i < _cardViews.Count && i < _targetPositions.Count; i++)
             {
-                spacing = _maxHandWidth / (count - 1);
-                totalWidth = _maxHandWidth;
-            }
-
-            float startX = -totalWidth / 2f;
-            float angleStep = count > 1 ? _fanAngle / (count - 1) : 0f;
-            float startAngle = _fanAngle / 2f;
-
-            for (int i = 0; i < count; i++)
-            {
-                CardView card = _cardViews[i];
-                if (card.IsSelected) continue; // ne pas repositionner les cartes sélectionnées en Y
-
-                RectTransform rt = card.RectTransform;
-                float x = startX + i * spacing;
-                float angle = startAngle - i * angleStep;
-
-                // Arc léger
-                float normalizedPos = count > 1 ? (float)i / (count - 1) - 0.5f : 0f;
-                float y = -(normalizedPos * normalizedPos) * 25f;
-
-                rt.anchoredPosition = new Vector2(x, y);
-                rt.localRotation = Quaternion.Euler(0, 0, angle);
+                RectTransform rt = _cardViews[i].RectTransform;
+                rt.anchoredPosition = _targetPositions[i];
+                rt.localRotation = Quaternion.Euler(0, 0, _targetRotations[i]);
+                rt.localScale = _targetScales[i];
                 rt.SetSiblingIndex(i);
             }
         }
 
-        /// <summary>
-        /// Repositionne toutes les cartes (y compris les sélectionnées) en X uniquement.
-        /// Utilisé après un changement de nombre de cartes.
-        /// </summary>
         public void ForceLayout()
         {
+            RecalculateTargets();
+        }
+
+        // ═══════════════════════════════════════
+        //  DRAG-TO-REORDER
+        // ═══════════════════════════════════════
+
+        /// <summary>
+        /// Démarre un drag-to-reorder depuis la main.
+        /// </summary>
+        public void BeginReorderDrag(int cardIndex, Vector2 screenPosition)
+        {
+            if (cardIndex < 0 || cardIndex >= _cardViews.Count) return;
+
+            _isReorderDrag = true;
+            _draggedOriginalIndex = cardIndex;
+            _reorderInsertIndex = cardIndex;
+            _draggedCard = _cardViews[cardIndex];
+
+            RectTransformUtility.ScreenPointToLocalPointInRectangle(
+                _handContainer, screenPosition, null, out _dragOffset);
+            _dragOffset -= _draggedCard.RectTransform.anchoredPosition;
+
+            _draggedCard.RectTransform.SetAsLastSibling();
+            _draggedCard.SetAlpha(0.85f);
+            _draggedCard.RectTransform.localScale = Vector3.one * 1.15f;
+            _draggedCard.RectTransform.localRotation = Quaternion.identity;
+
+            RecalculateTargets();
+        }
+
+        /// <summary>
+        /// Continue un drag-to-reorder : calcule le point d'insertion.
+        /// </summary>
+        public void ContinueReorderDrag(Vector2 screenPosition)
+        {
+            if (_draggedCard == null || _handContainer == null || !_isReorderDrag) return;
+
+            if (RectTransformUtility.ScreenPointToLocalPointInRectangle(
+                    _handContainer, screenPosition, null, out Vector2 localPoint))
+            {
+                _draggedCard.RectTransform.anchoredPosition = localPoint - _dragOffset;
+
+                // Calculer le point d'insertion basé sur la position X
+                int newInsert = CalculateInsertIndex(localPoint.x);
+                if (newInsert != _reorderInsertIndex)
+                {
+                    _reorderInsertIndex = newInsert;
+                    RecalculateTargets();
+                }
+            }
+        }
+
+        /// <summary>
+        /// Termine le drag-to-reorder : applique le réordonnement.
+        /// </summary>
+        public void EndReorderDrag()
+        {
+            if (_draggedCard == null || !_isReorderDrag) return;
+
+            _draggedCard.SetAlpha(1f);
+            _draggedCard.RectTransform.localScale = Vector3.one;
+
+            // Effectuer le réordonnement
+            if (_reorderInsertIndex >= 0 && _reorderInsertIndex != _draggedOriginalIndex)
+            {
+                CardView movedCard = _cardViews[_draggedOriginalIndex];
+                _cardViews.RemoveAt(_draggedOriginalIndex);
+
+                int insertAt = _reorderInsertIndex;
+                if (insertAt > _draggedOriginalIndex) insertAt--;
+                insertAt = Mathf.Clamp(insertAt, 0, _cardViews.Count);
+
+                _cardViews.Insert(insertAt, movedCard);
+
+                // Notifier pour sync le model
+                OnCardsReordered?.Invoke(_draggedOriginalIndex, insertAt);
+            }
+
+            _isReorderDrag = false;
+            _draggedCard = null;
+            _draggedOriginalIndex = -1;
+            _reorderInsertIndex = -1;
+
+            RecalculateTargets();
+        }
+
+        /// <summary>
+        /// Calcule l'index d'insertion en fonction de la position X du drag.
+        /// </summary>
+        private int CalculateInsertIndex(float localX)
+        {
             int count = _cardViews.Count;
-            if (count == 0) return;
+            if (count <= 1) return 0;
 
             float spacing = _cardSpacing;
             float totalWidth = (count - 1) * spacing;
@@ -196,29 +524,72 @@ namespace LevelUp.UI
             }
 
             float startX = -totalWidth / 2f;
-            float angleStep = count > 1 ? _fanAngle / (count - 1) : 0f;
-            float startAngle = _fanAngle / 2f;
 
             for (int i = 0; i < count; i++)
             {
-                CardView card = _cardViews[i];
-                RectTransform rt = card.RectTransform;
-                float x = startX + i * spacing;
-                float angle = startAngle - i * angleStep;
-                float normalizedPos = count > 1 ? (float)i / (count - 1) - 0.5f : 0f;
-                float y = -(normalizedPos * normalizedPos) * 25f;
-
-                if (card.IsSelected) y += 30f;
-
-                rt.anchoredPosition = new Vector2(x, y);
-                rt.localRotation = Quaternion.Euler(0, 0, angle);
-                rt.SetSiblingIndex(i);
+                float cardCenterX = startX + i * spacing;
+                if (localX < cardCenterX)
+                {
+                    return i;
+                }
             }
+
+            return count - 1;
         }
 
         /// <summary>
-        /// Toggle la sélection d'une carte (multi-sélection pour pose de niveau).
+        /// Indique si un drag-to-reorder est en cours.
         /// </summary>
+        public bool IsReorderDragging => _isReorderDrag;
+
+        // ═══════════════════════════════════════
+        //  ACTION DRAG (défausse / add to meld)
+        // ═══════════════════════════════════════
+
+        public void BeginDrag(int cardIndex, Vector2 screenPosition)
+        {
+            if (cardIndex < 0 || cardIndex >= _cardViews.Count) return;
+
+            _isReorderDrag = false;
+            _draggedCard = _cardViews[cardIndex];
+
+            RectTransformUtility.ScreenPointToLocalPointInRectangle(
+                _handContainer, screenPosition, null, out _dragOffset);
+            _dragOffset -= _draggedCard.RectTransform.anchoredPosition;
+
+            _draggedCard.RectTransform.SetAsLastSibling();
+            _draggedCard.SetAlpha(0.9f);
+            _draggedCard.RectTransform.localScale = Vector3.one * 1.1f;
+        }
+
+        public void ContinueDrag(Vector2 screenPosition)
+        {
+            if (_draggedCard == null || _handContainer == null) return;
+
+            if (RectTransformUtility.ScreenPointToLocalPointInRectangle(
+                    _handContainer, screenPosition, null, out Vector2 localPoint))
+            {
+                _draggedCard.RectTransform.anchoredPosition = localPoint - _dragOffset;
+            }
+        }
+
+        public void EndDrag(Vector2 screenPosition)
+        {
+            if (_draggedCard == null) return;
+
+            _draggedCard.SetAlpha(1f);
+            _draggedCard.RectTransform.localScale = Vector3.one;
+            OnCardDropped?.Invoke(_draggedCard.CardModel, screenPosition);
+            _draggedCard = null;
+            _isReorderDrag = false;
+
+            RecalculateTargets();
+        }
+
+        // ═══════════════════════════════════════
+        //  SELECTION
+        // ═══════════════════════════════════════
+
         public void ToggleCardSelection(int cardIndex)
         {
             if (cardIndex < 0 || cardIndex >= _cardViews.Count) return;
@@ -234,53 +605,48 @@ namespace LevelUp.UI
             {
                 card.SetSelected(true);
                 _selectedCards.Add(card);
+
+                // Pulse feedback
+                if (_animController != null)
+                {
+                    _animController.AnimatePulse(card.RectTransform);
+                }
             }
 
+            RecalculateTargets();
             OnCardSelected?.Invoke(card.CardModel);
         }
 
-        /// <summary>
-        /// Sélectionne une seule carte (pour la défausse). Désélectionne les autres.
-        /// </summary>
         public void SelectSingleCard(int cardIndex)
         {
             if (cardIndex < 0 || cardIndex >= _cardViews.Count) return;
 
             CardView clicked = _cardViews[cardIndex];
 
-            // Si on re-clique sur la seule carte sélectionnée, c'est un double-clic
             if (_selectedCards.Count == 1 && _selectedCards[0] == clicked)
             {
-                return; // le caller gère le double-clic
+                return;
             }
 
             DeselectAll();
             clicked.SetSelected(true);
             _selectedCards.Add(clicked);
+            RecalculateTargets();
             OnCardSelected?.Invoke(clicked.CardModel);
         }
 
-        /// <summary>
-        /// Vérifie si un clic est un double-clic sur la carte déjà sélectionnée.
-        /// </summary>
         public bool IsDoubleClick(int cardIndex)
         {
             if (cardIndex < 0 || cardIndex >= _cardViews.Count) return false;
             return _selectedCards.Count == 1 && _selectedCards[0] == _cardViews[cardIndex];
         }
 
-        /// <summary>
-        /// Retourne la CardView à un index donné.
-        /// </summary>
         public CardView? GetCardViewAt(int index)
         {
             if (index < 0 || index >= _cardViews.Count) return null;
             return _cardViews[index];
         }
 
-        /// <summary>
-        /// Retourne les CardModel de toutes les cartes sélectionnées.
-        /// </summary>
         public List<CardModel> GetSelectedCardModels()
         {
             List<CardModel> models = new();
@@ -291,54 +657,6 @@ namespace LevelUp.UI
             return models;
         }
 
-        /// <summary>
-        /// Démarre le drag d'une carte.
-        /// </summary>
-        public void BeginDrag(int cardIndex, Vector2 screenPosition)
-        {
-            if (cardIndex < 0 || cardIndex >= _cardViews.Count) return;
-
-            _draggedCard = _cardViews[cardIndex];
-
-            RectTransformUtility.ScreenPointToLocalPointInRectangle(
-                _handContainer, screenPosition, null, out _dragOffset);
-
-            _dragOffset -= _draggedCard.RectTransform.anchoredPosition;
-            _draggedCard.RectTransform.SetAsLastSibling();
-            _draggedCard.SetAlpha(0.85f);
-        }
-
-        /// <summary>
-        /// Continue le drag d'une carte.
-        /// </summary>
-        public void ContinueDrag(Vector2 screenPosition)
-        {
-            if (_draggedCard == null || _handContainer == null) return;
-
-            if (RectTransformUtility.ScreenPointToLocalPointInRectangle(
-                    _handContainer, screenPosition, null, out Vector2 localPoint))
-            {
-                _draggedCard.RectTransform.anchoredPosition = localPoint - _dragOffset;
-            }
-        }
-
-        /// <summary>
-        /// Termine le drag d'une carte.
-        /// </summary>
-        public void EndDrag(Vector2 screenPosition)
-        {
-            if (_draggedCard == null) return;
-
-            _draggedCard.SetAlpha(1f);
-            OnCardDropped?.Invoke(_draggedCard.CardModel, screenPosition);
-            _draggedCard = null;
-
-            ForceLayout();
-        }
-
-        /// <summary>
-        /// Retourne l'index d'une carte sous une position écran donnée.
-        /// </summary>
         public int GetCardIndexAtPosition(Vector2 screenPosition)
         {
             for (int i = _cardViews.Count - 1; i >= 0; i--)
@@ -352,9 +670,6 @@ namespace LevelUp.UI
             return -1;
         }
 
-        /// <summary>
-        /// Désélectionne toutes les cartes.
-        /// </summary>
         public void DeselectAll()
         {
             foreach (CardView cv in _selectedCards)
@@ -362,6 +677,7 @@ namespace LevelUp.UI
                 cv.SetSelected(false);
             }
             _selectedCards.Clear();
+            RecalculateTargets();
         }
     }
 }

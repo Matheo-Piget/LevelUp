@@ -1,4 +1,5 @@
 using UnityEngine;
+using UnityEngine.UI;
 using TMPro;
 using LevelUp.Core;
 using LevelUp.Utils;
@@ -6,8 +7,7 @@ using LevelUp.Utils;
 namespace LevelUp.UI
 {
     /// <summary>
-    /// Affiche le HUD : joueur actif, phase du tour, cartes restantes dans le deck,
-    /// niveau de chaque joueur, et messages de statut.
+    /// HUD style Balatro : badges arrondis, textes punchy, status pop-in animé.
     /// </summary>
     public class HUDView : MonoBehaviour
     {
@@ -23,13 +23,18 @@ namespace LevelUp.UI
         [Header("Status")]
         [SerializeField] private TextMeshProUGUI? _statusText;
         [SerializeField] private CanvasGroup? _statusCanvasGroup;
-        [SerializeField] private float _statusDisplayDuration = 2f;
+        [SerializeField] private float _statusDisplayDuration = 2.5f;
 
         [Header("Game Over Panel")]
         [SerializeField] private GameObject? _gameOverPanel;
         [SerializeField] private TextMeshProUGUI? _winnerText;
 
+        [Header("Animation")]
+        [SerializeField] private AnimationController? _animController;
+
         private float _statusTimer;
+        private RectTransform? _statusRect;
+        private bool _initialized;
 
         private void OnEnable()
         {
@@ -63,14 +68,98 @@ namespace LevelUp.UI
         {
             if (_gameOverPanel != null) _gameOverPanel.SetActive(false);
             if (_statusCanvasGroup != null) _statusCanvasGroup.alpha = 0f;
+            if (_statusText != null) _statusRect = _statusText.GetComponent<RectTransform>();
+
+            StyleHUD();
+        }
+
+        /// <summary>
+        /// Applique le style Balatro aux éléments du HUD.
+        /// </summary>
+        private void StyleHUD()
+        {
+            // Style du texte joueur
+            StyleText(_currentPlayerText, Constants.TextAccent, 22f, FontStyles.Bold);
+
+            // Phase : plus lisible
+            StyleText(_currentPhaseText, Constants.TextSecondary, 16f, FontStyles.Normal);
+
+            // Level : gros et doré
+            StyleText(_currentLevelText, Constants.TextAccent, 28f, FontStyles.Bold);
+
+            // Deck count
+            StyleText(_deckCountText, Constants.TextPrimary, 18f, FontStyles.Bold);
+
+            // Round
+            StyleText(_roundNumberText, Constants.TextSecondary, 16f, FontStyles.Normal);
+
+            // Status message
+            StyleText(_statusText, Constants.TextPrimary, 24f, FontStyles.Bold);
+
+            // Winner
+            StyleText(_winnerText, Constants.TextAccent, 36f, FontStyles.Bold);
+
+            // Ajouter des fonds arrondis derrière les groupes d'info
+            AddPanelBackground(_currentPlayerText, 10f, 6f);
+            AddPanelBackground(_currentLevelText, 10f, 6f);
+            AddPanelBackground(_deckCountText, 8f, 4f);
+            AddPanelBackground(_roundNumberText, 8f, 4f);
+
+            _initialized = true;
+        }
+
+        /// <summary>
+        /// Style un TextMeshProUGUI avec les couleurs Balatro.
+        /// </summary>
+        private static void StyleText(TextMeshProUGUI? text, Color color, float size, FontStyles style)
+        {
+            if (text == null) return;
+            text.color = color;
+            text.fontSize = size;
+            text.fontStyle = style;
+        }
+
+        /// <summary>
+        /// Ajoute un panneau de fond semi-transparent arrondi derrière un texte.
+        /// </summary>
+        private static void AddPanelBackground(TextMeshProUGUI? text, float paddingH, float paddingV)
+        {
+            if (text == null) return;
+
+            Transform parent = text.transform.parent;
+            if (parent == null) return;
+
+            // Vérifier si un background existe déjà
+            Transform? existingBg = parent.Find("PanelBg_" + text.name);
+            if (existingBg != null) return;
+
+            GameObject bgObj = new("PanelBg_" + text.name, typeof(RectTransform), typeof(Image));
+            bgObj.transform.SetParent(text.transform, false);
+            bgObj.transform.SetAsFirstSibling();
+
+            RectTransform rt = bgObj.GetComponent<RectTransform>();
+            rt.anchorMin = Vector2.zero;
+            rt.anchorMax = Vector2.one;
+            rt.sizeDelta = new Vector2(paddingH * 2f, paddingV * 2f);
+            rt.anchoredPosition = Vector2.zero;
+
+            Image img = bgObj.GetComponent<Image>();
+            img.color = Constants.PanelBackground;
+            img.raycastTarget = false;
         }
 
         private void Update()
         {
-            // Fade out du message de statut
             if (_statusTimer > 0f)
             {
                 _statusTimer -= Time.deltaTime;
+
+                // Fade out progressif dans la dernière seconde
+                if (_statusTimer <= 0.5f && _statusCanvasGroup != null)
+                {
+                    _statusCanvasGroup.alpha = Mathf.Max(0f, _statusTimer / 0.5f);
+                }
+
                 if (_statusTimer <= 0f && _statusCanvasGroup != null)
                 {
                     _statusCanvasGroup.alpha = 0f;
@@ -79,7 +168,7 @@ namespace LevelUp.UI
         }
 
         /// <summary>
-        /// Affiche un message de statut temporaire.
+        /// Affiche un message de statut avec pop-in animé.
         /// </summary>
         public void ShowStatus(string message)
         {
@@ -92,6 +181,12 @@ namespace LevelUp.UI
                 _statusCanvasGroup.alpha = 1f;
             }
             _statusTimer = _statusDisplayDuration;
+
+            // Pop-in animation
+            if (_animController != null && _statusRect != null)
+            {
+                _animController.AnimatePopIn(_statusRect);
+            }
         }
 
         private void OnTurnStarted(TurnStartedEvent evt)
@@ -108,25 +203,41 @@ namespace LevelUp.UI
             UpdatePhaseText(evt.NewPhase);
         }
 
+        /// <summary>
+        /// Texte de phase court et punchy style Balatro.
+        /// </summary>
         private void UpdatePhaseText(TurnPhase phase)
         {
             if (_currentPhaseText == null) return;
 
             _currentPhaseText.text = phase switch
             {
-                TurnPhase.Draw       => "Cliquez sur la pioche ou une défausse",
-                TurnPhase.LayDown    => "Sélectionnez vos cartes puis cliquez sur la table, ou Passer",
-                TurnPhase.AddToMelds => "Glissez une carte sur une combinaison, ou Terminer",
-                TurnPhase.Discard    => "Cliquez 2x sur une carte ou glissez-la pour défausser",
+                TurnPhase.Draw       => "PIOCHE - Cliquez pioche ou defausse",
+                TurnPhase.LayDown    => "POSE - Selectionnez puis cliquez table",
+                TurnPhase.AddToMelds => "AJOUTE - Glissez sur une combinaison",
+                TurnPhase.Discard    => "DEFAUSSE - Double-clic ou glissez",
                 _                    => ""
             };
+
+            // Couleur selon la phase
+            if (_currentPhaseText != null)
+            {
+                _currentPhaseText.color = phase switch
+                {
+                    TurnPhase.Draw       => Constants.CardBlue,
+                    TurnPhase.LayDown    => Constants.CardGreen,
+                    TurnPhase.AddToMelds => Constants.CardPurple,
+                    TurnPhase.Discard    => Constants.CardOrange,
+                    _                    => Constants.TextSecondary
+                };
+            }
         }
 
         private void OnDeckChanged(DeckChangedEvent evt)
         {
             if (_deckCountText != null)
             {
-                _deckCountText.text = $"Deck: {evt.CardsRemaining}";
+                _deckCountText.text = $"{evt.CardsRemaining}";
             }
         }
 
@@ -134,42 +245,42 @@ namespace LevelUp.UI
         {
             if (_roundNumberText != null)
             {
-                _roundNumberText.text = $"Round {evt.RoundNumber}";
+                _roundNumberText.text = $"ROUND {evt.RoundNumber}";
             }
-            ShowStatus($"Round {evt.RoundNumber} !");
+            ShowStatus($"ROUND {evt.RoundNumber}");
         }
 
         private void OnLevelLaidDown(LevelLaidDownEvent evt)
         {
-            ShowStatus($"Player {evt.PlayerIndex + 1} pose le niveau {evt.Level} !");
+            ShowStatus($"Player {evt.PlayerIndex + 1} pose le NIVEAU {evt.Level} !");
         }
 
         private void OnPlayerSkipped(PlayerSkippedEvent evt)
         {
-            ShowStatus($"Player {evt.PlayerIndex + 1} est sauté !");
+            ShowStatus($"Player {evt.PlayerIndex + 1} SKIP !");
         }
 
         private void OnForcedDraw(ForcedDrawEvent evt)
         {
-            ShowStatus($"Player {evt.PlayerIndex + 1} pioche {evt.CardCount} cartes !");
+            ShowStatus($"Player {evt.PlayerIndex + 1} +{evt.CardCount} CARTES !");
         }
 
         private void OnActionCardPlayed(ActionCardPlayedEvent evt)
         {
             string actionName = evt.Card.Type switch
             {
-                CardType.Skip      => "Skip",
+                CardType.Skip      => "SKIP",
                 CardType.Draw2     => "+2",
-                CardType.Wild      => "Wild",
-                CardType.WildDraw2 => "Wild +2",
-                _                  => "Action"
+                CardType.Wild      => "WILD",
+                CardType.WildDraw2 => "WILD +2",
+                _                  => "ACTION"
             };
-            ShowStatus($"Player {evt.PlayerIndex + 1} joue {actionName} !");
+            ShowStatus($"{actionName} !");
         }
 
         private void OnRoundEnded(RoundEndedEvent evt)
         {
-            ShowStatus($"Player {evt.WinnerIndex + 1} gagne le round !");
+            ShowStatus($"Player {evt.WinnerIndex + 1} WIN !");
         }
 
         private void OnGameOver(GameOverEvent evt)
@@ -177,10 +288,24 @@ namespace LevelUp.UI
             if (_gameOverPanel != null)
             {
                 _gameOverPanel.SetActive(true);
+
+                // Style le panel game over
+                Image? panelImg = _gameOverPanel.GetComponent<Image>();
+                if (panelImg != null)
+                {
+                    panelImg.color = new Color(0f, 0f, 0f, 0.85f);
+                }
+
+                // Pop-in animation
+                RectTransform? panelRt = _gameOverPanel.GetComponent<RectTransform>();
+                if (_animController != null && panelRt != null)
+                {
+                    _animController.AnimatePopIn(panelRt);
+                }
             }
             if (_winnerText != null)
             {
-                _winnerText.text = $"Player {evt.WinnerIndex + 1} gagne la partie !";
+                _winnerText.text = $"PLAYER {evt.WinnerIndex + 1} WINS!";
             }
         }
 
@@ -191,7 +316,7 @@ namespace LevelUp.UI
         {
             if (_currentLevelText != null)
             {
-                _currentLevelText.text = $"Niveau {level}";
+                _currentLevelText.text = $"LVL {level}";
             }
         }
     }

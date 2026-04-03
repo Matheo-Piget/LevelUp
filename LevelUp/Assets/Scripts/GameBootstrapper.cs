@@ -1,5 +1,7 @@
+using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
+using UnityEngine.UI;
 using LevelUp.UI;
 using LevelUp.AI;
 using LevelUp.Network;
@@ -9,7 +11,7 @@ namespace LevelUp.Core
 {
     /// <summary>
     /// Point d'entrée de la scène de jeu.
-    /// Câble tous les systèmes ensemble et lance la partie.
+    /// Câble tous les systèmes, applique le style visuel Balatro, et lance la partie.
     /// </summary>
     public class GameBootstrapper : MonoBehaviour
     {
@@ -23,6 +25,12 @@ namespace LevelUp.Core
         [SerializeField] private LevelProgressView? _levelProgressView;
         [SerializeField] private AnimationController? _animController;
         [SerializeField] private GameInputController? _inputController;
+        [SerializeField] private BalatroEffects? _balatroEffects;
+        [SerializeField] private DiscardPileView? _discardPileView;
+        [SerializeField] private TurnBannerView? _turnBannerView;
+
+        [Header("Visual")]
+        [SerializeField] private Canvas? _mainCanvas;
 
         [Header("Network")]
         [SerializeField] private NetworkManager? _networkManager;
@@ -35,7 +43,44 @@ namespace LevelUp.Core
 
         private void Start()
         {
+            InitializeVisuals();
             InitializeGame();
+        }
+
+        /// <summary>
+        /// Applique le style visuel Balatro : fond sombre + vignette.
+        /// </summary>
+        private void InitializeVisuals()
+        {
+            if (Camera.main != null)
+            {
+                Camera.main.backgroundColor = Constants.BackgroundDark;
+            }
+
+            if (_mainCanvas != null)
+            {
+                CreateVignetteOverlay(_mainCanvas.transform);
+            }
+        }
+
+        private static void CreateVignetteOverlay(Transform parent)
+        {
+            GameObject vignetteObj = new("Vignette", typeof(RectTransform), typeof(Image), typeof(CanvasGroup));
+            vignetteObj.transform.SetParent(parent, false);
+            vignetteObj.transform.SetAsLastSibling();
+
+            RectTransform rt = vignetteObj.GetComponent<RectTransform>();
+            rt.anchorMin = Vector2.zero;
+            rt.anchorMax = Vector2.one;
+            rt.sizeDelta = Vector2.zero;
+
+            Image img = vignetteObj.GetComponent<Image>();
+            img.color = new Color(0f, 0f, 0f, 0.15f);
+            img.raycastTarget = false;
+
+            CanvasGroup cg = vignetteObj.GetComponent<CanvasGroup>();
+            cg.blocksRaycasts = false;
+            cg.interactable = false;
         }
 
         /// <summary>
@@ -49,13 +94,10 @@ namespace LevelUp.Core
                 return;
             }
 
-            // Initialiser le background
-            Camera.main!.backgroundColor = Constants.BackgroundNavy;
-
             // Initialiser les vues
             if (_handView != null)
             {
-                _handView.SetPlayerIndex(0); // Joueur local = index 0
+                _handView.SetPlayerIndex(0);
             }
 
             if (_inputController != null)
@@ -63,7 +105,6 @@ namespace LevelUp.Core
                 _inputController.Initialize(_gameManager);
             }
 
-            // Initialiser le network
             if (_networkManager != null)
             {
                 _networkManager.Initialize(_gameManager, _humanPlayerCount);
@@ -72,7 +113,7 @@ namespace LevelUp.Core
             // Démarrer la partie
             _gameManager.StartGame(_humanPlayerCount, _aiPlayerCount);
 
-            // Créer les AIPlayers après que les joueurs soient créés
+            // Créer les AIPlayers
             for (int i = 0; i < _gameManager.Players.Count; i++)
             {
                 if (_gameManager.Players[i].IsAI)
@@ -83,20 +124,82 @@ namespace LevelUp.Core
                 }
             }
 
+            // Noms des joueurs
+            List<string> names = new();
+            foreach (PlayerModel p in _gameManager.Players)
+            {
+                names.Add(p.Name);
+            }
+
             // Initialiser la progression des niveaux
             if (_levelProgressView != null)
             {
-                List<string> names = new();
-                foreach (PlayerModel p in _gameManager.Players)
-                {
-                    names.Add(p.Name);
-                }
                 _levelProgressView.Initialize(_gameManager.Players.Count, names);
             }
+
+            // Initialiser les piles de défausse
+            if (_discardPileView != null)
+            {
+                _discardPileView.Initialize(_gameManager.Players.Count, names);
+            }
+
+            // Écouter le début de round pour le deal cascade
+            EventBus.Subscribe<RoundStartedEvent>(OnRoundStarted);
+
+            // Lancer le deal cascade pour le premier round
+            if (_handView != null)
+            {
+                StartCoroutine(FirstDealCascade());
+            }
+        }
+
+        /// <summary>
+        /// Deal cascade pour le premier round (les cartes sont déjà dans la main).
+        /// </summary>
+        private IEnumerator FirstDealCascade()
+        {
+            // Attendre une frame pour que tout soit initialisé
+            yield return null;
+
+            PlayerModel? player = _gameManager?.GetCurrentPlayer();
+            if (player != null && _handView != null)
+            {
+                _handView.RefreshHand(player.Hand, dealAnimation: true);
+            }
+        }
+
+        /// <summary>
+        /// Au début de chaque nouveau round, deal cascade.
+        /// </summary>
+        private void OnRoundStarted(RoundStartedEvent evt)
+        {
+            if (evt.RoundNumber <= 1) return; // Premier round géré par FirstDealCascade
+
+            if (_handView != null && _gameManager != null)
+            {
+                PlayerModel? local = null;
+                foreach (PlayerModel p in _gameManager.Players)
+                {
+                    if (!p.IsAI) { local = p; break; }
+                }
+
+                if (local != null)
+                {
+                    StartCoroutine(DealAfterDelay(local));
+                }
+            }
+        }
+
+        private IEnumerator DealAfterDelay(PlayerModel player)
+        {
+            yield return null; // Attendre que les cartes soient distribuées
+            _handView?.RefreshHand(player.Hand, dealAnimation: true);
         }
 
         private void OnDestroy()
         {
+            EventBus.Unsubscribe<RoundStartedEvent>(OnRoundStarted);
+
             foreach (AIPlayer ai in _aiPlayers)
             {
                 if (ai != null) Destroy(ai);

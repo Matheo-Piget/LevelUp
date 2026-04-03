@@ -7,9 +7,8 @@ using LevelUp.Utils;
 namespace LevelUp.UI
 {
     /// <summary>
-    /// Contrôleur d'entrée principal du jeu.
-    /// Gère : pioche (clic ou drag depuis le deck), multi-sélection pour poser le niveau,
-    /// défausse (clic ou drag), et ajout aux combinaisons.
+    /// Contrôleur d'entrée principal. Gère pioche, multi-sélection, défausse,
+    /// ajout aux combinaisons, et drag-to-reorder de la main.
     /// </summary>
     public class GameInputController : MonoBehaviour
     {
@@ -17,14 +16,20 @@ namespace LevelUp.UI
         [SerializeField] private TableView? _tableView;
         [SerializeField] private HUDView? _hudView;
         [SerializeField] private AnimationController? _animController;
+        [SerializeField] private DiscardPileView? _discardPileView;
         [SerializeField] private RectTransform? _deckHitArea;
-        [SerializeField] private RectTransform?[]? _discardHitAreas;
         [SerializeField] private RectTransform? _tableHitArea;
 
         private GameManager? _gameManager;
         private bool _isDragging;
-        private bool _isDraggingFromDeck;
         private bool _inputEnabled = true;
+        private Vector2 _dragStartPos;
+        private float _dragStartTime;
+        private int _dragCardIndex = -1;
+
+        // Reorder drag tracking
+        private bool _isReorderCandidate;
+        private const float ReorderDragThreshold = 15f;
 
         /// <summary>
         /// Initialise avec la référence au GameManager.
@@ -32,11 +37,35 @@ namespace LevelUp.UI
         public void Initialize(GameManager gameManager)
         {
             _gameManager = gameManager;
+
+            // Connecter l'event de réordonnement
+            if (_handView != null)
+            {
+                _handView.OnCardsReordered += OnCardsReordered;
+            }
+        }
+
+        private void OnDestroy()
+        {
+            if (_handView != null)
+            {
+                _handView.OnCardsReordered -= OnCardsReordered;
+            }
         }
 
         /// <summary>
-        /// Active/désactive les inputs.
+        /// Synchronise le modèle quand les cartes sont réordonnées dans la vue.
         /// </summary>
+        private void OnCardsReordered(int fromIndex, int toIndex)
+        {
+            if (_gameManager?.TurnManager == null) return;
+            PlayerModel player = _gameManager.TurnManager.CurrentPlayer;
+            if (!player.IsAI)
+            {
+                player.ReorderHand(fromIndex, toIndex);
+            }
+        }
+
         public void SetInputEnabled(bool enabled)
         {
             _inputEnabled = enabled;
@@ -55,9 +84,6 @@ namespace LevelUp.UI
             HandleInput();
         }
 
-        /// <summary>
-        /// Gère les entrées souris et tactile.
-        /// </summary>
         private void HandleInput()
         {
             Vector2 position;
@@ -100,39 +126,36 @@ namespace LevelUp.UI
             // ── Phase DRAW ──
             if (phase == TurnPhase.Draw)
             {
-                // Clic sur le deck → pioche avec animation
                 if (HitsRect(_deckHitArea, pos))
                 {
                     DrawFromDeckWithAnimation();
                     return;
                 }
 
-                // Clic sur une défausse
-                if (_discardHitAreas != null)
+                // Clic sur une pile de défausse (via DiscardPileView)
+                if (_discardPileView != null && _discardPileView.GetPileAtPosition(pos, out int pileIdx))
                 {
-                    for (int i = 0; i < _discardHitAreas.Length; i++)
-                    {
-                        if (HitsRect(_discardHitAreas[i], pos))
-                        {
-                            DrawFromDiscardWithAnimation(i);
-                            return;
-                        }
-                    }
+                    DrawFromDiscardWithAnimation(pileIdx);
+                    return;
                 }
                 return;
             }
 
-            // ── Phase LAY DOWN : multi-sélection de cartes ──
+            // ── Phase LAY DOWN : multi-sélection + reorder possible ──
             if (phase == TurnPhase.LayDown && _handView != null)
             {
                 int idx = _handView.GetCardIndexAtPosition(pos);
                 if (idx >= 0)
                 {
-                    _handView.ToggleCardSelection(idx);
+                    // Start tracking pour distinguer click vs drag (reorder)
+                    _dragStartPos = pos;
+                    _dragStartTime = Time.time;
+                    _dragCardIndex = idx;
+                    _isReorderCandidate = true;
+                    _isDragging = true;
                     return;
                 }
 
-                // Clic sur la table → tenter de poser le niveau avec les cartes sélectionnées
                 if (HitsRect(_tableHitArea, pos) || IsAboveHand(pos))
                 {
                     TryLayDownSelectedCards();
@@ -149,6 +172,9 @@ namespace LevelUp.UI
                 {
                     _handView.SelectSingleCard(idx);
                     _isDragging = true;
+                    _isReorderCandidate = false;
+                    _dragCardIndex = idx;
+                    _dragStartPos = pos;
                     _handView.BeginDrag(idx, pos);
                     return;
                 }
@@ -161,7 +187,6 @@ namespace LevelUp.UI
                 int idx = _handView.GetCardIndexAtPosition(pos);
                 if (idx >= 0)
                 {
-                    // Double-clic sur la même carte → défausser directement
                     if (_handView.IsDoubleClick(idx))
                     {
                         DiscardCard(_handView.SelectedCard!.CardModel);
@@ -170,20 +195,82 @@ namespace LevelUp.UI
 
                     _handView.SelectSingleCard(idx);
                     _isDragging = true;
-                    _handView.BeginDrag(idx, pos);
+                    _isReorderCandidate = true;
+                    _dragCardIndex = idx;
+                    _dragStartPos = pos;
+                    _dragStartTime = Time.time;
                     return;
                 }
             }
         }
 
         // ──────────────────────────────────────────────
-        //  POINTER DRAG / UP
+        //  POINTER DRAG
         // ──────────────────────────────────────────────
 
         private void OnPointerDrag(Vector2 pos)
         {
-            _handView?.ContinueDrag(pos);
+            if (_handView == null) return;
+
+            TurnPhase phase = _gameManager?.TurnManager?.CurrentPhase ?? TurnPhase.Draw;
+            float dragDist = Vector2.Distance(pos, _dragStartPos);
+
+            // Phase LAY DOWN : reorder drag
+            if (phase == TurnPhase.LayDown && _isReorderCandidate)
+            {
+                if (dragDist > ReorderDragThreshold)
+                {
+                    // Commence le reorder drag
+                    if (!_handView.IsReorderDragging)
+                    {
+                        _handView.BeginReorderDrag(_dragCardIndex, _dragStartPos);
+                    }
+                    _handView.ContinueReorderDrag(pos);
+                }
+                return;
+            }
+
+            // Phase DISCARD : décide entre reorder et action drag
+            if (phase == TurnPhase.Discard && _isReorderCandidate)
+            {
+                if (dragDist > ReorderDragThreshold)
+                {
+                    // Si on drag vers le haut → action drag (défausse)
+                    bool draggingUp = (pos.y - _dragStartPos.y) > 30f;
+
+                    if (draggingUp)
+                    {
+                        _isReorderCandidate = false;
+                        _handView.BeginDrag(_dragCardIndex, _dragStartPos);
+                        _handView.ContinueDrag(pos);
+                    }
+                    else
+                    {
+                        // Reorder drag (horizontal)
+                        if (!_handView.IsReorderDragging)
+                        {
+                            _handView.BeginReorderDrag(_dragCardIndex, _dragStartPos);
+                        }
+                        _handView.ContinueReorderDrag(pos);
+                    }
+                }
+                return;
+            }
+
+            // Action drag normal (AddToMelds ou Discard confirmé)
+            if (_handView.IsReorderDragging)
+            {
+                _handView.ContinueReorderDrag(pos);
+            }
+            else
+            {
+                _handView.ContinueDrag(pos);
+            }
         }
+
+        // ──────────────────────────────────────────────
+        //  POINTER UP
+        // ──────────────────────────────────────────────
 
         private void OnPointerUp(Vector2 pos)
         {
@@ -196,32 +283,58 @@ namespace LevelUp.UI
 
             if (_gameManager?.TurnManager == null || _handView == null)
             {
-                _handView?.EndDrag(pos);
+                FinishDrag(pos);
                 return;
             }
 
             TurnManager tm = _gameManager.TurnManager;
+
+            // Si c'était un reorder drag, terminer le réordonnement
+            if (_handView.IsReorderDragging)
+            {
+                _handView.EndReorderDrag();
+                _isReorderCandidate = false;
+                _dragCardIndex = -1;
+                return;
+            }
+
+            float dragDist = Vector2.Distance(pos, _dragStartPos);
+
+            // Phase LAY DOWN : si c'était juste un click (pas un drag), toggle selection
+            if (tm.CurrentPhase == TurnPhase.LayDown && dragDist < ReorderDragThreshold)
+            {
+                _handView.ToggleCardSelection(_dragCardIndex);
+                _isReorderCandidate = false;
+                _dragCardIndex = -1;
+                return;
+            }
+
+            // Phase DISCARD : si c'était un click court, c'est juste une sélection
+            if (tm.CurrentPhase == TurnPhase.Discard && _isReorderCandidate && dragDist < ReorderDragThreshold)
+            {
+                _isReorderCandidate = false;
+                _dragCardIndex = -1;
+                return;
+            }
+
             CardView? dragged = _handView.SelectedCard;
 
             if (dragged == null)
             {
-                _handView.EndDrag(pos);
+                FinishDrag(pos);
                 return;
             }
 
             CardModel card = dragged.CardModel;
 
-            // Phase Discard : drop sur la zone de défausse ou n'importe où au-dessus de la main
+            // Phase Discard : drop sur zone de défausse ou au-dessus de la main
             if (tm.CurrentPhase == TurnPhase.Discard)
             {
                 bool droppedOnValidZone = IsAboveHand(pos);
 
-                if (_discardHitAreas != null)
+                if (_discardPileView != null && _discardPileView.GetPileAtPosition(pos, out int _))
                 {
-                    foreach (RectTransform? area in _discardHitAreas)
-                    {
-                        if (HitsRect(area, pos)) { droppedOnValidZone = true; break; }
-                    }
+                    droppedOnValidZone = true;
                 }
 
                 if (droppedOnValidZone)
@@ -245,34 +358,44 @@ namespace LevelUp.UI
                 }
             }
 
-            // Drop invalide → retour à la position
-            _handView.EndDrag(pos);
+            FinishDrag(pos);
+        }
+
+        private void FinishDrag(Vector2 pos)
+        {
+            if (_handView != null)
+            {
+                if (_handView.IsReorderDragging)
+                {
+                    _handView.EndReorderDrag();
+                }
+                else
+                {
+                    _handView.EndDrag(pos);
+                }
+            }
+            _isReorderCandidate = false;
+            _dragCardIndex = -1;
         }
 
         // ──────────────────────────────────────────────
         //  ACTIONS DE JEU
         // ──────────────────────────────────────────────
 
-        /// <summary>
-        /// Pioche depuis le deck avec animation.
-        /// </summary>
         private void DrawFromDeckWithAnimation()
         {
             if (_gameManager?.TurnManager == null || _handView == null) return;
 
             TurnManager tm = _gameManager.TurnManager;
 
-            // Piocher la carte dans le modèle
             CardModel? drawn = _gameManager.DeckManager?.DrawFromPile();
             if (!drawn.HasValue) return;
 
             CardModel card = drawn.Value;
             tm.CurrentPlayer.AddToHand(card);
 
-            // Animer visuellement
             _handView.AddCardWithAnimation(card);
 
-            // Publier l'événement et avancer la phase
             EventBus.Publish(new CardDrawnEvent
             {
                 PlayerIndex = tm.CurrentPlayerIndex,
@@ -281,13 +404,8 @@ namespace LevelUp.UI
             });
 
             tm.AdvanceFromDraw();
-
-            _hudView?.ShowStatus("Carte piochée !");
         }
 
-        /// <summary>
-        /// Pioche depuis une défausse avec animation.
-        /// </summary>
         private void DrawFromDiscardWithAnimation(int pileIndex)
         {
             if (_gameManager?.TurnManager == null || _handView == null) return;
@@ -297,7 +415,11 @@ namespace LevelUp.UI
             CardModel? drawn = _gameManager.DeckManager?.DrawFromDiscard(pileIndex);
             if (!drawn.HasValue)
             {
-                _hudView?.ShowStatus("Défausse vide !");
+                _hudView?.ShowStatus("Defausse vide !");
+                if (_animController != null && _deckHitArea != null)
+                {
+                    _animController.AnimateShake(_deckHitArea);
+                }
                 return;
             }
 
@@ -316,9 +438,6 @@ namespace LevelUp.UI
             tm.AdvanceFromDraw();
         }
 
-        /// <summary>
-        /// Tente de poser le niveau avec les cartes sélectionnées.
-        /// </summary>
         private void TryLayDownSelectedCards()
         {
             if (_gameManager?.TurnManager == null || _handView == null) return;
@@ -329,11 +448,10 @@ namespace LevelUp.UI
 
             if (selected.Count == 0)
             {
-                _hudView?.ShowStatus("Sélectionnez des cartes d'abord !");
+                _hudView?.ShowStatus("Selectionnez des cartes d'abord !");
                 return;
             }
 
-            // Vérifier si les cartes sélectionnées valident le niveau
             if (LevelValidator.IsLevelComplete(player.Hand, player.CurrentLevel,
                     _gameManager.Config, out List<Meld> melds))
             {
@@ -345,13 +463,12 @@ namespace LevelUp.UI
 
                 _handView.DeselectAll();
                 tm.TryLayDownLevel(playerMelds);
-                _hudView?.ShowStatus($"Niveau {player.CurrentLevel} posé !");
+                _hudView?.ShowStatus($"NIVEAU {player.CurrentLevel} !");
             }
             else
             {
-                _hudView?.ShowStatus("Ces cartes ne valident pas le niveau !");
+                _hudView?.ShowStatus("Combinaison invalide !");
 
-                // Shake les cartes sélectionnées pour feedback visuel
                 if (_animController != null)
                 {
                     foreach (CardView cv in _handView.SelectedCards)
@@ -362,9 +479,6 @@ namespace LevelUp.UI
             }
         }
 
-        /// <summary>
-        /// Défausse une carte.
-        /// </summary>
         private void DiscardCard(CardModel card)
         {
             if (_gameManager?.TurnManager == null) return;
@@ -384,24 +498,17 @@ namespace LevelUp.UI
             }
         }
 
-        /// <summary>
-        /// Vérifie si une position est au-dessus de la zone de main.
-        /// </summary>
         private bool IsAboveHand(Vector2 screenPos)
         {
             if (_handView == null) return false;
             RectTransform handRect = _handView.GetComponent<RectTransform>();
             if (handRect == null) return false;
 
-            // Position est au-dessus du haut de la main
             RectTransformUtility.ScreenPointToLocalPointInRectangle(
                 handRect, screenPos, null, out Vector2 local);
             return local.y > handRect.rect.height * 0.3f;
         }
 
-        /// <summary>
-        /// Vérifie si une position touche un RectTransform donné.
-        /// </summary>
         private static bool HitsRect(RectTransform? rect, Vector2 screenPos)
         {
             return rect != null &&
@@ -412,29 +519,19 @@ namespace LevelUp.UI
         //  BOUTONS UI
         // ──────────────────────────────────────────────
 
-        /// <summary>
-        /// Bouton "Poser le niveau" — utilise la validation automatique.
-        /// </summary>
         public void OnLayDownButton()
         {
             if (_gameManager?.TurnManager == null) return;
             if (_gameManager.TurnManager.CurrentPhase != TurnPhase.LayDown) return;
-
             TryLayDownSelectedCards();
         }
 
-        /// <summary>
-        /// Bouton "Passer" — saute la phase de pose du niveau.
-        /// </summary>
         public void OnSkipLayDownButton()
         {
             _handView?.DeselectAll();
             _gameManager?.TurnManager?.SkipLayDown();
         }
 
-        /// <summary>
-        /// Bouton "Terminer" — saute la phase d'ajout aux combinaisons.
-        /// </summary>
         public void OnSkipAddToMeldsButton()
         {
             _handView?.DeselectAll();

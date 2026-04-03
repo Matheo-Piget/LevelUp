@@ -54,6 +54,7 @@ namespace LevelUp.AI
 
         /// <summary>
         /// Joue un tour complet avec des délais pour simuler la réflexion.
+        /// Affiche l'indicateur "thinking" pendant la réflexion.
         /// </summary>
         private IEnumerator PlayTurnCoroutine()
         {
@@ -62,28 +63,41 @@ namespace LevelUp.AI
             TurnManager tm = _gameManager.TurnManager;
             PlayerModel player = tm.CurrentPlayer;
 
+            // Montrer l'indicateur de réflexion via event
+            EventBus.Publish(new AIThinkingEvent { PlayerIndex = _playerIndex, IsThinking = true });
+
             // Phase 1 : Piocher
             yield return new WaitForSeconds(_thinkDelay);
+            if (tm.CurrentPhase != TurnPhase.Draw)
+            {
+                EventBus.Publish(new AIThinkingEvent { PlayerIndex = _playerIndex, IsThinking = false });
+                yield break;
+            }
             DecideDraw(tm, player);
 
             // Phase 2 : Tenter de poser le niveau
             yield return new WaitForSeconds(_actionDelay);
-            DecideLayDown(tm, player);
+            if (tm.CurrentPhase == TurnPhase.LayDown)
+            {
+                DecideLayDown(tm, player);
+            }
 
             // Phase 3 : Ajouter aux combinaisons si possible
-            if (player.HasLaidDownThisRound)
+            if (tm.CurrentPhase == TurnPhase.AddToMelds)
             {
                 yield return new WaitForSeconds(_actionDelay);
                 DecideAddToMelds(tm, player);
             }
-            else
-            {
-                tm.SkipLayDown();
-            }
 
             // Phase 4 : Défausser
             yield return new WaitForSeconds(_actionDelay);
-            DecideDiscard(tm, player);
+            if (tm.CurrentPhase == TurnPhase.Discard)
+            {
+                DecideDiscard(tm, player);
+            }
+
+            // Cacher l'indicateur
+            EventBus.Publish(new AIThinkingEvent { PlayerIndex = _playerIndex, IsThinking = false });
         }
 
         /// <summary>
@@ -127,14 +141,12 @@ namespace LevelUp.AI
         {
             if (player.HasLaidDownThisRound)
             {
-                tm.SkipLayDown();
                 return;
             }
 
             if (LevelValidator.IsLevelComplete(player.Hand, player.CurrentLevel,
                     _gameManager?.Config, out List<Meld> melds))
             {
-                // Assigner les bons index aux melds
                 List<Meld> playerMelds = new();
                 foreach (Meld m in melds)
                 {
@@ -142,10 +154,12 @@ namespace LevelUp.AI
                 }
 
                 tm.TryLayDownLevel(playerMelds);
+                // TryLayDownLevel avance automatiquement vers AddToMelds
             }
             else
             {
                 tm.SkipLayDown();
+                // SkipLayDown avance vers Discard (car HasLaidDownThisRound = false)
             }
         }
 

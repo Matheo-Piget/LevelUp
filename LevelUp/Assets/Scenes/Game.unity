@@ -1769,7 +1769,7 @@ RectTransform:
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
   m_AnchorMin: {x: 0, y: 0}
   m_AnchorMax: {x: 1, y: 1}
-  m_AnchoredPosition: {x: 0.000061035156, y: 0}
+  m_AnchoredPosition: {x: 0, y: 0}
   m_SizeDelta: {x: -0.00012207, y: 0}
   m_Pivot: {x: 0.5, y: 0.5}
 --- !u!1 &1254646220
@@ -2027,7 +2027,6 @@ MonoBehaviour:
   _cardPrefab: {fileID: 3231048318628849007, guid: c2f790017a8f67443a135fe9da98e38d, type: 3}
   _cardSpacing: 60
   _maxHandWidth: 800
-  _fanAngle: 5
   _animController: {fileID: 0}
 --- !u!1 &1306252638
 GameObject:
@@ -2297,6 +2296,53 @@ CanvasRenderer:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 1332464656}
   m_CullTransparentMesh: 1
+--- !u!1 &1386651832
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 1386651834}
+  - component: {fileID: 1386651833}
+  m_Layer: 0
+  m_Name: BalatroEffect
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!114 &1386651833
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1386651832}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 253f40a6770f8fa49a18ade9b389e069, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  _animController: {fileID: 2106306725}
+  _canvas: {fileID: 1206463766}
+  _tableCenter: {fileID: 506810644}
+--- !u!4 &1386651834
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1386651832}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 977.7792, y: 462.46957, z: -6.8002706}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 0}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1 &1408546770
 GameObject:
   m_ObjectHideFlags: 0
@@ -3016,8 +3062,8 @@ GameObject:
   serializedVersion: 6
   m_Component:
   - component: {fileID: 1991573046}
-  - component: {fileID: 1991573047}
   - component: {fileID: 1991573048}
+  - component: {fileID: 1991573049}
   m_Layer: 5
   m_Name: LevelProgress
   m_TagString: Untagged
@@ -3044,32 +3090,6 @@ RectTransform:
   m_AnchoredPosition: {x: 0, y: -300}
   m_SizeDelta: {x: -40, y: 180}
   m_Pivot: {x: 0.5, y: 0.5}
---- !u!114 &1991573047
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 1991573045}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 59f8146938fff824cb5fd77236b75775, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: 
-  m_Padding:
-    m_Left: 0
-    m_Right: 0
-    m_Top: 0
-    m_Bottom: 0
-  m_ChildAlignment: 0
-  m_Spacing: 5
-  m_ChildForceExpandWidth: 1
-  m_ChildForceExpandHeight: 0
-  m_ChildControlWidth: 0
-  m_ChildControlHeight: 0
-  m_ChildScaleWidth: 0
-  m_ChildScaleHeight: 0
-  m_ReverseArrangement: 0
 --- !u!114 &1991573048
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -3084,10 +3104,35 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   _container: {fileID: 1991573046}
   _stepWidth: 60
+  _stepHeight: 40
   _playerRowHeight: 40
-  _completedColor: {r: 0.27058825, g: 0.78431374, b: 0.47058824, a: 1}
-  _currentColor: {r: 0.9607843, g: 0.78431374, b: 0.25882354, a: 1}
-  _pendingColor: {r: 0.22745098, g: 0.24705882, b: 0.36078432, a: 1}
+  _animController: {fileID: 0}
+--- !u!114 &1991573049
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1991573045}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 30649d3a9faa99c48a7b1166b86bf2a0, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  m_Padding:
+    m_Left: 0
+    m_Right: 0
+    m_Top: 0
+    m_Bottom: 0
+  m_ChildAlignment: 0
+  m_Spacing: 20
+  m_ChildForceExpandWidth: 1
+  m_ChildForceExpandHeight: 1
+  m_ChildControlWidth: 0
+  m_ChildControlHeight: 0
+  m_ChildScaleWidth: 0
+  m_ChildScaleHeight: 0
+  m_ReverseArrangement: 0
 --- !u!1 &1992684653
 GameObject:
   m_ObjectHideFlags: 0
@@ -3362,6 +3407,7 @@ MonoBehaviour:
   _statusDisplayDuration: 2
   _gameOverPanel: {fileID: 191547774}
   _winnerText: {fileID: 339090125}
+  _animController: {fileID: 0}
 --- !u!1 &2106306722
 GameObject:
   m_ObjectHideFlags: 0
@@ -3413,9 +3459,11 @@ MonoBehaviour:
   _handView: {fileID: 1264877169}
   _tableView: {fileID: 506810645}
   _hudView: {fileID: 2064752259}
+  _animController: {fileID: 2106306725}
   _deckHitArea: {fileID: 2056734400}
   _discardHitAreas:
   - {fileID: 500088665}
+  _tableHitArea: {fileID: 0}
 --- !u!114 &2106306725
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -3428,55 +3476,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 066efc10711879a4e8b9c28ddeca5407, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  _drawCurve:
-    serializedVersion: 2
-    m_Curve:
-    - serializedVersion: 3
-      time: 0
-      value: 0
-      inSlope: 0
-      outSlope: 0
-      tangentMode: 0
-      weightedMode: 0
-      inWeight: 0
-      outWeight: 0
-    - serializedVersion: 3
-      time: 1
-      value: 1
-      inSlope: 0
-      outSlope: 0
-      tangentMode: 0
-      weightedMode: 0
-      inWeight: 0
-      outWeight: 0
-    m_PreInfinity: 2
-    m_PostInfinity: 2
-    m_RotationOrder: 4
-  _playCurve:
-    serializedVersion: 2
-    m_Curve:
-    - serializedVersion: 3
-      time: 0
-      value: 0
-      inSlope: 0
-      outSlope: 0
-      tangentMode: 0
-      weightedMode: 0
-      inWeight: 0
-      outWeight: 0
-    - serializedVersion: 3
-      time: 1
-      value: 1
-      inSlope: 0
-      outSlope: 0
-      tangentMode: 0
-      weightedMode: 0
-      inWeight: 0
-      outWeight: 0
-    m_PreInfinity: 2
-    m_PostInfinity: 2
-    m_RotationOrder: 4
-  _discardCurve:
+  _moveCurve:
     serializedVersion: 2
     m_Curve:
     - serializedVersion: 3
@@ -3503,6 +3503,7 @@ MonoBehaviour:
   _deckPosition: {fileID: 2056734400}
   _discardPosition: {fileID: 500088665}
   _tableCenter: {fileID: 506810644}
+  _effectCanvas: {fileID: 0}
 --- !u!114 &2106306726
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -3522,6 +3523,8 @@ MonoBehaviour:
   _levelProgressView: {fileID: 1991573048}
   _animController: {fileID: 2106306725}
   _inputController: {fileID: 2106306724}
+  _balatroEffects: {fileID: 1386651833}
+  _mainCanvas: {fileID: 0}
   _networkManager: {fileID: 0}
   _humanPlayerCount: 1
   _aiPlayerCount: 3
@@ -3561,3 +3564,4 @@ SceneRoots:
   - {fileID: 1254646223}
   - {fileID: 1206463767}
   - {fileID: 2106306728}
+  - {fileID: 1386651834}

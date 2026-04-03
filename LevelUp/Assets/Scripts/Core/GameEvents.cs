@@ -112,4 +112,11 @@ namespace LevelUp.Core
         public CardModel Card;
         public int TargetPlayerIndex;
     }
+
+    /// <summary>Événement déclenché quand l'IA commence/arrête de réfléchir.</summary>
+    public struct AIThinkingEvent
+    {
+        public int PlayerIndex;
+        public bool IsThinking;
+    }
 }

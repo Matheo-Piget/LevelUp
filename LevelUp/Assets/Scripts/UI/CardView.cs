@@ -7,8 +7,8 @@ using LevelUp.Utils;
 namespace LevelUp.UI
 {
     /// <summary>
-    /// Affichage visuel d'une carte : couleur, valeur, animations.
-    /// Attach ce script à un prefab de carte avec Image + TextMeshPro.
+    /// Affichage visuel d'une carte style Balatro : fond sombre, accents néon,
+    /// glow sur hover/sélection. Position et scale gérés par HandView.
     /// </summary>
     [RequireComponent(typeof(RectTransform))]
     public class CardView : MonoBehaviour
@@ -35,7 +35,10 @@ namespace LevelUp.UI
         private RectTransform? _rectTransform;
         private bool _isFaceUp = true;
         private bool _isSelected;
-        private float _baseY;
+        private bool _isHovered;
+        private Image? _glowOverlay;
+        private float _glowAlpha;
+        private float _targetGlowAlpha;
 
         /// <summary>Le modèle de carte associé.</summary>
         public CardModel CardModel => _cardModel;
@@ -45,6 +48,9 @@ namespace LevelUp.UI
 
         /// <summary>Indique si la carte est sélectionnée.</summary>
         public bool IsSelected => _isSelected;
+
+        /// <summary>Indique si la carte est survolée.</summary>
+        public bool IsHovered => _isHovered;
 
         /// <summary>RectTransform de la carte.</summary>
         public RectTransform RectTransform
@@ -59,6 +65,41 @@ namespace LevelUp.UI
         private void Awake()
         {
             _rectTransform = GetComponent<RectTransform>();
+            CreateGlowOverlay();
+        }
+
+        private void Update()
+        {
+            // Smooth glow transition
+            if (_glowOverlay != null)
+            {
+                _glowAlpha = Mathf.Lerp(_glowAlpha, _targetGlowAlpha, Time.deltaTime * 15f);
+                Color c = _glowOverlay.color;
+                c.a = _glowAlpha;
+                _glowOverlay.color = c;
+            }
+        }
+
+        /// <summary>
+        /// Crée un overlay de glow derrière la carte pour l'effet néon.
+        /// </summary>
+        private void CreateGlowOverlay()
+        {
+            if (_border == null) return;
+
+            GameObject glowObj = new GameObject("GlowOverlay", typeof(RectTransform), typeof(Image));
+            glowObj.transform.SetParent(transform, false);
+            glowObj.transform.SetAsFirstSibling();
+
+            RectTransform rt = glowObj.GetComponent<RectTransform>();
+            rt.anchorMin = Vector2.zero;
+            rt.anchorMax = Vector2.one;
+            rt.sizeDelta = new Vector2(8f, 8f); // slightly larger than card
+            rt.anchoredPosition = Vector2.zero;
+
+            _glowOverlay = glowObj.GetComponent<Image>();
+            _glowOverlay.color = new Color(1f, 1f, 1f, 0f);
+            _glowOverlay.raycastTarget = false;
         }
 
         /// <summary>
@@ -68,73 +109,78 @@ namespace LevelUp.UI
         {
             _cardModel = card;
             _isFaceUp = faceUp;
+            _isSelected = false;
+            _isHovered = false;
+            _targetGlowAlpha = 0f;
+            _glowAlpha = 0f;
             UpdateVisuals();
         }
 
         /// <summary>
-        /// Met à jour tous les éléments visuels selon le modèle de carte.
+        /// Met à jour tous les éléments visuels — style Balatro : fond sombre, accents vifs.
         /// </summary>
         private void UpdateVisuals()
         {
             if (_cardFront != null) _cardFront.SetActive(_isFaceUp);
             if (_cardBack != null) _cardBack.SetActive(!_isFaceUp);
 
-            if (!_isFaceUp) return;
+            if (!_isFaceUp)
+            {
+                if (_glowOverlay != null) _glowOverlay.color = new Color(1f, 1f, 1f, 0f);
+                return;
+            }
 
             Color cardColor = _cardModel.IsAction
                 ? GetActionCardColor()
                 : Constants.GetColor(_cardModel.Color);
 
-            // Fond blanc de la carte
-            if (_background != null)
+            // Fond sombre de la carte (pas blanc)
+            if (_background != null) _background.color = Constants.CardFaceColor;
+
+            // Bordure colorée vive
+            if (_border != null) _border.color = cardColor;
+
+            // Bande de couleur sur le côté
+            if (_colorBand != null) _colorBand.color = cardColor;
+
+            // Ombre plus prononcée
+            if (_shadowImage != null) _shadowImage.color = new Color(0f, 0f, 0f, 0.5f);
+
+            // Glow overlay prend la couleur de la carte
+            if (_glowOverlay != null)
             {
-                _background.color = Color.white;
+                Color glowColor = cardColor;
+                glowColor.a = 0f;
+                _glowOverlay.color = glowColor;
             }
 
-            // Bordure colorée (bande latérale ou contour)
-            if (_border != null)
-            {
-                _border.color = cardColor;
-            }
-
-            // Bande de couleur (indicateur visuel fort)
-            if (_colorBand != null)
-            {
-                _colorBand.color = cardColor;
-            }
-
-            // Ombre
-            if (_shadowImage != null)
-            {
-                _shadowImage.color = new Color(0f, 0f, 0f, 0.25f);
-            }
-
-            // Texte principal
             string displayText = GetDisplayText();
 
+            // Texte principal — blanc pour contraste sur fond sombre
             if (_valueText != null)
             {
                 _valueText.text = displayText;
-                _valueText.color = cardColor;
-                _valueText.fontSize = _cardModel.IsAction ? 28f : 52f;
+                _valueText.color = Constants.TextPrimary;
+                _valueText.fontSize = _cardModel.IsAction ? 28f : 56f;
+                _valueText.fontStyle = FontStyles.Bold;
             }
 
+            // Coins — couleur de la carte pour un accent visuel
             if (_cornerValueTopLeft != null)
             {
                 _cornerValueTopLeft.text = displayText;
                 _cornerValueTopLeft.color = cardColor;
+                _cornerValueTopLeft.fontStyle = FontStyles.Bold;
             }
 
             if (_cornerValueBottomRight != null)
             {
                 _cornerValueBottomRight.text = displayText;
                 _cornerValueBottomRight.color = cardColor;
+                _cornerValueBottomRight.fontStyle = FontStyles.Bold;
             }
         }
 
-        /// <summary>
-        /// Retourne le texte à afficher selon le type de carte.
-        /// </summary>
         private string GetDisplayText()
         {
             return _cardModel.Type switch
@@ -148,17 +194,14 @@ namespace LevelUp.UI
             };
         }
 
-        /// <summary>
-        /// Retourne la couleur pour les cartes action.
-        /// </summary>
         private Color GetActionCardColor()
         {
             return _cardModel.Type switch
             {
-                CardType.Skip      => new Color32(0xFF, 0x45, 0x45, 0xFF),
-                CardType.Draw2     => new Color32(0xFF, 0x85, 0x00, 0xFF),
-                CardType.Wild      => new Color32(0x00, 0xCC, 0x66, 0xFF),
-                CardType.WildDraw2 => new Color32(0xCC, 0x00, 0xFF, 0xFF),
+                CardType.Skip      => new Color32(0xFF, 0x4D, 0x6A, 0xFF), // rose vif
+                CardType.Draw2     => new Color32(0xFF, 0x8C, 0x42, 0xFF), // orange vif
+                CardType.Wild      => new Color32(0x4D, 0xFF, 0x91, 0xFF), // vert néon
+                CardType.WildDraw2 => new Color32(0xBB, 0x6B, 0xFF, 0xFF), // violet néon
                 _                  => Color.white
             };
         }
@@ -173,41 +216,58 @@ namespace LevelUp.UI
         }
 
         /// <summary>
-        /// Sélectionne ou désélectionne la carte.
-        /// La carte monte et reçoit un outline lumineux quand sélectionnée.
+        /// Marque la carte comme sélectionnée — glow intense + bordure lumineuse.
         /// </summary>
         public void SetSelected(bool selected)
         {
             _isSelected = selected;
-            Vector2 pos = RectTransform.anchoredPosition;
+
+            Color cardColor = _cardModel.IsAction
+                ? GetActionCardColor()
+                : Constants.GetColor(_cardModel.Color);
 
             if (selected)
             {
-                _baseY = pos.y;
-                RectTransform.anchoredPosition = new Vector2(pos.x, _baseY + 30f);
-
-                // Highlight : border plus claire
+                // Bordure très lumineuse (blend vers blanc)
                 if (_border != null)
                 {
-                    Color c = _border.color;
-                    _border.color = new Color(
-                        Mathf.Min(c.r + 0.3f, 1f),
-                        Mathf.Min(c.g + 0.3f, 1f),
-                        Mathf.Min(c.b + 0.3f, 1f),
-                        1f);
+                    _border.color = Color.Lerp(cardColor, Color.white, 0.5f);
                 }
+
+                // Glow intense
+                _targetGlowAlpha = 0.4f;
             }
             else
             {
-                RectTransform.anchoredPosition = new Vector2(pos.x, _baseY);
-
-                // Restaurer la couleur normale
                 if (_border != null)
                 {
-                    Color cardColor = _cardModel.IsAction
-                        ? GetActionCardColor()
-                        : Constants.GetColor(_cardModel.Color);
                     _border.color = cardColor;
+                }
+                _targetGlowAlpha = _isHovered ? 0.2f : 0f;
+            }
+        }
+
+        /// <summary>
+        /// Marque la carte comme survolée — glow léger.
+        /// </summary>
+        public void SetHovered(bool hovered)
+        {
+            if (_isHovered == hovered) return;
+            _isHovered = hovered;
+
+            if (!_isSelected)
+            {
+                _targetGlowAlpha = hovered ? 0.2f : 0f;
+
+                Color cardColor = _cardModel.IsAction
+                    ? GetActionCardColor()
+                    : Constants.GetColor(_cardModel.Color);
+
+                if (_border != null)
+                {
+                    _border.color = hovered
+                        ? Color.Lerp(cardColor, Color.white, 0.25f)
+                        : cardColor;
                 }
             }
         }
@@ -217,10 +277,7 @@ namespace LevelUp.UI
         /// </summary>
         public void SetAlpha(float alpha)
         {
-            if (_canvasGroup != null)
-            {
-                _canvasGroup.alpha = alpha;
-            }
+            if (_canvasGroup != null) _canvasGroup.alpha = alpha;
         }
 
         /// <summary>

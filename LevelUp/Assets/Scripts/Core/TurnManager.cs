@@ -143,6 +143,14 @@ namespace LevelUp.Core
                 Melds = meldCards
             });
 
+            // Avancer vers AddToMelds puisque le niveau a été posé
+            _currentPhase = TurnPhase.AddToMelds;
+            EventBus.Publish(new TurnPhaseChangedEvent
+            {
+                PlayerIndex = _currentPlayerIndex,
+                NewPhase = _currentPhase
+            });
+
             return true;
         }
 

@@ -93,6 +93,21 @@ namespace LevelUp.Core
         }
 
         /// <summary>
+        /// Réordonne une carte dans la main (drag-to-reorder).
+        /// </summary>
+        public void ReorderHand(int fromIndex, int toIndex)
+        {
+            if (fromIndex < 0 || fromIndex >= Hand.Count) return;
+            if (toIndex < 0 || toIndex >= Hand.Count) return;
+            if (fromIndex == toIndex) return;
+
+            CardModel card = Hand[fromIndex];
+            Hand.RemoveAt(fromIndex);
+            Hand.Insert(toIndex, card);
+            // Pas de HandChangedEvent ici — la vue gère le réordonnement visuellement
+        }
+
+        /// <summary>
         /// Indique si la main est vide.
         /// </summary>
         public bool IsHandEmpty => Hand.Count == 0;
