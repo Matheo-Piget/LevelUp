@@ -62,6 +62,14 @@ namespace LevelUp.UI
         /// <summary>Événement déclenché quand les cartes sont réordonnées.</summary>
         public event System.Action<int, int>? OnCardsReordered;
 
+        /// <summary>Événement déclenché quand la sélection (ajout/retrait/clear) change.</summary>
+        public event System.Action? OnSelectionChanged;
+
+        // Pending refresh : si un HandChangedEvent arrive pendant une animation,
+        // on note qu'il faut rafraîchir une fois l'animation finie pour éviter
+        // toute désynchronisation entre la main du modèle et la vue.
+        private List<CardModel>? _pendingHand;
+
         private void OnEnable()
         {
             EventBus.Subscribe<HandChangedEvent>(OnHandChanged);
@@ -282,8 +290,26 @@ namespace LevelUp.UI
         private void OnHandChanged(HandChangedEvent evt)
         {
             if (evt.PlayerIndex != _playerIndex) return;
-            if (_animatingDraw || _animatingDeal) return;
+            if (_animatingDraw || _animatingDeal)
+            {
+                // On garde une référence à la dernière main pour rafraîchir
+                // une fois l'animation terminée. Évite toute désync.
+                _pendingHand = new List<CardModel>(evt.NewHand);
+                return;
+            }
             RefreshHand(evt.NewHand);
+        }
+
+        /// <summary>
+        /// Si une mise à jour était en attente pendant une animation, l'applique.
+        /// Appelée à la fin des animations de deal et de draw.
+        /// </summary>
+        private void FlushPendingHand()
+        {
+            if (_pendingHand == null) return;
+            List<CardModel> hand = _pendingHand;
+            _pendingHand = null;
+            RefreshHand(hand);
         }
 
         /// <summary>
@@ -368,6 +394,7 @@ namespace LevelUp.UI
 
             _animatingDeal = false;
             RecalculateTargets();
+            FlushPendingHand();
         }
 
         /// <summary>
@@ -397,11 +424,13 @@ namespace LevelUp.UI
                 _animController.AnimateDrawToHand(cardView.RectTransform, () =>
                 {
                     _animatingDraw = false;
+                    FlushPendingHand();
                 });
             }
             else
             {
                 _animatingDraw = false;
+                FlushPendingHand();
             }
         }
 
@@ -615,6 +644,7 @@ namespace LevelUp.UI
 
             RecalculateTargets();
             OnCardSelected?.Invoke(card.CardModel);
+            OnSelectionChanged?.Invoke();
         }
 
         public void SelectSingleCard(int cardIndex)
@@ -628,11 +658,12 @@ namespace LevelUp.UI
                 return;
             }
 
-            DeselectAll();
+            DeselectAllInternal();
             clicked.SetSelected(true);
             _selectedCards.Add(clicked);
             RecalculateTargets();
             OnCardSelected?.Invoke(clicked.CardModel);
+            OnSelectionChanged?.Invoke();
         }
 
         public bool IsDoubleClick(int cardIndex)
@@ -672,12 +703,18 @@ namespace LevelUp.UI
 
         public void DeselectAll()
         {
+            DeselectAllInternal();
+            RecalculateTargets();
+            OnSelectionChanged?.Invoke();
+        }
+
+        private void DeselectAllInternal()
+        {
             foreach (CardView cv in _selectedCards)
             {
                 cv.SetSelected(false);
             }
             _selectedCards.Clear();
-            RecalculateTargets();
         }
     }
 }

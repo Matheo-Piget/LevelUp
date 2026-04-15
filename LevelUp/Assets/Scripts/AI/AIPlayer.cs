@@ -141,6 +141,7 @@ namespace LevelUp.AI
         {
             if (player.HasLaidDownThisRound)
             {
+                tm.SkipLayDown(); // Avance vers AddToMelds (niveau déjà posé ce round)
                 return;
             }
 

@@ -30,6 +30,7 @@ namespace LevelUp.UI
         // Reorder drag tracking
         private bool _isReorderCandidate;
         private const float ReorderDragThreshold = 15f;
+        private const float DragUpThreshold = 30f;
 
         /// <summary>
         /// Initialise avec la référence au GameManager.
@@ -138,6 +139,20 @@ namespace LevelUp.UI
                     DrawFromDiscardWithAnimation(pileIdx);
                     return;
                 }
+
+                // Permettre le reorder pendant la phase Draw
+                if (_handView != null)
+                {
+                    int idx = _handView.GetCardIndexAtPosition(pos);
+                    if (idx >= 0)
+                    {
+                        _dragStartPos = pos;
+                        _dragStartTime = Time.time;
+                        _dragCardIndex = idx;
+                        _isReorderCandidate = true;
+                        _isDragging = true;
+                    }
+                }
                 return;
             }
 
@@ -215,17 +230,48 @@ namespace LevelUp.UI
             TurnPhase phase = _gameManager?.TurnManager?.CurrentPhase ?? TurnPhase.Draw;
             float dragDist = Vector2.Distance(pos, _dragStartPos);
 
-            // Phase LAY DOWN : reorder drag
-            if (phase == TurnPhase.LayDown && _isReorderCandidate)
+            // Phase DRAW : reorder seulement (pas d'action drag)
+            if (phase == TurnPhase.Draw && _isReorderCandidate)
             {
                 if (dragDist > ReorderDragThreshold)
                 {
-                    // Commence le reorder drag
                     if (!_handView.IsReorderDragging)
                     {
                         _handView.BeginReorderDrag(_dragCardIndex, _dragStartPos);
                     }
                     _handView.ContinueReorderDrag(pos);
+                }
+                return;
+            }
+
+            // Phase LAY DOWN : drag horizontal = reorder, drag vers le haut = défausse
+            if (phase == TurnPhase.LayDown && _isReorderCandidate)
+            {
+                if (dragDist > ReorderDragThreshold)
+                {
+                    // Si déjà en mode reorder, on y reste
+                    if (_handView.IsReorderDragging)
+                    {
+                        _handView.ContinueReorderDrag(pos);
+                        return;
+                    }
+
+                    bool draggingUp = (pos.y - _dragStartPos.y) > DragUpThreshold;
+
+                    if (draggingUp)
+                    {
+                        // Action drag : intention de défausser → on isole la carte tirée
+                        _isReorderCandidate = false;
+                        _handView.SelectSingleCard(_dragCardIndex);
+                        _handView.BeginDrag(_dragCardIndex, _dragStartPos);
+                        _handView.ContinueDrag(pos);
+                    }
+                    else
+                    {
+                        // Reorder drag (horizontal)
+                        _handView.BeginReorderDrag(_dragCardIndex, _dragStartPos);
+                        _handView.ContinueReorderDrag(pos);
+                    }
                 }
                 return;
             }
@@ -236,7 +282,7 @@ namespace LevelUp.UI
                 if (dragDist > ReorderDragThreshold)
                 {
                     // Si on drag vers le haut → action drag (défausse)
-                    bool draggingUp = (pos.y - _dragStartPos.y) > 30f;
+                    bool draggingUp = (pos.y - _dragStartPos.y) > DragUpThreshold;
 
                     if (draggingUp)
                     {
@@ -330,14 +376,7 @@ namespace LevelUp.UI
             // Phase Discard : drop sur zone de défausse ou au-dessus de la main
             if (tm.CurrentPhase == TurnPhase.Discard)
             {
-                bool droppedOnValidZone = IsAboveHand(pos);
-
-                if (_discardPileView != null && _discardPileView.GetPileAtPosition(pos, out int _))
-                {
-                    droppedOnValidZone = true;
-                }
-
-                if (droppedOnValidZone)
+                if (IsDropOnDiscardZone(pos))
                 {
                     _handView.EndDrag(pos);
                     _handView.DeselectAll();
@@ -346,19 +385,63 @@ namespace LevelUp.UI
                 }
             }
 
-            // Phase AddToMelds : drop sur une combinaison
-            if (tm.CurrentPhase == TurnPhase.AddToMelds && _tableView != null)
+            // Phase LayDown : drop sur défausse → skip LayDown puis défausser (fin de tour)
+            if (tm.CurrentPhase == TurnPhase.LayDown)
             {
-                if (_tableView.GetMeldAtPosition(pos, out int ownerIdx, out int meldIdx))
+                if (IsDropOnDiscardZone(pos))
+                {
+                    _handView.EndDrag(pos);
+                    _handView.DeselectAll();
+                    tm.SkipLayDown();
+                    DiscardCard(card);
+                    return;
+                }
+            }
+
+            // Phase AddToMelds : drop sur une combinaison ou défausse
+            if (tm.CurrentPhase == TurnPhase.AddToMelds)
+            {
+                if (_tableView != null &&
+                    _tableView.GetMeldAtPosition(pos, out int ownerIdx, out int meldIdx))
                 {
                     _handView.EndDrag(pos);
                     _handView.DeselectAll();
                     tm.AddToMeld(card, ownerIdx, meldIdx);
                     return;
                 }
+
+                // Strict : uniquement la pile de défausse compte (évite les drops manqués
+                // sur les combinaisons qui partiraient en défausse accidentellement)
+                if (IsDropOnDiscardPile(pos))
+                {
+                    _handView.EndDrag(pos);
+                    _handView.DeselectAll();
+                    tm.SkipAddToMelds();
+                    DiscardCard(card);
+                    return;
+                }
             }
 
             FinishDrag(pos);
+        }
+
+        /// <summary>
+        /// Vrai si la position correspond à la zone de défausse (au-dessus de la main
+        /// ou directement sur une pile de défausse). Lenient : utile en LayDown/Discard.
+        /// </summary>
+        private bool IsDropOnDiscardZone(Vector2 pos)
+        {
+            if (IsAboveHand(pos)) return true;
+            return IsDropOnDiscardPile(pos);
+        }
+
+        /// <summary>
+        /// Vrai uniquement si le drop est directement sur une pile de défausse.
+        /// </summary>
+        private bool IsDropOnDiscardPile(Vector2 pos)
+        {
+            return _discardPileView != null &&
+                   _discardPileView.GetPileAtPosition(pos, out int _);
         }
 
         private void FinishDrag(Vector2 pos)
@@ -446,13 +529,12 @@ namespace LevelUp.UI
             PlayerModel player = tm.CurrentPlayer;
             List<CardModel> selected = _handView.GetSelectedCardModels();
 
-            if (selected.Count == 0)
-            {
-                _hudView?.ShowStatus("Selectionnez des cartes d'abord !");
-                return;
-            }
+            // Si le joueur a fait une sélection, on valide CETTE sélection.
+            // Sinon, on essaye une auto-détection sur toute la main (mode rapide).
+            List<CardModel> source = selected.Count > 0 ? selected : player.Hand;
+            bool isAutoMode = selected.Count == 0;
 
-            if (LevelValidator.IsLevelComplete(player.Hand, player.CurrentLevel,
+            if (LevelValidator.IsLevelComplete(source, player.CurrentLevel,
                     _gameManager.Config, out List<Meld> melds))
             {
                 List<Meld> playerMelds = new();
@@ -467,9 +549,11 @@ namespace LevelUp.UI
             }
             else
             {
-                _hudView?.ShowStatus("Combinaison invalide !");
+                _hudView?.ShowStatus(isAutoMode
+                    ? "Aucune combinaison valide dans la main"
+                    : "Combinaison invalide !");
 
-                if (_animController != null)
+                if (_animController != null && !isAutoMode)
                 {
                     foreach (CardView cv in _handView.SelectedCards)
                     {
@@ -506,7 +590,9 @@ namespace LevelUp.UI
 
             RectTransformUtility.ScreenPointToLocalPointInRectangle(
                 handRect, screenPos, null, out Vector2 local);
-            return local.y > handRect.rect.height * 0.3f;
+            // Tout drag relâché au-dessus du milieu de la zone main compte comme défausse,
+            // ça rend le geste beaucoup plus tolérant et évite les "rate" frustrants.
+            return local.y > -handRect.rect.height * 0.1f;
         }
 
         private static bool HitsRect(RectTransform? rect, Vector2 screenPos)

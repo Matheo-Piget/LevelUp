@@ -165,17 +165,30 @@ namespace LevelUp.UI
 
             PlayerProgressRow row = _rows[playerIndex];
 
+            if (row.IsCurrent == null || row.IsCurrent.Length != row.Steps.Count)
+            {
+                row.IsCurrent = new bool[row.Steps.Count];
+            }
+
             for (int i = 0; i < row.Steps.Count; i++)
             {
                 int lvl = i + 1;
                 bool completed = lvl < currentLevel;
                 bool current = lvl == currentLevel;
 
+                row.IsCurrent[i] = current;
+
                 // Background
                 Color targetBg = completed ? _completedColor
                     : current ? _currentColor
                     : _pendingColor;
                 row.Steps[i].color = targetBg;
+
+                // Reset scale for non-current
+                if (!current)
+                {
+                    row.Steps[i].GetComponent<RectTransform>().localScale = Vector3.one;
+                }
 
                 // Bordure (glow sur current)
                 if (i < row.StepBorders.Count)
@@ -214,17 +227,24 @@ namespace LevelUp.UI
             while (true)
             {
                 float t = Mathf.PingPong(Time.time * 1.5f, 1f);
-                float alpha = Mathf.Lerp(0.7f, 1f, t);
+                float alpha = Mathf.Lerp(0.45f, 1f, t);
 
                 foreach (PlayerProgressRow row in _rows)
                 {
                     for (int i = 0; i < row.StepBorders.Count; i++)
                     {
-                        if (row.StepBorders[i].color.a > 0.01f)
+                        // L'index "current" est marqué via le tag (color.r très haut + jaune)
+                        // mais on identifie plus simplement via le step background.
+                        if (row.IsCurrent != null && i < row.IsCurrent.Length && row.IsCurrent[i])
                         {
                             Color c = _currentColor;
-                            c.a = alpha * 0.5f;
+                            c.a = alpha;
                             row.StepBorders[i].color = c;
+
+                            // Petit scale pulse sur la step elle-même
+                            RectTransform stepRt = row.Steps[i].GetComponent<RectTransform>();
+                            float scale = 1f + (alpha - 0.45f) * 0.12f;
+                            stepRt.localScale = Vector3.one * scale;
                         }
                     }
                 }
@@ -285,6 +305,7 @@ namespace LevelUp.UI
             public List<Image> Steps;
             public List<TextMeshProUGUI> StepTexts;
             public List<Image> StepBorders;
+            public bool[]? IsCurrent;
 
             public PlayerProgressRow(int index, TextMeshProUGUI? name,
                 List<Image> steps, List<TextMeshProUGUI> stepTexts, List<Image> stepBorders)
@@ -294,6 +315,8 @@ namespace LevelUp.UI
                 Steps = steps;
                 StepTexts = stepTexts;
                 StepBorders = stepBorders;
+                IsCurrent = new bool[steps.Count];
+                if (steps.Count > 0) IsCurrent[0] = true;
             }
         }
     }

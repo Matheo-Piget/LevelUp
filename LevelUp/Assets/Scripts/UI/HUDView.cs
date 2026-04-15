@@ -36,6 +36,16 @@ namespace LevelUp.UI
         private RectTransform? _statusRect;
         private bool _initialized;
 
+        private static readonly Color[] PlayerColors =
+        {
+            Constants.CardBlue,
+            Constants.CardRed,
+            Constants.CardGreen,
+            Constants.CardPurple,
+            Constants.CardOrange,
+            Constants.CardYellow
+        };
+
         private void OnEnable()
         {
             EventBus.Subscribe<TurnStartedEvent>(OnTurnStarted);
@@ -84,8 +94,8 @@ namespace LevelUp.UI
             // Phase : plus lisible
             StyleText(_currentPhaseText, Constants.TextSecondary, 16f, FontStyles.Normal);
 
-            // Level : gros et doré
-            StyleText(_currentLevelText, Constants.TextAccent, 28f, FontStyles.Bold);
+            // Level : gros et doré, bien visible
+            StyleText(_currentLevelText, Constants.TextAccent, 22f, FontStyles.Bold);
 
             // Deck count
             StyleText(_deckCountText, Constants.TextPrimary, 18f, FontStyles.Bold);
@@ -193,8 +203,11 @@ namespace LevelUp.UI
         {
             if (_currentPlayerText != null)
             {
-                _currentPlayerText.text = $"Player {evt.PlayerIndex + 1}";
+                _currentPlayerText.text = $"PLAYER {evt.PlayerIndex + 1}";
+                Color playerColor = PlayerColors[evt.PlayerIndex % PlayerColors.Length];
+                _currentPlayerText.color = playerColor;
             }
+            UpdateCurrentLevel(evt.PlayerLevel);
             UpdatePhaseText(evt.Phase);
         }
 
@@ -213,9 +226,9 @@ namespace LevelUp.UI
             _currentPhaseText.text = phase switch
             {
                 TurnPhase.Draw       => "PIOCHE - Cliquez pioche ou defausse",
-                TurnPhase.LayDown    => "POSE - Selectionnez puis cliquez table",
-                TurnPhase.AddToMelds => "AJOUTE - Glissez sur une combinaison",
-                TurnPhase.Discard    => "DEFAUSSE - Double-clic ou glissez",
+                TurnPhase.LayDown    => "POSE - Cliquez table ou glissez ↑ pour defausser",
+                TurnPhase.AddToMelds => "AJOUTE - Sur combinaison ou glissez ↑ pour defausser",
+                TurnPhase.Discard    => "DEFAUSSE - Double-clic ou glissez ↑",
                 _                    => ""
             };
 
@@ -310,14 +323,34 @@ namespace LevelUp.UI
         }
 
         /// <summary>
-        /// Met à jour l'affichage du niveau du joueur actif.
+        /// Met à jour l'affichage du niveau du joueur actif avec l'objectif.
         /// </summary>
         public void UpdateCurrentLevel(int level)
         {
             if (_currentLevelText != null)
             {
-                _currentLevelText.text = $"LVL {level}";
+                string req = DescribeLevelRequirement(level);
+                _currentLevelText.text = $"NIVEAU {level}  —  {req}";
             }
+        }
+
+        /// <summary>
+        /// Décrit l'objectif d'un niveau en texte court.
+        /// </summary>
+        private static string DescribeLevelRequirement(int level)
+        {
+            return level switch
+            {
+                1 => "2 suites de 3",
+                2 => "1 suite de 3 + 1 brelan",
+                3 => "2 brelans",
+                4 => "1 suite de 4 + 1 paire",
+                5 => "1 flush de 5",
+                6 => "1 suite de 5",
+                7 => "1 carre + 1 paire",
+                8 => "1 flush de 7",
+                _ => "?"
+            };
         }
     }
 }

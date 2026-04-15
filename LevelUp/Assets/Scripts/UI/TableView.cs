@@ -106,10 +106,10 @@ namespace LevelUp.UI
                 groupObj.transform.SetParent(_tableContainer, false);
             }
 
-            // Fond semi-transparent arrondi
+            // Fond semi-transparent avec bordure colorée
             Image? bgImage = groupObj.GetComponent<Image>();
             if (bgImage == null) bgImage = groupObj.AddComponent<Image>();
-            bgImage.color = Constants.PanelBackground;
+            bgImage.color = new Color(0.08f, 0.12f, 0.20f, 0.90f);
             bgImage.raycastTarget = true;
 
             // Badge joueur au-dessus du meld
@@ -118,6 +118,19 @@ namespace LevelUp.UI
                 : Constants.TextPrimary;
 
             CreatePlayerBadge(groupObj.transform, playerIndex, badgeColor);
+
+            // Bordure colorée en bas du meld pour identifier le joueur
+            GameObject borderObj = new("MeldBorder", typeof(RectTransform), typeof(Image));
+            borderObj.transform.SetParent(groupObj.transform, false);
+            RectTransform borderRt = borderObj.GetComponent<RectTransform>();
+            borderRt.anchorMin = new Vector2(0f, 0f);
+            borderRt.anchorMax = new Vector2(1f, 0f);
+            borderRt.pivot = new Vector2(0.5f, 0f);
+            borderRt.sizeDelta = new Vector2(0f, 3f);
+            borderRt.anchoredPosition = Vector2.zero;
+            Image borderImg = borderObj.GetComponent<Image>();
+            borderImg.color = badgeColor;
+            borderImg.raycastTarget = false;
 
             MeldGroupView groupView = groupObj.GetComponent<MeldGroupView>();
             if (groupView == null) groupView = groupObj.AddComponent<MeldGroupView>();
@@ -202,7 +215,7 @@ namespace LevelUp.UI
                     currentX += group.GetWidth() + _meldSpacing;
                 }
 
-                currentY -= _playerZoneSpacing + 110f;
+                currentY -= _playerZoneSpacing + 135f;
             }
         }
 
@@ -283,8 +296,8 @@ namespace LevelUp.UI
             cardView.Setup(card, true);
             cardView.SetInteractable(false);
 
-            // Cartes plus petites sur la table
-            cardView.RectTransform.localScale = Vector3.one * 0.65f;
+            // Cartes sur la table — assez grosses pour être lisibles
+            cardView.RectTransform.localScale = Vector3.one * 0.75f;
 
             _cards.Add(cardView);
             LayoutCards();
@@ -300,8 +313,8 @@ namespace LevelUp.UI
             for (int i = 0; i < _cards.Count; i++)
             {
                 _cards[i].RectTransform.anchoredPosition = new Vector2(
-                    8f + i * _cardSpacing, // padding gauche
-                    -4f); // petit offset vers le bas pour laisser place au badge
+                    10f + i * _cardSpacing, // padding gauche
+                    -8f); // offset pour laisser place au badge
                 _cards[i].RectTransform.SetSiblingIndex(i + 1); // +1 pour le badge/bg
             }
         }
@@ -312,8 +325,8 @@ namespace LevelUp.UI
         public void UpdateBackgroundSize()
         {
             RectTransform rt = GetComponent<RectTransform>();
-            float width = GetWidth() + 16f; // padding
-            float height = 105f; // hauteur fixe pour les cartes réduites + badge
+            float width = GetWidth() + 20f; // padding
+            float height = 125f; // hauteur pour cartes 0.75x + badge
             rt.sizeDelta = new Vector2(width, height);
         }
 
@@ -322,8 +335,8 @@ namespace LevelUp.UI
         /// </summary>
         public float GetWidth()
         {
-            if (_cards.Count == 0) return 60f;
-            return (_cards.Count - 1) * _cardSpacing + 70f;
+            if (_cards.Count == 0) return 70f;
+            return (_cards.Count - 1) * _cardSpacing + 80f;
         }
     }
 }

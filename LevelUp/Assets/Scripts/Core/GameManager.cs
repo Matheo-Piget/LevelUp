@@ -129,6 +129,11 @@ namespace LevelUp.Core
             {
                 winner.CurrentLevel += 1;
             }
+            EventBus.Publish(new LevelCompletedEvent
+            {
+                PlayerIndex = winnerIndex,
+                Level = winner.CurrentLevel - 1
+            });
 
             // Les autres joueurs ayant posé leur niveau avancent d'un niveau
             foreach (PlayerModel player in _players)
@@ -138,6 +143,11 @@ namespace LevelUp.Core
                 if (player.HasLaidDownThisRound)
                 {
                     player.CurrentLevel += 1;
+                    EventBus.Publish(new LevelCompletedEvent
+                    {
+                        PlayerIndex = player.Index,
+                        Level = player.CurrentLevel - 1
+                    });
                 }
                 // Les joueurs qui n'ont pas posé restent au même niveau
             }

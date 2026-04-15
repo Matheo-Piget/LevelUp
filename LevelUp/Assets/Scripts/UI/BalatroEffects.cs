@@ -174,9 +174,10 @@ namespace LevelUp.UI
         {
             if (_canvas == null) yield break;
 
-            while (true)
+            while (_canvas != null)
             {
-                yield return new WaitForSeconds(Random.Range(2f, 4f));
+                yield return new WaitForSeconds(Random.Range(1.2f, 2.6f));
+                if (_canvas == null) yield break;
                 StartCoroutine(RunSingleAmbientParticle());
             }
         }
@@ -188,18 +189,20 @@ namespace LevelUp.UI
             GameObject p = new("AmbientP", typeof(RectTransform), typeof(Image), typeof(CanvasGroup));
             p.transform.SetParent(_canvas.transform, false);
             p.transform.SetAsFirstSibling();
+            // Au-dessus du fond mais sous le glow joueur
+            p.transform.SetSiblingIndex(2);
 
             RectTransform rt = p.GetComponent<RectTransform>();
-            float startX = Random.Range(-500f, 500f);
-            float startY = -400f;
+            float startX = Random.Range(-700f, 700f);
+            float startY = -500f;
             rt.anchoredPosition = new Vector2(startX, startY);
-            float size = Random.Range(3f, 6f);
+            float size = Random.Range(4f, 8f);
             rt.sizeDelta = new Vector2(size, size);
 
             Image img = p.GetComponent<Image>();
-            Color[] ambientColors = { Constants.CardBlue, Constants.CardPurple, Constants.CardGreen };
+            Color[] ambientColors = { Constants.CardBlue, Constants.CardPurple, Constants.CardGreen, Constants.CardYellow };
             Color c = ambientColors[Random.Range(0, ambientColors.Length)];
-            c.a = 0.08f;
+            c.a = 0.18f;
             img.color = c;
             img.raycastTarget = false;
 
@@ -209,12 +212,13 @@ namespace LevelUp.UI
             cg.alpha = 0f;
 
             float duration = Random.Range(6f, 10f);
-            float driftX = Random.Range(-30f, 30f);
-            float speed = Random.Range(40f, 80f);
+            float driftX = Random.Range(-40f, 40f);
+            float speed = Random.Range(50f, 95f);
             float elapsed = 0f;
 
             while (elapsed < duration)
             {
+                if (p == null) yield break;
                 elapsed += Time.deltaTime;
                 float t = elapsed / duration;
 
@@ -223,12 +227,12 @@ namespace LevelUp.UI
                 rt.anchoredPosition = new Vector2(x, y);
 
                 float alpha = t < 0.2f ? t / 0.2f : t > 0.8f ? (1f - t) / 0.2f : 1f;
-                cg.alpha = alpha * 0.08f;
+                cg.alpha = alpha * 0.22f;
 
                 yield return null;
             }
 
-            Destroy(p);
+            if (p != null) Destroy(p);
         }
 
         private void ShowFloatingText(string text, Vector2 position, Color color, float fontSize = 36f)

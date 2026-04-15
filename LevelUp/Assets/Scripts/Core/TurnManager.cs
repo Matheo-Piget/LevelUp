@@ -48,7 +48,9 @@ namespace LevelUp.Core
             EventBus.Publish(new TurnStartedEvent
             {
                 PlayerIndex = _currentPlayerIndex,
-                Phase = _currentPhase
+                Phase = _currentPhase,
+                PlayerLevel = CurrentPlayer.CurrentLevel,
+                HasLaidDown = CurrentPlayer.HasLaidDownThisRound
             });
         }
 
@@ -302,7 +304,9 @@ namespace LevelUp.Core
             EventBus.Publish(new TurnStartedEvent
             {
                 PlayerIndex = _currentPlayerIndex,
-                Phase = _currentPhase
+                Phase = _currentPhase,
+                PlayerLevel = CurrentPlayer.CurrentLevel,
+                HasLaidDown = CurrentPlayer.HasLaidDownThisRound
             });
         }
     }

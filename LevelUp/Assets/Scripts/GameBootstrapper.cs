@@ -1,7 +1,6 @@
 using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
-using UnityEngine.UI;
 using LevelUp.UI;
 using LevelUp.AI;
 using LevelUp.Network;
@@ -40,15 +39,122 @@ namespace LevelUp.Core
         [SerializeField] private int _aiPlayerCount = 3;
 
         private readonly List<AIPlayer> _aiPlayers = new();
+        private MainMenuController? _mainMenu;
+        private PauseMenuController? _pauseMenu;
+        private GameOverCelebration? _gameOverCelebration;
+        private bool _gameStarted;
 
         private void Start()
         {
+            GameSettings.Initialize();
             InitializeVisuals();
-            InitializeGame();
+            ShowMainMenu();
         }
 
         /// <summary>
-        /// Applique le style visuel Balatro : fond sombre + vignette.
+        /// Affiche le menu principal. La partie démarre quand le joueur clique sur JOUER.
+        /// </summary>
+        private void ShowMainMenu()
+        {
+            if (_mainCanvas == null)
+            {
+                // Fallback : démarre direct si pas de canvas
+                InitializeGame();
+                return;
+            }
+
+            if (_mainMenu == null)
+            {
+                _mainMenu = gameObject.AddComponent<MainMenuController>();
+                _mainMenu.OnPlayClicked += HandleMenuPlay;
+                _mainMenu.Setup(_mainCanvas);
+            }
+            else
+            {
+                _mainMenu.Show();
+            }
+        }
+
+        private void HandleMenuPlay()
+        {
+            if (_gameStarted)
+            {
+                // Reprise depuis pause → rien à initialiser, juste masquer menu
+                return;
+            }
+            InitializeGame();
+            InitializePauseAndGameOver();
+            _gameStarted = true;
+        }
+
+        private void InitializePauseAndGameOver()
+        {
+            if (_mainCanvas == null) return;
+
+            if (_pauseMenu == null)
+            {
+                _pauseMenu = gameObject.AddComponent<PauseMenuController>();
+                _pauseMenu.OnMainMenuRequested += HandleReturnToMainMenu;
+                _pauseMenu.Setup(_mainCanvas);
+            }
+
+            if (_gameOverCelebration == null)
+            {
+                _gameOverCelebration = gameObject.AddComponent<GameOverCelebration>();
+                _gameOverCelebration.OnReplayClicked += HandleReplay;
+                _gameOverCelebration.OnMainMenuClicked += HandleReturnToMainMenu;
+                _gameOverCelebration.Setup(_mainCanvas);
+            }
+        }
+
+        private void HandleReturnToMainMenu()
+        {
+            // Réinitialise le temps et la partie, puis réaffiche le menu
+            Time.timeScale = 1f;
+            RestartGame();
+            _gameStarted = false;
+            ShowMainMenu();
+        }
+
+        private void HandleReplay()
+        {
+            Time.timeScale = 1f;
+            RestartGame();
+        }
+
+        private void RestartGame()
+        {
+            // Nettoie les AIs précédents
+            foreach (AIPlayer ai in _aiPlayers)
+            {
+                if (ai != null) Destroy(ai);
+            }
+            _aiPlayers.Clear();
+
+            // Relance la partie
+            if (_gameManager != null)
+            {
+                _gameManager.StartGame(_humanPlayerCount, _aiPlayerCount);
+
+                for (int i = 0; i < _gameManager.Players.Count; i++)
+                {
+                    if (_gameManager.Players[i].IsAI)
+                    {
+                        AIPlayer ai = gameObject.AddComponent<AIPlayer>();
+                        ai.Initialize(_gameManager, i);
+                        _aiPlayers.Add(ai);
+                    }
+                }
+
+                if (_handView != null)
+                {
+                    StartCoroutine(FirstDealCascade());
+                }
+            }
+        }
+
+        /// <summary>
+        /// Applique le style visuel Balatro : caméra sombre + fond animé + glow joueur.
         /// </summary>
         private void InitializeVisuals()
         {
@@ -59,28 +165,14 @@ namespace LevelUp.Core
 
             if (_mainCanvas != null)
             {
-                CreateVignetteOverlay(_mainCanvas.transform);
+                // Fond animé avec blobs colorés qui dérivent
+                AnimatedBackground animBg = gameObject.AddComponent<AnimatedBackground>();
+                animBg.Setup(_mainCanvas);
+
+                // Glow coloré sur les bords selon le joueur actif
+                PlayerTurnGlow turnGlow = gameObject.AddComponent<PlayerTurnGlow>();
+                turnGlow.Setup(_mainCanvas);
             }
-        }
-
-        private static void CreateVignetteOverlay(Transform parent)
-        {
-            GameObject vignetteObj = new("Vignette", typeof(RectTransform), typeof(Image), typeof(CanvasGroup));
-            vignetteObj.transform.SetParent(parent, false);
-            vignetteObj.transform.SetAsLastSibling();
-
-            RectTransform rt = vignetteObj.GetComponent<RectTransform>();
-            rt.anchorMin = Vector2.zero;
-            rt.anchorMax = Vector2.one;
-            rt.sizeDelta = Vector2.zero;
-
-            Image img = vignetteObj.GetComponent<Image>();
-            img.color = new Color(0f, 0f, 0f, 0.15f);
-            img.raycastTarget = false;
-
-            CanvasGroup cg = vignetteObj.GetComponent<CanvasGroup>();
-            cg.blocksRaycasts = false;
-            cg.interactable = false;
         }
 
         /// <summary>
@@ -141,6 +233,13 @@ namespace LevelUp.Core
             if (_discardPileView != null)
             {
                 _discardPileView.Initialize(_gameManager.Players.Count, names);
+            }
+
+            // Indicateur de validité de sélection en temps réel
+            if (_handView != null && _mainCanvas != null)
+            {
+                SelectionStatusView statusView = gameObject.AddComponent<SelectionStatusView>();
+                statusView.Setup(_mainCanvas, _gameManager, _handView);
             }
 
             // Écouter le début de round pour le deal cascade

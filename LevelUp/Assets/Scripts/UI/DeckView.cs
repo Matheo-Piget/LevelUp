@@ -46,11 +46,8 @@ namespace LevelUp.UI
             if (_deckContainer != null && _cardCount > 0)
             {
                 _breathTime += Time.deltaTime;
-                float breathScale = 1f + Mathf.Sin(_breathTime * 2f) * 0.008f;
-                float breathY = Mathf.Sin(_breathTime * 1.5f) * 1.5f;
-
+                float breathScale = 1f + Mathf.Sin(_breathTime * 2f) * 0.018f;
                 _deckContainer.localScale = Vector3.one * breathScale;
-                // Petit mouvement Y subtil pas appliqué pour éviter les conflits de layout
             }
         }
 

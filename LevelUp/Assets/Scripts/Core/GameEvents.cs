@@ -20,6 +20,8 @@ namespace LevelUp.Core
     {
         public int PlayerIndex;
         public TurnPhase Phase;
+        public int PlayerLevel;
+        public bool HasLaidDown;
     }
 
     /// <summary>Événement déclenché quand la phase du tour change.</summary>
