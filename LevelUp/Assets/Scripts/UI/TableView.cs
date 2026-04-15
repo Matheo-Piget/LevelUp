@@ -77,13 +77,10 @@ namespace LevelUp.UI
             if (!_playerMeldGroups.TryGetValue(evt.MeldOwnerIndex, out List<MeldGroupView>? groups))
                 return;
 
-            foreach (MeldGroupView group in groups)
-            {
-                if (group.TryAddCard(evt.Card, _cardPrefab))
-                {
-                    break;
-                }
-            }
+            if (evt.MeldIndex < 0 || evt.MeldIndex >= groups.Count) return;
+
+            groups[evt.MeldIndex].TryAddCard(evt.Card, _cardPrefab);
+            LayoutTable();
         }
 
         /// <summary>
@@ -187,35 +184,66 @@ namespace LevelUp.UI
         }
 
         /// <summary>
-        /// Repositionne tous les groupes sur la table, centré.
+        /// Repositionne tous les groupes sur la table en flow horizontal avec wrap.
+        /// Utilise toute la largeur disponible avant de descendre à une nouvelle ligne.
         /// </summary>
         private void LayoutTable()
         {
             if (_tableContainer == null) return;
 
-            float currentY = 0f;
+            float maxWidth = _tableContainer.rect.width;
+            if (maxWidth <= 0f) maxWidth = 680f; // fallback si le layout n'est pas encore résolu
+
+            const float meldHeight = 135f;
+
+            // Collecte les melds en ligne dans l'ordre d'apparition (joueur par joueur)
+            List<List<MeldGroupView>> rows = new();
+            List<MeldGroupView> currentRow = new();
+            float currentRowWidth = 0f;
 
             foreach (KeyValuePair<int, List<MeldGroupView>> kvp in _playerMeldGroups)
             {
-                // Calculer la largeur totale de la ligne
-                float totalWidth = 0f;
                 foreach (MeldGroupView group in kvp.Value)
                 {
-                    totalWidth += group.GetWidth() + _meldSpacing;
+                    float w = group.GetWidth();
+                    float widthIfAdded = currentRow.Count == 0
+                        ? w
+                        : currentRowWidth + _meldSpacing + w;
+
+                    if (currentRow.Count > 0 && widthIfAdded > maxWidth)
+                    {
+                        rows.Add(currentRow);
+                        currentRow = new List<MeldGroupView>();
+                        currentRowWidth = 0f;
+                        widthIfAdded = w;
+                    }
+
+                    currentRow.Add(group);
+                    currentRowWidth = widthIfAdded;
                 }
-                totalWidth -= _meldSpacing; // enlever le dernier espacement
+            }
+            if (currentRow.Count > 0) rows.Add(currentRow);
 
-                float startX = -totalWidth / 2f;
-                float currentX = startX;
+            // Positionne chaque ligne centrée, empilée verticalement
+            float totalHeight = rows.Count * meldHeight + Mathf.Max(0, rows.Count - 1) * _playerZoneSpacing;
+            float startY = totalHeight / 2f - meldHeight / 2f;
 
-                foreach (MeldGroupView group in kvp.Value)
+            for (int r = 0; r < rows.Count; r++)
+            {
+                List<MeldGroupView> row = rows[r];
+                float rowWidth = 0f;
+                foreach (MeldGroupView g in row) rowWidth += g.GetWidth();
+                rowWidth += Mathf.Max(0, row.Count - 1) * _meldSpacing;
+
+                float currentX = -rowWidth / 2f;
+                float y = startY - r * (meldHeight + _playerZoneSpacing);
+
+                foreach (MeldGroupView g in row)
                 {
-                    RectTransform rt = group.GetComponent<RectTransform>();
-                    rt.anchoredPosition = new Vector2(currentX, currentY);
-                    currentX += group.GetWidth() + _meldSpacing;
+                    RectTransform rt = g.GetComponent<RectTransform>();
+                    rt.anchoredPosition = new Vector2(currentX, y);
+                    currentX += g.GetWidth() + _meldSpacing;
                 }
-
-                currentY -= _playerZoneSpacing + 135f;
             }
         }
 

@@ -37,6 +37,7 @@ namespace LevelUp.UI
         private void OnEnable()
         {
             EventBus.Subscribe<CardDiscardedEvent>(OnCardDiscarded);
+            EventBus.Subscribe<CardDrawnEvent>(OnCardDrawn);
             EventBus.Subscribe<RoundStartedEvent>(OnRoundStarted);
             EventBus.Subscribe<GameStartedEvent>(OnGameStarted);
         }
@@ -44,8 +45,32 @@ namespace LevelUp.UI
         private void OnDisable()
         {
             EventBus.Unsubscribe<CardDiscardedEvent>(OnCardDiscarded);
+            EventBus.Unsubscribe<CardDrawnEvent>(OnCardDrawn);
             EventBus.Unsubscribe<RoundStartedEvent>(OnRoundStarted);
             EventBus.Unsubscribe<GameStartedEvent>(OnGameStarted);
+        }
+
+        /// <summary>
+        /// Un joueur a pioché depuis une pile de défausse → retirer la carte du dessus
+        /// et l'afficher dans l'état visuel correct (carte précédente si elle existe).
+        /// </summary>
+        private void OnCardDrawn(CardDrawnEvent evt)
+        {
+            if (!evt.FromDiscard) return;
+            if (evt.DiscardPileIndex < 0 || evt.DiscardPileIndex >= _pileSlots.Count) return;
+
+            PileSlot slot = _pileSlots[evt.DiscardPileIndex];
+
+            // Retire la carte du dessus (celle qui vient d'être piochée)
+            if (slot.TopCardView != null)
+            {
+                Destroy(slot.TopCardView.gameObject);
+                slot.TopCardView = null;
+            }
+
+            slot.CardCount = Mathf.Max(0, slot.CardCount - 1);
+            slot.CountText.text = slot.CardCount.ToString();
+            slot.CountText.color = slot.CardCount > 3 ? Constants.CardYellow : Constants.TextSecondary;
         }
 
         private void OnGameStarted(GameStartedEvent evt)

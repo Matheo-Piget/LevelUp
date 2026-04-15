@@ -355,11 +355,22 @@ namespace LevelUp.UI
                 return;
             }
 
-            // Phase DISCARD : si c'était un click court, c'est juste une sélection
+            // Phase DISCARD : un simple clic sur une carte la défausse directement
+            // (plus besoin de double-clic ou drag — zéro friction)
             if (tm.CurrentPhase == TurnPhase.Discard && _isReorderCandidate && dragDist < ReorderDragThreshold)
             {
+                CardView? clicked = _dragCardIndex >= 0
+                    ? _handView.GetCardViewAt(_dragCardIndex)
+                    : null;
                 _isReorderCandidate = false;
                 _dragCardIndex = -1;
+
+                if (clicked != null)
+                {
+                    CardModel toDiscard = clicked.CardModel;
+                    _handView.DeselectAll();
+                    DiscardCard(toDiscard);
+                }
                 return;
             }
 
@@ -406,7 +417,14 @@ namespace LevelUp.UI
                 {
                     _handView.EndDrag(pos);
                     _handView.DeselectAll();
-                    tm.AddToMeld(card, ownerIdx, meldIdx);
+                    if (!tm.AddToMeld(card, ownerIdx, meldIdx))
+                    {
+                        _hudView?.ShowStatus("Cette carte ne peut pas être ajoutée ici");
+                        if (_animController != null)
+                        {
+                            _animController.AnimateShake(dragged.RectTransform);
+                        }
+                    }
                     return;
                 }
 
@@ -475,15 +493,19 @@ namespace LevelUp.UI
             if (!drawn.HasValue) return;
 
             CardModel card = drawn.Value;
-            tm.CurrentPlayer.AddToHand(card);
 
+            // ORDRE IMPORTANT : lancer l'animation AVANT AddToHand, pour que
+            // HandView soit en mode _animatingDraw quand HandChangedEvent arrive
+            // (sinon la main serait rebuild instantanément → carte en doublon).
             _handView.AddCardWithAnimation(card);
+            tm.CurrentPlayer.AddToHand(card);
 
             EventBus.Publish(new CardDrawnEvent
             {
                 PlayerIndex = tm.CurrentPlayerIndex,
                 Card = card,
-                FromDiscard = false
+                FromDiscard = false,
+                DiscardPileIndex = -1
             });
 
             tm.AdvanceFromDraw();
@@ -507,15 +529,16 @@ namespace LevelUp.UI
             }
 
             CardModel card = drawn.Value;
-            tm.CurrentPlayer.AddToHand(card);
 
             _handView.AddCardWithAnimation(card);
+            tm.CurrentPlayer.AddToHand(card);
 
             EventBus.Publish(new CardDrawnEvent
             {
                 PlayerIndex = tm.CurrentPlayerIndex,
                 Card = card,
-                FromDiscard = true
+                FromDiscard = true,
+                DiscardPileIndex = pileIndex
             });
 
             tm.AdvanceFromDraw();

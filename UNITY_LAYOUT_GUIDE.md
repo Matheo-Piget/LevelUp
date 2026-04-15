@@ -121,11 +121,15 @@ Affiche la dernière carte défaussée par chaque joueur en ligne horizontale.
 |---|---|
 | Parent | `Canvas` |
 | Anchor preset | **middle-left** |
-| Pos X | 160 |
-| Pos Y | -50 |
-| Width | 280 |
-| Height | 520 |
+| Pos X | 200 |
+| Pos Y | 0 |
+| Width | 340 |
+| Height | 320 |
 | Pivot | X: 0.5, Y: 0.5 |
+
+> **Important** : aucun layout group à ajouter manuellement — `LevelProgressView.Initialize()` ajoute automatiquement un `VerticalLayoutGroup` avec le bon padding/spacing. Laisse le GameObject vide, le script s'occupe de tout.
+
+**Structure d'une rangée (construite par code)** : chaque joueur a sa rangée avec son nom en haut + les 8 indicateurs de niveau (30×30 px) alignés horizontalement en dessous. Pas besoin d'enfant à créer à la main.
 
 ---
 
@@ -242,7 +246,7 @@ Regroupe Deck, Discard single pile et Table. Crée un GameObject vide nommé `Pl
 |---|---|---|
 | HUD | 440 → 540 | -960 → +960 |
 | DiscardPileView | 230 → 430 | -600 → +600 |
-| LevelProgress | -310 → +210 | -860 → -580 |
+| LevelProgress | -160 → +160 | -790 → -450 |
 | PlayZone (deck+discard+table) | -125 → +215 | -490 → +610 |
 | PlayerHand | -400 → -140 | -920 → +920 |
 | TurnBannerView | -60 → +60 | -400 → +400 (overlay temporaire) |
@@ -400,6 +404,247 @@ Déjà définies dans `Constants.cs`, à réutiliser pour tout nouveau texte :
 | Couleur joueur 2 | `#FF4D6A` (rouge) | `CardRed` |
 | Couleur joueur 3 | `#4DFF91` (vert) | `CardGreen` |
 | Couleur joueur 4 | `#BB6BFF` (violet) | `CardPurple` |
+
+---
+
+## 15. Mapping complet script → GameObject
+
+Section cruciale : quel script va sur quel objet, et pourquoi. Il y a **3 catégories** de scripts dans le projet — ne confonds pas.
+
+### 15.1 Scripts à placer MANUELLEMENT dans la scène `Game.unity`
+
+Ces scripts ont des champs `[SerializeField]` à remplir dans l'Inspector. Tu dois les ajouter via **Add Component** sur le bon GameObject.
+
+#### Scripts racine (GameObjects vides, pas sous Canvas)
+
+| Script | GameObject à créer | Obligatoire ? |
+|---|---|---|
+| `GameBootstrapper` | `GameRoot` (vide, racine de scène) | ✅ |
+| `GameManager` | `GameManager` (vide, racine) | ✅ |
+| `AnimationController` | `AnimationController` (vide, racine) | ✅ |
+| `GameInputController` | `InputController` (vide, racine) | ✅ |
+| `NetworkManager` | `NetworkManager` (vide, racine) | ❌ multijoueur uniquement |
+
+> Tu peux fusionner `GameBootstrapper + GameManager + AnimationController + GameInputController` sur un même GameObject `GameRoot` pour simplifier. C'est juste plus lisible séparé.
+
+#### Scripts UI (enfants du Canvas)
+
+| Script | GameObject cible | Parent hiérarchique |
+|---|---|---|
+| `HUDView` | `HUD` | `Canvas` |
+| `HandView` | `PlayerHand` | `Canvas` |
+| `TableView` | `Table` | `Canvas/PlayZone` |
+| `DeckView` | `DeckArea` | `Canvas/PlayZone` |
+| `DiscardPileView` | `DiscardPileView` | `Canvas` |
+| `LevelProgressView` | `LevelProgress` | `Canvas` |
+| `TurnBannerView` | `TurnBannerView` | `Canvas` |
+| `BalatroEffects` | `BalatroEffect` | `Canvas` |
+
+### 15.2 Scripts AUTO-GÉNÉRÉS au runtime (ne pas les ajouter à la main)
+
+`GameBootstrapper` crée ces composants dynamiquement via `AddComponent`. **Ne les place PAS dans la hiérarchie** — ils se dédoubleraient.
+
+| Script | Ajouté par | Moment |
+|---|---|---|
+| `AnimatedBackground` | `GameBootstrapper.InitializeVisuals()` | Au Start |
+| `PlayerTurnGlow` | `GameBootstrapper.InitializeVisuals()` | Au Start |
+| `MainMenuController` | `GameBootstrapper.ShowMainMenu()` | Au Start |
+| `PauseMenuController` | `GameBootstrapper.InitializePauseAndGameOver()` | Après clic JOUER |
+| `GameOverCelebration` | `GameBootstrapper.InitializePauseAndGameOver()` | Après clic JOUER |
+| `SelectionStatusView` | `GameBootstrapper.InitializeGame()` | Après clic JOUER |
+| `OptionsPanel` | `MainMenuController` / `PauseMenuController` | À l'ouverture des options |
+| `AIPlayer` (×N) | `GameBootstrapper.InitializeGame()` | Un par joueur IA |
+
+> Tous ces scripts utilisent un pattern `Setup(Canvas)` qui construit leur hiérarchie UI par code — pas besoin de les configurer dans l'éditeur.
+
+### 15.3 Scripts sur PREFABS (pas dans la scène)
+
+| Script | Prefab associé | Utilisé par |
+|---|---|---|
+| `CardView` | `Assets/Prefabs/Card.prefab` | HandView, TableView, DiscardPileView, DeckView |
+| `MeldGroupView` | `Assets/Prefabs/MeldGroup.prefab` | TableView |
+
+> Ces prefabs doivent exister et être référencés dans les champs `Card Prefab` / `Meld Group Prefab` des vues.
+
+### 15.4 Helpers STATIQUES (aucun GameObject)
+
+Jamais à placer nulle part — appelés directement en code :
+
+- `UIFactory` — static, constructeurs UI (panels, boutons, texte)
+- `GameSettings` — static, persistance PlayerPrefs (volume, qualité, daltonisme)
+- `UITween` — static, tweens légers (fade, scale, move) — crée son `TweenRunner` invisible au premier appel
+- `EventBus` — static, pub/sub mémoire
+- `Constants`, `CardExtensions`, `LevelValidator`, `MeldValidator` — static, pas de MonoBehaviour
+
+### 15.5 Hiérarchie finale complète (copier-coller mental)
+
+```
+Scene: Game.unity
+├── Main Camera
+├── EventSystem                 (Unity builtin — requis pour UI)
+├── GameRoot                    → GameBootstrapper
+├── GameManager                 → GameManager
+├── AnimationController         → AnimationController
+├── InputController             → GameInputController
+├── NetworkManager              → NetworkManager        (optionnel)
+└── Canvas                      → Canvas + CanvasScaler + GraphicRaycaster
+    ├── HUD                     → HUDView
+    │   ├── RounNumberText
+    │   ├── DeckLabel
+    │   ├── DeckCountText
+    │   ├── CurrentPlayerText
+    │   ├── CurrentPhaseText
+    │   ├── CurrentLevelText
+    │   └── StatusText (+ CanvasGroup)
+    ├── DiscardPileView         → DiscardPileView
+    │   └── Content             (RectTransform, rempli dynamiquement)
+    ├── LevelProgress           → LevelProgressView
+    ├── PlayZone                (GameObject vide)
+    │   ├── DeckArea            → DeckView
+    │   │   ├── TopCardImage    (Image)
+    │   │   └── CountText       (TMP)
+    │   ├── DiscardArea         (Image — zone de hit, pas de script)
+    │   └── Table               → TableView
+    │       └── TableContainer  (RectTransform stretch)
+    ├── PlayerHand              → HandView
+    │   └── HandContainer       (RectTransform stretch)
+    ├── TurnBannerView          → TurnBannerView
+    └── BalatroEffect           → BalatroEffects
+
+AU RUNTIME, GameBootstrapper ajoute sur lui-même :
+  + AnimatedBackground          (crée overlay sous Canvas)
+  + PlayerTurnGlow              (crée 4 bords sous Canvas)
+  + MainMenuController          (crée overlay sous Canvas)
+  + PauseMenuController         (crée overlay sous Canvas, inactif)
+  + GameOverCelebration         (crée overlay sous Canvas, inactif)
+  + SelectionStatusView         (crée badge sous Canvas)
+  + AIPlayer × (nombre d'IA)
+
+Prefabs requis dans Assets/Prefabs/ :
+  - Card.prefab                 → CardView
+  - MeldGroup.prefab            → MeldGroupView
+```
+
+### 15.6 Toutes les références Inspector (checklist drag & drop)
+
+Parcours cette liste dans l'Inspector après avoir placé les scripts.
+
+**GameBootstrapper** (sur `GameRoot`) :
+| Champ | Drag depuis |
+|---|---|
+| Game Manager | `GameManager` |
+| Hand View | `Canvas/PlayerHand` |
+| Table View | `Canvas/PlayZone/Table` |
+| Hud View | `Canvas/HUD` |
+| Level Progress View | `Canvas/LevelProgress` |
+| Anim Controller | `AnimationController` |
+| Input Controller | `InputController` |
+| Balatro Effects | `Canvas/BalatroEffect` |
+| Discard Pile View | `Canvas/DiscardPileView` |
+| Turn Banner View | `Canvas/TurnBannerView` |
+| Main Canvas | `Canvas` |
+| Network Manager | `NetworkManager` (ou laisse vide) |
+| Human Player Count | 1 |
+| AI Player Count | 3 |
+
+**AnimationController** (sur `AnimationController`) :
+| Champ | Drag depuis |
+|---|---|
+| Deck Position | `Canvas/PlayZone/DeckArea` |
+| Discard Position | `Canvas/PlayZone/DiscardArea` |
+| Table Center | `Canvas/PlayZone/Table` |
+| Effect Canvas | `Canvas` |
+
+**GameInputController** (sur `InputController`) :
+| Champ | Drag depuis |
+|---|---|
+| Hand View | `Canvas/PlayerHand` |
+| Table View | `Canvas/PlayZone/Table` |
+| Hud View | `Canvas/HUD` |
+| Anim Controller | `AnimationController` |
+| Discard Pile View | `Canvas/DiscardPileView` |
+| Deck Hit Area | `Canvas/PlayZone/DeckArea` |
+| Table Hit Area | `Canvas/PlayZone/Table` |
+
+**HandView** (sur `Canvas/PlayerHand`) :
+| Champ | Valeur |
+|---|---|
+| Hand Container | `Canvas/PlayerHand/HandContainer` |
+| Card Prefab | `Assets/Prefabs/Card` |
+| Card Spacing | 100 (recommandé) |
+| Max Hand Width | 1400 |
+| Anim Controller | `AnimationController` |
+
+**TableView** (sur `Canvas/PlayZone/Table`) :
+| Champ | Valeur |
+|---|---|
+| Table Container | `Canvas/PlayZone/Table/TableContainer` |
+| Card Prefab | `Assets/Prefabs/Card` |
+| Meld Group Prefab | `Assets/Prefabs/MeldGroup` |
+| Meld Spacing | 25 |
+| Card In Meld Spacing | 30 |
+| Player Zone Spacing | 30 |
+
+**DeckView** (sur `Canvas/PlayZone/DeckArea`) :
+| Champ | Drag depuis |
+|---|---|
+| Deck Container | `Canvas/PlayZone/DeckArea` (self) |
+| Top Card Image | `Canvas/PlayZone/DeckArea/TopCardImage` |
+| Count Text | `Canvas/PlayZone/DeckArea/CountText` |
+| Anim Controller | `AnimationController` |
+
+**DiscardPileView** (sur `Canvas/DiscardPileView`) :
+| Champ | Valeur |
+|---|---|
+| Container | `Canvas/DiscardPileView/Content` (ou self) |
+| Card Prefab | `Assets/Prefabs/Card` |
+| Anim Controller | `AnimationController` |
+| Pile Spacing | 130 |
+
+**LevelProgressView** (sur `Canvas/LevelProgress`) :
+| Champ | Valeur |
+|---|---|
+| Container | `Canvas/LevelProgress` (self) |
+| Step Width | 40 |
+| Step Height | 40 |
+| Player Row Height | 48 |
+| Anim Controller | `AnimationController` |
+
+**HUDView** (sur `Canvas/HUD`) : voir §8 ci-dessus.
+
+**BalatroEffects** (sur `Canvas/BalatroEffect`) :
+| Champ | Drag depuis |
+|---|---|
+| Canvas | `Canvas` |
+
+**TurnBannerView** (sur `Canvas/TurnBannerView`) :
+| Champ | Drag depuis |
+|---|---|
+| Anim Controller | `AnimationController` |
+| Canvas | `Canvas` |
+| Table Center | `Canvas/PlayZone/Table` |
+
+**CardView** (sur prefab `Card.prefab`) :
+| Champ | Sous-objet attendu dans le prefab |
+|---|---|
+| Card Front | `Front` (GameObject) |
+| Card Back | `Back` (GameObject) |
+| Background | `Front/Background` (Image) |
+| Border | `Front/Border` (Image) |
+| Color Band | `Front/ColorBand` (Image) |
+| Shadow Image | `Shadow` (Image) |
+| Value Text | `Front/ValueText` (TMP) |
+| Corner Value Top Left | `Front/CornerTL` (TMP) |
+| Corner Value Bottom Right | `Front/CornerBR` (TMP) |
+| Canvas Group | sur racine du prefab |
+
+### 15.7 Résumé en 3 lignes
+
+1. **Tu places manuellement** : 5 GameObjects racine (GameRoot, GameManager, AnimationController, InputController, Canvas) + 8 scripts UI sous Canvas (HUD, PlayerHand, Table, DeckArea, DiscardPileView, LevelProgress, TurnBannerView, BalatroEffect).
+2. **Le code génère tout seul** : AnimatedBackground, PlayerTurnGlow, MainMenu, PauseMenu, GameOverCelebration, SelectionStatus, OptionsPanel, AIPlayer.
+3. **Dans les prefabs** : CardView, MeldGroupView.
+
+Si un script n'est pas dans une de ces 3 listes, c'est un helper statique — pas de GameObject.
 
 ---
 

@@ -70,7 +70,8 @@ namespace LevelUp.Core
             {
                 PlayerIndex = _currentPlayerIndex,
                 Card = card.Value,
-                FromDiscard = false
+                FromDiscard = false,
+                DiscardPileIndex = -1
             });
 
             AdvanceToLayDown();
@@ -93,7 +94,8 @@ namespace LevelUp.Core
             {
                 PlayerIndex = _currentPlayerIndex,
                 Card = card.Value,
-                FromDiscard = true
+                FromDiscard = true,
+                DiscardPileIndex = discardPileIndex
             });
 
             AdvanceToLayDown();
@@ -190,6 +192,7 @@ namespace LevelUp.Core
                 {
                     PlayerIndex = _currentPlayerIndex,
                     MeldOwnerIndex = meldOwnerIndex,
+                    MeldIndex = meldIndex,
                     Card = card
                 });
 

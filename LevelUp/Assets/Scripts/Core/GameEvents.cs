@@ -37,6 +37,8 @@ namespace LevelUp.Core
         public int PlayerIndex;
         public CardModel Card;
         public bool FromDiscard;
+        /// <summary>Index de la pile de défausse piochée (-1 si pioche depuis le deck).</summary>
+        public int DiscardPileIndex;
     }
 
     /// <summary>Événement déclenché quand un joueur défausse une carte.</summary>
@@ -59,6 +61,7 @@ namespace LevelUp.Core
     {
         public int PlayerIndex;
         public int MeldOwnerIndex;
+        public int MeldIndex;
         public CardModel Card;
     }
 

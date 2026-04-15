@@ -15,9 +15,9 @@ namespace LevelUp.UI
     public class LevelProgressView : MonoBehaviour
     {
         [SerializeField] private RectTransform? _container;
-        [SerializeField] private float _stepWidth = 40f;
-        [SerializeField] private float _stepHeight = 40f;
-        [SerializeField] private float _playerRowHeight = 48f;
+        [SerializeField] private float _stepWidth = 30f;
+        [SerializeField] private float _stepHeight = 30f;
+        [SerializeField] private float _playerRowHeight = 64f;
         [SerializeField] private AnimationController? _animController;
 
         // Couleurs Balatro
@@ -50,6 +50,8 @@ namespace LevelUp.UI
 
             if (_container == null) return;
 
+            EnsureContainerLayout(_container);
+
             for (int p = 0; p < playerCount; p++)
             {
                 PlayerProgressRow row = CreatePlayerRow(p, playerNames[p]);
@@ -59,18 +61,28 @@ namespace LevelUp.UI
             StartPulseAnimation();
         }
 
+        private static void EnsureContainerLayout(RectTransform container)
+        {
+            VerticalLayoutGroup vlg = container.GetComponent<VerticalLayoutGroup>();
+            if (vlg == null) vlg = container.gameObject.AddComponent<VerticalLayoutGroup>();
+            vlg.spacing = 6f;
+            vlg.padding = new RectOffset(6, 6, 6, 6);
+            vlg.childAlignment = TextAnchor.UpperCenter;
+            vlg.childControlWidth = true;
+            vlg.childControlHeight = true;
+            vlg.childForceExpandWidth = true;
+            vlg.childForceExpandHeight = false;
+        }
+
         /// <summary>
         /// Crée une rangée de progression pour un joueur.
         /// </summary>
         private PlayerProgressRow CreatePlayerRow(int playerIndex, string playerName)
         {
-            // Conteneur de la rangée avec fond
+            // Conteneur de la rangée (layout vertical : nom au-dessus, steps en-dessous)
             GameObject rowObj = new($"ProgressRow_P{playerIndex}",
-                typeof(RectTransform), typeof(HorizontalLayoutGroup), typeof(Image));
+                typeof(RectTransform), typeof(VerticalLayoutGroup), typeof(Image), typeof(LayoutElement));
             rowObj.transform.SetParent(_container, false);
-
-            RectTransform rowRt = rowObj.GetComponent<RectTransform>();
-            rowRt.sizeDelta = new Vector2(0, _playerRowHeight);
 
             // Fond subtil pour la rangée
             Image rowBg = rowObj.GetComponent<Image>();
@@ -79,26 +91,48 @@ namespace LevelUp.UI
                 : new Color(0.08f, 0.11f, 0.16f, 0.5f);
             rowBg.raycastTarget = false;
 
-            HorizontalLayoutGroup layout = rowObj.GetComponent<HorizontalLayoutGroup>();
-            layout.spacing = 6f;
-            layout.childAlignment = TextAnchor.MiddleLeft;
-            layout.childForceExpandWidth = false;
-            layout.childForceExpandHeight = false;
-            layout.padding = new RectOffset(8, 8, 4, 4);
+            VerticalLayoutGroup rowLayout = rowObj.GetComponent<VerticalLayoutGroup>();
+            rowLayout.spacing = 4f;
+            rowLayout.childAlignment = TextAnchor.MiddleCenter;
+            rowLayout.childControlWidth = true;
+            rowLayout.childControlHeight = true;
+            rowLayout.childForceExpandWidth = true;
+            rowLayout.childForceExpandHeight = false;
+            rowLayout.padding = new RectOffset(8, 8, 6, 6);
 
-            // Nom du joueur
-            GameObject nameObj = new("Name", typeof(RectTransform), typeof(TextMeshProUGUI));
+            LayoutElement rowLe = rowObj.GetComponent<LayoutElement>();
+            rowLe.minHeight = _playerRowHeight;
+            rowLe.preferredHeight = _playerRowHeight;
+
+            // Nom du joueur (ligne du haut)
+            GameObject nameObj = new("Name", typeof(RectTransform), typeof(TextMeshProUGUI), typeof(LayoutElement));
             nameObj.transform.SetParent(rowObj.transform, false);
-
-            RectTransform nameRt = nameObj.GetComponent<RectTransform>();
-            nameRt.sizeDelta = new Vector2(80, _playerRowHeight);
 
             TextMeshProUGUI nameText = nameObj.GetComponent<TextMeshProUGUI>();
             nameText.text = playerName;
             nameText.fontSize = 13;
             nameText.color = Constants.TextSecondary;
-            nameText.alignment = TextAlignmentOptions.MidlineLeft;
+            nameText.alignment = TextAlignmentOptions.Center;
             nameText.fontStyle = FontStyles.Bold;
+
+            LayoutElement nameLe = nameObj.GetComponent<LayoutElement>();
+            nameLe.preferredHeight = 18f;
+
+            // Conteneur des steps (ligne du bas, horizontal)
+            GameObject stepsObj = new("Steps",
+                typeof(RectTransform), typeof(HorizontalLayoutGroup), typeof(LayoutElement));
+            stepsObj.transform.SetParent(rowObj.transform, false);
+
+            HorizontalLayoutGroup stepsLayout = stepsObj.GetComponent<HorizontalLayoutGroup>();
+            stepsLayout.spacing = 4f;
+            stepsLayout.childAlignment = TextAnchor.MiddleCenter;
+            stepsLayout.childControlWidth = false;
+            stepsLayout.childControlHeight = false;
+            stepsLayout.childForceExpandWidth = false;
+            stepsLayout.childForceExpandHeight = false;
+
+            LayoutElement stepsLe = stepsObj.GetComponent<LayoutElement>();
+            stepsLe.preferredHeight = _stepHeight + 4f;
 
             // Étapes de niveau (1-8) — indicateurs arrondis
             List<Image> steps = new();
@@ -109,11 +143,15 @@ namespace LevelUp.UI
             {
                 // Conteneur step
                 GameObject stepObj = new($"Step_{lvl}",
-                    typeof(RectTransform), typeof(Image));
-                stepObj.transform.SetParent(rowObj.transform, false);
+                    typeof(RectTransform), typeof(Image), typeof(LayoutElement));
+                stepObj.transform.SetParent(stepsObj.transform, false);
 
                 RectTransform stepRt = stepObj.GetComponent<RectTransform>();
                 stepRt.sizeDelta = new Vector2(_stepWidth, _stepHeight);
+
+                LayoutElement stepLe = stepObj.GetComponent<LayoutElement>();
+                stepLe.preferredWidth = _stepWidth;
+                stepLe.preferredHeight = _stepHeight;
 
                 Image stepImage = stepObj.GetComponent<Image>();
                 stepImage.color = lvl == 1 ? _currentColor : _pendingColor;
