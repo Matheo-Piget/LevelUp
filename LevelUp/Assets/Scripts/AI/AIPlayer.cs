@@ -10,6 +10,10 @@ namespace LevelUp.AI
     /// <summary>
     /// Intelligence artificielle heuristique pour un joueur bot.
     /// Évalue la main, décide de poser le niveau, choisit la meilleure défausse.
+    ///
+    /// Principe fondamental : toute action passe par <see cref="GameManager.ExecuteCommand"/>.
+    /// L'IA emprunte exactement le même chemin que le joueur humain —
+    /// aucun accès direct en écriture au modèle ou au TurnManager.
     /// </summary>
     public class AIPlayer : MonoBehaviour
     {
@@ -54,73 +58,72 @@ namespace LevelUp.AI
 
         /// <summary>
         /// Joue un tour complet avec des délais pour simuler la réflexion.
-        /// Affiche l'indicateur "thinking" pendant la réflexion.
         /// </summary>
         private IEnumerator PlayTurnCoroutine()
         {
             if (_gameManager?.TurnManager == null) yield break;
 
-            TurnManager tm = _gameManager.TurnManager;
-            PlayerModel player = tm.CurrentPlayer;
-
-            // Montrer l'indicateur de réflexion via event
             EventBus.Publish(new AIThinkingEvent { PlayerIndex = _playerIndex, IsThinking = true });
 
             // Phase 1 : Piocher
             yield return new WaitForSeconds(_thinkDelay);
-            if (tm.CurrentPhase != TurnPhase.Draw)
+            if (_gameManager.TurnManager.CurrentPhase != TurnPhase.Draw)
             {
                 EventBus.Publish(new AIThinkingEvent { PlayerIndex = _playerIndex, IsThinking = false });
                 yield break;
             }
-            DecideDraw(tm, player);
+            DecideDraw();
 
             // Phase 2 : Tenter de poser le niveau
             yield return new WaitForSeconds(_actionDelay);
-            if (tm.CurrentPhase == TurnPhase.LayDown)
+            if (_gameManager.TurnManager.CurrentPhase == TurnPhase.LayDown)
             {
-                DecideLayDown(tm, player);
+                DecideLayDown();
             }
 
             // Phase 3 : Ajouter aux combinaisons si possible
-            if (tm.CurrentPhase == TurnPhase.AddToMelds)
+            if (_gameManager.TurnManager.CurrentPhase == TurnPhase.AddToMelds)
             {
                 yield return new WaitForSeconds(_actionDelay);
-                DecideAddToMelds(tm, player);
+                DecideAddToMelds();
             }
 
             // Phase 4 : Défausser
             yield return new WaitForSeconds(_actionDelay);
-            if (tm.CurrentPhase == TurnPhase.Discard)
+            if (_gameManager.TurnManager.CurrentPhase == TurnPhase.Discard)
             {
-                DecideDiscard(tm, player);
+                DecideDiscard();
             }
 
-            // Cacher l'indicateur
             EventBus.Publish(new AIThinkingEvent { PlayerIndex = _playerIndex, IsThinking = false });
         }
+
+        // ────────────────────────────────────────────────────
+        //  DÉCISIONS (lecture du modèle + envoi de commandes)
+        // ────────────────────────────────────────────────────
 
         /// <summary>
         /// Décide d'où piocher : deck ou une défausse.
         /// Privilégie la défausse si la carte visible aide à compléter le niveau.
         /// </summary>
-        private void DecideDraw(TurnManager tm, PlayerModel player)
+        private void DecideDraw()
         {
             if (_gameManager?.DeckManager == null) return;
 
+            PlayerModel player = _gameManager.TurnManager!.CurrentPlayer;
             DeckManager deck = _gameManager.DeckManager;
             bool drewFromDiscard = false;
 
-            // Vérifier chaque pile de défausse
             for (int i = 0; i < deck.DiscardPileCount; i++)
             {
                 CardModel? topCard = deck.PeekDiscard(i);
                 if (!topCard.HasValue) continue;
 
-                // Évaluer si la carte aide
                 if (IsCardUseful(topCard.Value, player))
                 {
-                    if (tm.DrawFromDiscard(i))
+                    CommandResult result = _gameManager.ExecuteCommand(
+                        new DrawFromDiscardCommand(_playerIndex, i));
+                    if (result.Success)
                     {
                         drewFromDiscard = true;
                         break;
@@ -130,23 +133,28 @@ namespace LevelUp.AI
 
             if (!drewFromDiscard)
             {
-                tm.DrawFromDeck();
+                _gameManager.ExecuteCommand(new DrawFromDeckCommand(_playerIndex));
             }
         }
 
         /// <summary>
         /// Décide si le bot pose son niveau.
         /// </summary>
-        private void DecideLayDown(TurnManager tm, PlayerModel player)
+        private void DecideLayDown()
         {
+            if (_gameManager == null) return;
+
+            PlayerModel player = _gameManager.TurnManager!.CurrentPlayer;
+
             if (player.HasLaidDownThisRound)
             {
-                tm.SkipLayDown(); // Avance vers AddToMelds (niveau déjà posé ce round)
+                _gameManager.ExecuteCommand(
+                    new SkipPhaseCommand(_playerIndex, TurnPhase.LayDown));
                 return;
             }
 
             if (LevelValidator.IsLevelComplete(player.Hand, player.CurrentLevel,
-                    _gameManager?.Config, out List<Meld> melds))
+                    _gameManager.Config, out List<Meld> melds))
             {
                 List<Meld> playerMelds = new();
                 foreach (Meld m in melds)
@@ -154,31 +162,30 @@ namespace LevelUp.AI
                     playerMelds.Add(new Meld(m.Type, m.Cards, player.Index));
                 }
 
-                tm.TryLayDownLevel(playerMelds);
-                // TryLayDownLevel avance automatiquement vers AddToMelds
+                _gameManager.ExecuteCommand(
+                    new LayDownLevelCommand(_playerIndex, playerMelds));
             }
             else
             {
-                tm.SkipLayDown();
-                // SkipLayDown avance vers Discard (car HasLaidDownThisRound = false)
+                _gameManager.ExecuteCommand(
+                    new SkipPhaseCommand(_playerIndex, TurnPhase.LayDown));
             }
         }
 
         /// <summary>
         /// Tente d'ajouter des cartes aux combinaisons existantes.
         /// </summary>
-        private void DecideAddToMelds(TurnManager tm, PlayerModel player)
+        private void DecideAddToMelds()
         {
             if (_gameManager == null)
             {
-                tm.SkipAddToMelds();
                 return;
             }
 
+            PlayerModel player = _gameManager.TurnManager!.CurrentPlayer;
             bool addedAny = true;
 
-            // Continuer tant qu'on peut ajouter des cartes
-            while (addedAny && player.Hand.Count > 1) // garder au moins 1 carte pour défausser
+            while (addedAny && player.Hand.Count > 1)
             {
                 addedAny = false;
 
@@ -186,13 +193,15 @@ namespace LevelUp.AI
                 {
                     for (int m = 0; m < otherPlayer.LaidMelds.Count; m++)
                     {
-                        // Essayer chaque carte de la main
                         for (int c = player.Hand.Count - 1; c >= 0; c--)
                         {
                             if (player.Hand.Count <= 1) break;
 
                             CardModel card = player.Hand[c];
-                            if (tm.AddToMeld(card, otherPlayer.Index, m))
+                            CommandResult result = _gameManager.ExecuteCommand(
+                                new AddToMeldCommand(_playerIndex, card, otherPlayer.Index, m));
+
+                            if (result.Success)
                             {
                                 addedAny = true;
                                 break;
@@ -202,15 +211,19 @@ namespace LevelUp.AI
                 }
             }
 
-            tm.SkipAddToMelds();
+            _gameManager.ExecuteCommand(
+                new SkipPhaseCommand(_playerIndex, TurnPhase.AddToMelds));
         }
 
         /// <summary>
         /// Choisit la meilleure carte à défausser.
         /// Stratégie : garder les cartes utiles pour le niveau, défausser les moins utiles.
         /// </summary>
-        private void DecideDiscard(TurnManager tm, PlayerModel player)
+        private void DecideDiscard()
         {
+            if (_gameManager == null) return;
+
+            PlayerModel player = _gameManager.TurnManager!.CurrentPlayer;
             if (player.Hand.Count == 0) return;
 
             CardModel bestDiscard = player.Hand[0];
@@ -220,7 +233,6 @@ namespace LevelUp.AI
             {
                 float score = EvaluateCardUsefulness(card, player);
 
-                // Pénaliser les action cards pour qu'on les garde pas inutilement
                 if (card.IsAction && !card.IsWild)
                 {
                     score -= 5f;
@@ -233,19 +245,20 @@ namespace LevelUp.AI
                 }
             }
 
-            // Si on défausse une action card, cibler le joueur le plus avancé
             int targetIndex = -1;
             if (bestDiscard.IsAction)
             {
                 targetIndex = FindBestTarget(player);
             }
 
-            bool roundEnded = tm.Discard(bestDiscard, targetIndex);
-            if (roundEnded)
-            {
-                _gameManager?.OnRoundEnd(player.Index);
-            }
+            // ExecuteCommand gère automatiquement OnRoundEnd si la main est vide
+            _gameManager.ExecuteCommand(
+                new DiscardCommand(_playerIndex, bestDiscard, targetIndex));
         }
+
+        // ────────────────────────────────────────────────────
+        //  HEURISTIQUES (lecture seule)
+        // ────────────────────────────────────────────────────
 
         /// <summary>
         /// Évalue l'utilité d'une carte pour le niveau actuel du joueur.
@@ -253,7 +266,7 @@ namespace LevelUp.AI
         /// </summary>
         private float EvaluateCardUsefulness(CardModel card, PlayerModel player)
         {
-            if (card.IsWild) return 10f; // Les Wilds sont toujours utiles
+            if (card.IsWild) return 10f;
 
             float score = 0f;
             int level = player.CurrentLevel;
@@ -270,7 +283,6 @@ namespace LevelUp.AI
                     switch (req.Type)
                     {
                         case MeldType.Run:
-                            // Bonus si la carte a des voisins consécutifs dans la main
                             int neighbors = player.Hand.Count(c =>
                                 c.Type == CardType.Normal &&
                                 System.Math.Abs(c.Value - card.Value) <= 1 &&
@@ -279,7 +291,6 @@ namespace LevelUp.AI
                             break;
 
                         case MeldType.Set:
-                            // Bonus si d'autres cartes ont la même valeur
                             int sameValue = player.Hand.Count(c =>
                                 c.Type == CardType.Normal &&
                                 c.Value == card.Value &&
@@ -288,7 +299,6 @@ namespace LevelUp.AI
                             break;
 
                         case MeldType.Flush:
-                            // Bonus si d'autres cartes ont la même couleur
                             int sameColor = player.Hand.Count(c =>
                                 c.Type == CardType.Normal &&
                                 c.Color == card.Color &&
@@ -302,9 +312,6 @@ namespace LevelUp.AI
             return score;
         }
 
-        /// <summary>
-        /// Vérifie si une carte de la défausse est utile pour le bot.
-        /// </summary>
         private bool IsCardUseful(CardModel card, PlayerModel player)
         {
             return EvaluateCardUsefulness(card, player) >= 4f;

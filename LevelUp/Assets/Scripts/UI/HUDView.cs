@@ -178,7 +178,7 @@ namespace LevelUp.UI
         }
 
         /// <summary>
-        /// Affiche un message de statut avec pop-in animé.
+        /// Affiche un message de statut avec pop-in animé et slide.
         /// </summary>
         public void ShowStatus(string message)
         {
@@ -192,10 +192,16 @@ namespace LevelUp.UI
             }
             _statusTimer = _statusDisplayDuration;
 
-            // Pop-in animation
-            if (_animController != null && _statusRect != null)
+            if (_statusRect != null)
             {
-                _animController.AnimatePopIn(_statusRect);
+                // Scale pop via UITween
+                _statusRect.localScale = Vector3.one * 0.5f;
+                UITween.ScaleTo(_statusText!.gameObject, _statusRect, Vector3.one, 0.35f);
+
+                // Slide-in léger depuis le bas
+                Vector2 target = _statusRect.anchoredPosition;
+                _statusRect.anchoredPosition = target + Vector2.down * 20f;
+                UITween.MoveTo(_statusText.gameObject, _statusRect, target, 0.3f);
             }
         }
 
@@ -205,7 +211,26 @@ namespace LevelUp.UI
             {
                 _currentPlayerText.text = $"PLAYER {evt.PlayerIndex + 1}";
                 Color playerColor = PlayerColors[evt.PlayerIndex % PlayerColors.Length];
-                _currentPlayerText.color = playerColor;
+
+                if (_initialized)
+                {
+                    // Flash blanc → couleur joueur
+                    _currentPlayerText.color = Color.white;
+                    UITween.ColorTo(
+                        _currentPlayerText.gameObject, _currentPlayerText, playerColor, 0.4f);
+
+                    // Scale pop
+                    RectTransform rt = _currentPlayerText.GetComponent<RectTransform>();
+                    if (rt != null)
+                    {
+                        rt.localScale = Vector3.one * 1.3f;
+                        UITween.ScaleTo(_currentPlayerText.gameObject, rt, Vector3.one, 0.35f);
+                    }
+                }
+                else
+                {
+                    _currentPlayerText.color = playerColor;
+                }
             }
             UpdateCurrentLevel(evt.PlayerLevel);
             UpdatePhaseText(evt.Phase);
@@ -213,36 +238,51 @@ namespace LevelUp.UI
 
         private void OnPhaseChanged(TurnPhaseChangedEvent evt)
         {
-            UpdatePhaseText(evt.NewPhase);
+            UpdatePhaseText(evt.NewPhase, animated: true);
         }
 
         /// <summary>
         /// Texte de phase court et punchy style Balatro.
+        /// Si animated=true, le texte fait un pop-in et le badge pulse.
         /// </summary>
-        private void UpdatePhaseText(TurnPhase phase)
+        private void UpdatePhaseText(TurnPhase phase, bool animated = false)
         {
             if (_currentPhaseText == null) return;
 
             _currentPhaseText.text = phase switch
             {
                 TurnPhase.Draw       => "PIOCHE - Cliquez pioche ou defausse",
-                TurnPhase.LayDown    => "POSE - Cliquez table ou glissez ↑ pour defausser",
-                TurnPhase.AddToMelds => "AJOUTE - Sur combinaison ou glissez ↑ pour defausser",
-                TurnPhase.Discard    => "DEFAUSSE - Double-clic ou glissez ↑",
+                TurnPhase.LayDown    => "POSE - Selectionnez puis cliquez table",
+                TurnPhase.AddToMelds => "AJOUTE - Glissez sur combinaison",
+                TurnPhase.Discard    => "DEFAUSSE - Cliquez une carte",
                 _                    => ""
             };
 
-            // Couleur selon la phase
-            if (_currentPhaseText != null)
+            Color phaseColor = phase switch
             {
-                _currentPhaseText.color = phase switch
+                TurnPhase.Draw       => Constants.CardBlue,
+                TurnPhase.LayDown    => Constants.CardGreen,
+                TurnPhase.AddToMelds => Constants.CardPurple,
+                TurnPhase.Discard    => Constants.CardOrange,
+                _                    => Constants.TextSecondary
+            };
+            _currentPhaseText.color = phaseColor;
+
+            if (animated && _initialized)
+            {
+                RectTransform phaseRt = _currentPhaseText.GetComponent<RectTransform>();
+                if (phaseRt != null)
                 {
-                    TurnPhase.Draw       => Constants.CardBlue,
-                    TurnPhase.LayDown    => Constants.CardGreen,
-                    TurnPhase.AddToMelds => Constants.CardPurple,
-                    TurnPhase.Discard    => Constants.CardOrange,
-                    _                    => Constants.TextSecondary
-                };
+                    // Pop-in via UITween
+                    UITween.ScaleTo(
+                        _currentPhaseText.gameObject, phaseRt, Vector3.one, 0.3f);
+                    phaseRt.localScale = Vector3.one * 0.7f;
+
+                    // Flash de couleur blanche puis retour à la phase color
+                    _currentPhaseText.color = Color.white;
+                    UITween.ColorTo(
+                        _currentPhaseText.gameObject, _currentPhaseText, phaseColor, 0.4f);
+                }
             }
         }
 
@@ -327,10 +367,19 @@ namespace LevelUp.UI
         /// </summary>
         public void UpdateCurrentLevel(int level)
         {
-            if (_currentLevelText != null)
+            if (_currentLevelText == null) return;
+
+            string req = DescribeLevelRequirement(level);
+            _currentLevelText.text = $"NIVEAU {level}  —  {req}";
+
+            if (_initialized)
             {
-                string req = DescribeLevelRequirement(level);
-                _currentLevelText.text = $"NIVEAU {level}  —  {req}";
+                RectTransform rt = _currentLevelText.GetComponent<RectTransform>();
+                if (rt != null)
+                {
+                    rt.localScale = Vector3.one * 1.2f;
+                    UITween.ScaleTo(_currentLevelText.gameObject, rt, Vector3.one, 0.3f);
+                }
             }
         }
 

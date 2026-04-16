@@ -92,8 +92,9 @@ namespace LevelUp.Core
         /// <summary>
         /// Vérifie si une main contient les cartes nécessaires pour compléter un niveau.
         /// Retourne true et la liste des combinaisons trouvées si le niveau est validé.
+        /// Accepte IReadOnlyList pour compatibilité avec PlayerModel.Hand.
         /// </summary>
-        public static bool IsLevelComplete(List<CardModel> hand, int level, GameConfig? config,
+        public static bool IsLevelComplete(IReadOnlyList<CardModel> hand, int level, GameConfig? config,
             out List<Meld> foundMelds)
         {
             foundMelds = new List<Meld>();

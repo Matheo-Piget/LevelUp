@@ -1,11 +1,15 @@
 using System;
 using System.Collections.Generic;
+using UnityEngine;
 
 namespace LevelUp.Utils
 {
     /// <summary>
     /// Système d'événements découplé basé sur des types génériques.
     /// Permet la communication entre systèmes sans dépendances directes.
+    ///
+    /// Robustesse : chaque subscriber est invoqué dans un try/catch isolé.
+    /// Un handler qui lève une exception ne bloque pas les suivants.
     /// </summary>
     public static class EventBus
     {
@@ -49,13 +53,25 @@ namespace LevelUp.Utils
 
         /// <summary>
         /// Publier un événement de type T à tous les abonnés.
+        /// Chaque handler est isolé : une exception dans l'un n'empêche
+        /// pas les suivants de s'exécuter.
         /// </summary>
         public static void Publish<T>(T eventData) where T : struct
         {
             Type type = typeof(T);
-            if (Events.TryGetValue(type, out Delegate? existing))
+            if (!Events.TryGetValue(type, out Delegate? existing)) return;
+            if (existing is not Action<T> action) return;
+
+            foreach (Delegate d in action.GetInvocationList())
             {
-                (existing as Action<T>)?.Invoke(eventData);
+                try
+                {
+                    ((Action<T>)d).Invoke(eventData);
+                }
+                catch (Exception ex)
+                {
+                    Debug.LogError($"[EventBus] Exception in {type.Name} handler: {ex}");
+                }
             }
         }
 

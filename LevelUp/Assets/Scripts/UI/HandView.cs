@@ -287,6 +287,20 @@ namespace LevelUp.UI
             _playerIndex = index;
         }
 
+        /// <summary>
+        /// Permet à l'InputController de verrouiller le flag d'animation
+        /// AVANT d'exécuter une commande de pioche, pour que le HandChangedEvent
+        /// soit mis en file d'attente au lieu de rebuild la main instantanément.
+        /// </summary>
+        public void SetAnimatingDraw(bool animating)
+        {
+            _animatingDraw = animating;
+            if (!animating)
+            {
+                FlushPendingHand();
+            }
+        }
+
         private void OnHandChanged(HandChangedEvent evt)
         {
             if (evt.PlayerIndex != _playerIndex) return;
@@ -315,7 +329,7 @@ namespace LevelUp.UI
         /// <summary>
         /// Reconstruit la main. Si dealAnimation=true, anime un cascade deal.
         /// </summary>
-        public void RefreshHand(List<CardModel> cards, bool dealAnimation = false)
+        public void RefreshHand(IReadOnlyList<CardModel> cards, bool dealAnimation = false)
         {
             foreach (CardView view in _cardViews)
             {

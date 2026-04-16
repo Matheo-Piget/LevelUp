@@ -5,8 +5,9 @@ using LevelUp.Utils;
 namespace LevelUp.Core
 {
     /// <summary>
-    /// Machine à états principale du jeu : Setup → PlayerTurn → Validate → EndRound → GameOver.
-    /// Point d'entrée du jeu, orchestre tous les systèmes.
+    /// Machine à états principale du jeu : Setup → PlayerTurn → EndRound → GameOver.
+    /// Orchestre les systèmes et expose le <see cref="GameCommandExecutor"/>
+    /// comme point d'entrée unique pour toutes les actions.
     /// </summary>
     public class GameManager : MonoBehaviour
     {
@@ -17,6 +18,7 @@ namespace LevelUp.Core
         private DeckManager? _deckManager;
         private TurnManager? _turnManager;
         private ActionCardHandler? _actionHandler;
+        private GameCommandExecutor? _executor;
         private int _roundNumber;
         private int _roundStarterIndex;
 
@@ -31,6 +33,9 @@ namespace LevelUp.Core
 
         /// <summary>Le DeckManager actif.</summary>
         public DeckManager? DeckManager => _deckManager;
+
+        /// <summary>L'exécuteur de commandes — point d'entrée pour toute action de jeu.</summary>
+        public GameCommandExecutor? Executor => _executor;
 
         /// <summary>La config du jeu.</summary>
         public GameConfig? Config => _config;
@@ -53,7 +58,6 @@ namespace LevelUp.Core
             _players.Clear();
             _roundNumber = 0;
 
-            // Créer les joueurs
             int totalPlayers = humanPlayers + aiPlayers;
             for (int i = 0; i < humanPlayers; i++)
             {
@@ -64,10 +68,11 @@ namespace LevelUp.Core
                 _players.Add(new PlayerModel(humanPlayers + i, $"Bot {i + 1}", true));
             }
 
-            // Initialiser les systèmes
             _deckManager = new DeckManager(_config);
             _actionHandler = new ActionCardHandler(_deckManager, _players);
-            _turnManager = new TurnManager(_players, _deckManager, _actionHandler, _config);
+            _turnManager = new TurnManager(_players, _actionHandler);
+            _executor = new GameCommandExecutor(
+                _players, _deckManager, _turnManager, _actionHandler, _config);
 
             _roundStarterIndex = 0;
 
@@ -84,13 +89,11 @@ namespace LevelUp.Core
             _roundNumber++;
             _state = GameState.PlayerTurn;
 
-            // Reset des joueurs pour le nouveau round
             foreach (PlayerModel player in _players)
             {
                 player.ResetForNewRound();
             }
 
-            // Créer et mélanger le deck, distribuer
             _deckManager!.CreateAndShuffle(_players.Count);
             List<List<CardModel>> hands = _deckManager.Deal(_players.Count);
 
@@ -104,7 +107,6 @@ namespace LevelUp.Core
 
             EventBus.Publish(new RoundStartedEvent { RoundNumber = _roundNumber });
 
-            // Démarrer le premier tour
             _turnManager!.StartRound(_roundStarterIndex);
         }
 
@@ -123,7 +125,7 @@ namespace LevelUp.Core
             // Le gagnant du round saute un niveau (bonus)
             if (winner.HasLaidDownThisRound)
             {
-                winner.CurrentLevel += 2; // Saute un niveau
+                winner.CurrentLevel += 2;
             }
             else
             {
@@ -149,7 +151,6 @@ namespace LevelUp.Core
                         Level = player.CurrentLevel - 1
                     });
                 }
-                // Les joueurs qui n'ont pas posé restent au même niveau
             }
 
             // Vérifier si quelqu'un a gagné la partie
@@ -169,17 +170,23 @@ namespace LevelUp.Core
         }
 
         /// <summary>
-        /// Vérifie si le round vient de se terminer (appelé après chaque défausse).
+        /// Point d'entrée UNIQUE pour toute action de jeu.
+        /// Valide, exécute, publie les événements, et gère la fin de round automatiquement.
+        /// IA et humain passent par ce chemin — aucune exception.
         /// </summary>
-        public void CheckRoundEnd()
+        public CommandResult ExecuteCommand(IGameCommand command)
         {
-            if (_turnManager == null) return;
+            if (_executor == null)
+                return CommandResult.Failure("Game not initialized");
 
-            PlayerModel current = _turnManager.CurrentPlayer;
-            if (current.IsHandEmpty)
+            CommandResult result = _executor.Execute(command);
+
+            if (result.RoundEnded)
             {
-                OnRoundEnd(current.Index);
+                OnRoundEnd(_turnManager!.CurrentPlayerIndex);
             }
+
+            return result;
         }
 
         /// <summary>
