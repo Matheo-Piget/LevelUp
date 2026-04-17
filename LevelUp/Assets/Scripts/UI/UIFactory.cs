@@ -285,7 +285,7 @@ namespace LevelUp.UI
             // Slider area au milieu
             GameObject sliderObj = new("Slider", typeof(RectTransform));
             sliderObj.transform.SetParent(container.transform, false);
-            RectTransform srt = sliderObj.AddComponent<RectTransform>();
+            RectTransform srt = sliderObj.GetComponent<RectTransform>();
             srt.anchorMin = new Vector2(0f, 0.5f);
             srt.anchorMax = new Vector2(1f, 0.5f);
             srt.sizeDelta = new Vector2(-width * 0.35f - 80f, 22f);

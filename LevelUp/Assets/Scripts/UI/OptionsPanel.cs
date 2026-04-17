@@ -36,15 +36,20 @@ namespace LevelUp.UI
             vBtn.transition = Selectable.Transition.None;
             vBtn.onClick.AddListener(Hide);
 
-            // Panel central
+            // Panel central — hauteur augmentée pour laisser de la place au bouton FERMER
+            // sans qu'il chevauche les sliders/toggles au-dessus.
             GameObject panelObj = UIFactory.CreatePanel(veil.transform, "OptionsPanel",
-                Constants.PanelBackground, new Vector2(560f, 520f),
+                Constants.PanelBackground, new Vector2(580f, 640f),
                 withBorder: true, borderColor: Constants.CardPurple);
             _panel = panelObj.GetComponent<RectTransform>();
             _panel.anchorMin = new Vector2(0.5f, 0.5f);
             _panel.anchorMax = new Vector2(0.5f, 0.5f);
             _panel.anchoredPosition = Vector2.zero;
             _panelCanvasGroup = panelObj.AddComponent<CanvasGroup>();
+            // Bloque tous les clics qui ne touchent pas les contrôles (pour ne pas
+            // que le veil derrière ferme le panel quand on clique entre deux éléments).
+            Image panelBlocker = panelObj.GetComponent<Image>();
+            if (panelBlocker != null) panelBlocker.raycastTarget = true;
 
             UIFactory.AddDropShadow(_panel, 10f, 0.5f);
 
@@ -85,7 +90,7 @@ namespace LevelUp.UI
             crt.anchorMin = new Vector2(0.5f, 1f);
             crt.anchorMax = new Vector2(0.5f, 1f);
             crt.pivot = new Vector2(0.5f, 1f);
-            crt.sizeDelta = new Vector2(480f, 300f);
+            crt.sizeDelta = new Vector2(500f, 340f);
             crt.anchoredPosition = new Vector2(0f, -120f);
 
             VerticalLayoutGroup vlg = content.AddComponent<VerticalLayoutGroup>();
@@ -96,11 +101,11 @@ namespace LevelUp.UI
 
             // Sliders volume
             UIFactory.CreateLabeledSlider(content.transform, "MusicVol", "Musique",
-                0f, 1f, GameSettings.MusicVolume, 460f,
+                0f, 1f, GameSettings.MusicVolume, 500f,
                 v => GameSettings.MusicVolume = v, Constants.CardBlue);
 
             UIFactory.CreateLabeledSlider(content.transform, "SfxVol", "Effets SFX",
-                0f, 1f, GameSettings.SfxVolume, 460f,
+                0f, 1f, GameSettings.SfxVolume, 500f,
                 v => GameSettings.SfxVolume = v, Constants.CardGreen);
 
             // Qualité : 3 boutons radio
@@ -108,13 +113,19 @@ namespace LevelUp.UI
 
             // Toggle daltonisme
             UIFactory.CreateLabeledToggle(content.transform, "Colorblind",
-                "Mode daltonisme (icônes)", GameSettings.ColorblindMode, 460f,
+                "Mode daltonisme (icônes)", GameSettings.ColorblindMode, 500f,
                 v => GameSettings.ColorblindMode = v, Constants.CardOrange);
 
-            // Bouton fermer en bas
-            UIFactory.CreateButton(_panel, "BtnClose", "FERMER",
-                new Vector2(220f, 56f), Hide, Constants.CardRed)
-                .GetComponent<RectTransform>().anchoredPosition = new Vector2(0f, -230f);
+            // Bouton fermer ancré en bas du panel — SetAsLastSibling() pour être
+            // sûr d'être au-dessus du contenu et de recevoir les clics.
+            Button closeBtn = UIFactory.CreateButton(_panel, "BtnClose", "FERMER",
+                new Vector2(240f, 60f), Hide, Constants.CardRed);
+            RectTransform closeRt = closeBtn.GetComponent<RectTransform>();
+            closeRt.anchorMin = new Vector2(0.5f, 0f);
+            closeRt.anchorMax = new Vector2(0.5f, 0f);
+            closeRt.pivot = new Vector2(0.5f, 0f);
+            closeRt.anchoredPosition = new Vector2(0f, 30f);
+            closeBtn.transform.SetAsLastSibling();
 
             // Masqué par défaut
             _panel.localScale = Vector3.zero;

@@ -89,6 +89,7 @@ namespace LevelUp.UI
 
         private void CreateBackgroundVeil(RectTransform parent)
         {
+            // Fond opaque : on ne doit pas voir la scène de jeu derrière le menu.
             GameObject veil = new("Veil", typeof(RectTransform), typeof(Image));
             veil.transform.SetParent(parent, false);
             RectTransform rt = veil.GetComponent<RectTransform>();
@@ -97,8 +98,20 @@ namespace LevelUp.UI
             rt.sizeDelta = Vector2.zero;
 
             Image img = veil.GetComponent<Image>();
-            img.color = new Color(0f, 0f, 0f, 0.55f);
+            img.color = Constants.BackgroundDark;
             img.raycastTarget = true; // bloque les clics sur le jeu dessous
+
+            // Vignette radiale pour donner de la profondeur sans laisser filtrer la scène
+            GameObject vignette = new("Vignette", typeof(RectTransform), typeof(Image));
+            vignette.transform.SetParent(veil.transform, false);
+            RectTransform vRt = vignette.GetComponent<RectTransform>();
+            vRt.anchorMin = Vector2.zero;
+            vRt.anchorMax = Vector2.one;
+            vRt.sizeDelta = Vector2.zero;
+            Image vImg = vignette.GetComponent<Image>();
+            vImg.sprite = UIFactory.SoftShadowSprite;
+            vImg.color = new Color(0f, 0f, 0f, 0.55f);
+            vImg.raycastTarget = false;
         }
 
         private void CreateTitle(RectTransform parent)
