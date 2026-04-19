@@ -403,7 +403,7 @@ namespace LevelUp.UI
                     return;
                 }
 
-                if (IsDropOnDiscardPile(pos))
+                if (IsDropOnDiscardZone(pos))
                 {
                     _handView.EndDrag(pos);
                     _handView.DeselectAll();
@@ -421,10 +421,15 @@ namespace LevelUp.UI
             return IsAboveHand(pos) || IsDropOnDiscardPile(pos);
         }
 
+        /// <summary>
+        /// Drop sur la défausse = sur une pile précise OU dans la bande large
+        /// qui contient toutes les piles (zone généreuse, zéro friction).
+        /// </summary>
         private bool IsDropOnDiscardPile(Vector2 pos)
         {
-            return _discardPileView != null &&
-                   _discardPileView.GetPileAtPosition(pos, out int _);
+            if (_discardPileView == null) return false;
+            if (_discardPileView.GetPileAtPosition(pos, out int _)) return true;
+            return _discardPileView.IsInsideDiscardArea(pos);
         }
 
         private void FinishDrag(Vector2 pos)

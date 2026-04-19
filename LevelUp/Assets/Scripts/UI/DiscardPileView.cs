@@ -110,14 +110,14 @@ namespace LevelUp.UI
 
             RectTransform slotRt = slotObj.GetComponent<RectTransform>();
             slotRt.anchoredPosition = new Vector2(xPos, 0);
-            slotRt.sizeDelta = new Vector2(100f, 150f);
+            slotRt.sizeDelta = new Vector2(130f, 175f);
 
-            // Emplacement vide (fond subtil)
+            // Emplacement vide (fond subtil) — zone de hit-test généreuse pour faciliter le drop
             GameObject emptyBg = new("EmptyBg", typeof(RectTransform), typeof(Image));
             emptyBg.transform.SetParent(slotObj.transform, false);
 
             RectTransform bgRt = emptyBg.GetComponent<RectTransform>();
-            bgRt.sizeDelta = new Vector2(80f, 112f);
+            bgRt.sizeDelta = new Vector2(120f, 165f);
             bgRt.anchoredPosition = Vector2.zero;
 
             Image bgImg = emptyBg.GetComponent<Image>();
@@ -321,6 +321,35 @@ namespace LevelUp.UI
                 }
             }
             return false;
+        }
+
+        /// <summary>
+        /// Zone de drop étendue : couvre toute la bande de défausse du joueur courant.
+        /// Permet de défausser sans viser précisément une pile (réduit la friction).
+        /// </summary>
+        public bool IsInsideDiscardArea(Vector2 screenPosition)
+        {
+            if (_container == null) return false;
+            return RectTransformUtility.RectangleContainsScreenPoint(
+                _container, screenPosition, null);
+        }
+
+        /// <summary>
+        /// Retourne la pile la plus proche (utile quand on drop dans la zone élargie).
+        /// </summary>
+        public int GetNearestPileIndex(Vector2 screenPosition)
+        {
+            if (_pileSlots.Count == 0) return -1;
+            int best = 0;
+            float bestDist = float.MaxValue;
+            for (int i = 0; i < _pileSlots.Count; i++)
+            {
+                Vector3 world = _pileSlots[i].BackgroundRect.position;
+                Vector2 screen = RectTransformUtility.WorldToScreenPoint(null, world);
+                float d = Vector2.SqrMagnitude(screen - screenPosition);
+                if (d < bestDist) { bestDist = d; best = i; }
+            }
+            return best;
         }
 
         private void ClearSlots()

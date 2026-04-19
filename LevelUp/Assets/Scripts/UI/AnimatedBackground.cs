@@ -11,7 +11,7 @@ namespace LevelUp.UI
     /// </summary>
     public class AnimatedBackground : MonoBehaviour
     {
-        private const int BlobCount = 4;
+        private const int BlobCount = 6;
 
         private RectTransform[] _blobs = new RectTransform[BlobCount];
         private Vector2[] _blobOrigins = new Vector2[BlobCount];
@@ -19,6 +19,9 @@ namespace LevelUp.UI
         private float[] _phaseOffsets = new float[BlobCount];
         private float[] _speeds = new float[BlobCount];
         private CanvasGroup[] _blobGroups = new CanvasGroup[BlobCount];
+        private Image[] _blobImages = new Image[BlobCount];
+        private Color[] _blobBaseColors = new Color[BlobCount];
+        private Color[] _blobAltColors = new Color[BlobCount];
 
         private RectTransform? _root;
         private Sprite? _radialSprite;
@@ -48,13 +51,14 @@ namespace LevelUp.UI
 
             CreateBaseGradient(_root);
             CreateRadialSprite();
+            CreateTopAurora(_root);
             CreateBlobs(_root);
             CreateGrid(_root);
             CreateVignette(_root);
         }
 
-        /// <summary>Couche de base : couleur sombre uniforme.</summary>
-        private static void CreateBaseGradient(RectTransform parent)
+        /// <summary>Couche de base : dégradé profond nuit -> indigo.</summary>
+        private void CreateBaseGradient(RectTransform parent)
         {
             GameObject baseObj = new("BaseColor", typeof(RectTransform), typeof(Image));
             baseObj.transform.SetParent(parent, false);
@@ -65,8 +69,55 @@ namespace LevelUp.UI
             rt.sizeDelta = Vector2.zero;
 
             Image img = baseObj.GetComponent<Image>();
-            img.color = new Color32(0x07, 0x0C, 0x16, 0xFF);
+            img.color = Color.white;
             img.raycastTarget = false;
+            img.sprite = CreateVerticalGradient(
+                new Color32(0x1A, 0x0F, 0x2E, 0xFF),  // haut : violet profond
+                new Color32(0x05, 0x08, 0x14, 0xFF)); // bas : quasi noir bleuté
+        }
+
+        /// <summary>Bande lumineuse "aurora" en haut pour un look vibrant.</summary>
+        private void CreateTopAurora(RectTransform parent)
+        {
+            GameObject a = new("Aurora", typeof(RectTransform), typeof(Image), typeof(CanvasGroup));
+            a.transform.SetParent(parent, false);
+
+            RectTransform rt = a.GetComponent<RectTransform>();
+            rt.anchorMin = new Vector2(0f, 1f);
+            rt.anchorMax = new Vector2(1f, 1f);
+            rt.pivot = new Vector2(0.5f, 1f);
+            rt.sizeDelta = new Vector2(0f, 520f);
+            rt.anchoredPosition = new Vector2(0f, 120f);
+
+            Image img = a.GetComponent<Image>();
+            img.sprite = _radialSprite;
+            img.color = new Color(0.55f, 0.35f, 0.85f, 0.22f);
+            img.raycastTarget = false;
+
+            CanvasGroup cg = a.GetComponent<CanvasGroup>();
+            cg.blocksRaycasts = false;
+            cg.interactable = false;
+        }
+
+        private static Sprite CreateVerticalGradient(Color top, Color bottom)
+        {
+            const int w = 4;
+            const int h = 128;
+            Texture2D tex = new(w, h, TextureFormat.RGBA32, false)
+            {
+                filterMode = FilterMode.Bilinear,
+                wrapMode = TextureWrapMode.Clamp
+            };
+            Color[] pixels = new Color[w * h];
+            for (int y = 0; y < h; y++)
+            {
+                float t = y / (float)(h - 1);
+                Color c = Color.Lerp(bottom, top, t);
+                for (int x = 0; x < w; x++) pixels[y * w + x] = c;
+            }
+            tex.SetPixels(pixels);
+            tex.Apply();
+            return Sprite.Create(tex, new Rect(0, 0, w, h), new Vector2(0.5f, 0.5f));
         }
 
         /// <summary>
@@ -104,24 +155,40 @@ namespace LevelUp.UI
             _radialSprite = Sprite.Create(tex, new Rect(0, 0, size, size), new Vector2(0.5f, 0.5f));
         }
 
-        /// <summary>4 blobs colorés qui dérivent.</summary>
+        /// <summary>6 blobs colorés qui dérivent, alternant 2 couleurs chacun.</summary>
         private void CreateBlobs(RectTransform parent)
         {
-            Color[] colors =
+            // Palette vibrante façon Balatro : magenta, cyan, rose, ambre, violet, turquoise
+            Color[] baseColors =
             {
-                new(Constants.CardBlue.r, Constants.CardBlue.g, Constants.CardBlue.b, 0.18f),
-                new(Constants.CardPurple.r, Constants.CardPurple.g, Constants.CardPurple.b, 0.16f),
-                new(Constants.CardGreen.r, Constants.CardGreen.g, Constants.CardGreen.b, 0.12f),
-                new(Constants.CardOrange.r, Constants.CardOrange.g, Constants.CardOrange.b, 0.10f),
+                new(0.55f, 0.25f, 0.95f, 0.42f),  // violet vif
+                new(0.20f, 0.80f, 0.95f, 0.38f),  // cyan
+                new(0.95f, 0.35f, 0.70f, 0.36f),  // rose
+                new(1.00f, 0.65f, 0.25f, 0.32f),  // ambre chaud
+                new(0.30f, 0.95f, 0.70f, 0.28f),  // turquoise
+                new(0.85f, 0.30f, 0.45f, 0.34f),  // framboise
+            };
+            Color[] altColors =
+            {
+                new(0.30f, 0.20f, 0.95f, 0.42f),  // bleu électrique
+                new(0.50f, 0.90f, 0.95f, 0.38f),  // azur
+                new(0.95f, 0.55f, 0.85f, 0.36f),  // lilas
+                new(0.95f, 0.85f, 0.35f, 0.32f),  // or
+                new(0.50f, 0.95f, 0.85f, 0.28f),  // menthe
+                new(1.00f, 0.45f, 0.35f, 0.34f),  // corail
             };
 
             Vector2[] origins =
             {
-                new(-380f, 200f),
-                new(420f, -150f),
-                new(-300f, -250f),
-                new(350f, 280f),
+                new(-500f, 220f),
+                new(500f, -180f),
+                new(-420f, -260f),
+                new(420f, 300f),
+                new(0f, 120f),
+                new(-80f, -360f),
             };
+
+            float[] sizes = { 1100f, 1050f, 900f, 950f, 800f, 900f };
 
             for (int i = 0; i < BlobCount; i++)
             {
@@ -129,12 +196,12 @@ namespace LevelUp.UI
                 blobObj.transform.SetParent(parent, false);
 
                 RectTransform rt = blobObj.GetComponent<RectTransform>();
-                rt.sizeDelta = new Vector2(900f, 900f);
+                rt.sizeDelta = new Vector2(sizes[i], sizes[i]);
                 rt.anchoredPosition = origins[i];
 
                 Image img = blobObj.GetComponent<Image>();
                 img.sprite = _radialSprite;
-                img.color = colors[i];
+                img.color = baseColors[i];
                 img.raycastTarget = false;
                 img.type = Image.Type.Simple;
 
@@ -144,10 +211,13 @@ namespace LevelUp.UI
                 cg.alpha = 1f;
 
                 _blobs[i] = rt;
+                _blobImages[i] = img;
+                _blobBaseColors[i] = baseColors[i];
+                _blobAltColors[i] = altColors[i];
                 _blobOrigins[i] = origins[i];
-                _blobAmplitudes[i] = new Vector2(Random.Range(60f, 130f), Random.Range(50f, 100f));
+                _blobAmplitudes[i] = new Vector2(Random.Range(80f, 170f), Random.Range(60f, 130f));
                 _phaseOffsets[i] = Random.Range(0f, Mathf.PI * 2f);
-                _speeds[i] = Random.Range(0.12f, 0.28f);
+                _speeds[i] = Random.Range(0.10f, 0.24f);
                 _blobGroups[i] = cg;
             }
         }
@@ -239,9 +309,20 @@ namespace LevelUp.UI
 
                 if (_blobGroups[i] != null)
                 {
-                    float pulse = 0.85f + Mathf.Sin(phase * 1.3f) * 0.15f;
+                    float pulse = 0.75f + Mathf.Sin(phase * 1.3f) * 0.25f;
                     _blobGroups[i].alpha = pulse;
                 }
+
+                // Cycle lent entre les 2 teintes — rend le fond vivant sans effet de flash.
+                if (_blobImages[i] != null)
+                {
+                    float t = 0.5f + 0.5f * Mathf.Sin(phase * 0.35f);
+                    _blobImages[i].color = Color.Lerp(_blobBaseColors[i], _blobAltColors[i], t);
+                }
+
+                // Léger "breathing" d'échelle pour plus de vie
+                float scale = 1f + Mathf.Sin(phase * 0.9f) * 0.06f;
+                _blobs[i].localScale = new Vector3(scale, scale, 1f);
             }
         }
     }
