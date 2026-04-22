@@ -229,10 +229,11 @@ namespace LevelUp.Core
                 _levelProgressView.Initialize(_gameManager.Players.Count, names);
             }
 
-            // Initialiser les piles de défausse
+            // Initialiser les piles de défausse (DeckManager pour peek après pioche)
             if (_discardPileView != null)
             {
-                _discardPileView.Initialize(_gameManager.Players.Count, names);
+                _discardPileView.Initialize(
+                    _gameManager.Players.Count, names, _gameManager.DeckManager);
             }
 
             // Indicateur de validité de sélection en temps réel

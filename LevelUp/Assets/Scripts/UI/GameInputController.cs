@@ -696,5 +696,29 @@ namespace LevelUp.UI
             _handView?.DeselectAll();
             ExecuteSkipPhase(TurnPhase.AddToMelds);
         }
+
+        /// <summary>Tri de la main par valeur croissante (actions en fin).</summary>
+        public void OnSortByValueButton()
+        {
+            SortCurrentPlayerHand(PlayerModel.CompareByValue);
+        }
+
+        /// <summary>Tri de la main par couleur (tiebreak par valeur).</summary>
+        public void OnSortByColorButton()
+        {
+            SortCurrentPlayerHand(PlayerModel.CompareByColor);
+        }
+
+        private void SortCurrentPlayerHand(System.Comparison<CardModel> comparator)
+        {
+            if (_gameManager?.TurnManager == null || _handView == null) return;
+            if (_isDragging) return; // ne pas perturber un geste en cours
+
+            PlayerModel player = _gameManager.TurnManager.CurrentPlayer;
+            if (player.IsAI) return;
+
+            player.SortHand(comparator);
+            _handView.ApplySortedOrder(player.Hand);
+        }
     }
 }

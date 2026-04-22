@@ -339,6 +339,8 @@ namespace LevelUp.UI
 
         /// <summary>
         /// Ajoute une carte au groupe.
+        /// Les cartes sont maintenues triées par valeur pour rester lisibles,
+        /// y compris quand on complète un meld existant.
         /// </summary>
         public bool TryAddCard(CardModel card, GameObject? cardPrefab)
         {
@@ -356,6 +358,8 @@ namespace LevelUp.UI
             cardView.RectTransform.localScale = Vector3.one * 0.75f;
 
             _cards.Add(cardView);
+            // Tri par valeur (même ordre que le modèle Meld.TryAddCard).
+            _cards.Sort((a, b) => a.CardModel.Value.CompareTo(b.CardModel.Value));
             LayoutCards();
             UpdateBackgroundSize();
             return true;

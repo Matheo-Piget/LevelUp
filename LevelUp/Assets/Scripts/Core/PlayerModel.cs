@@ -120,6 +120,29 @@ namespace LevelUp.Core
             _hand.RemoveAt(fromIndex);
             _hand.Insert(toIndex, card);
         }
+
+        /// <summary>
+        /// Trie la main selon un comparateur. Purement cosmétique.
+        /// </summary>
+        public void SortHand(System.Comparison<CardModel> comparator)
+        {
+            _hand.Sort(comparator);
+        }
+
+        /// <summary>Comparateur par valeur croissante (actions en fin, tiebreak par couleur).</summary>
+        public static readonly System.Comparison<CardModel> CompareByValue = (a, b) =>
+        {
+            if (a.IsAction != b.IsAction) return a.IsAction ? 1 : -1;
+            int v = a.Value.CompareTo(b.Value);
+            return v != 0 ? v : ((int)a.Color).CompareTo((int)b.Color);
+        };
+
+        /// <summary>Comparateur par couleur (tiebreak par valeur croissante). Les Wild finissent en dernier.</summary>
+        public static readonly System.Comparison<CardModel> CompareByColor = (a, b) =>
+        {
+            int c = ((int)a.Color).CompareTo((int)b.Color);
+            return c != 0 ? c : a.Value.CompareTo(b.Value);
+        };
     }
 
     /// <summary>
@@ -168,10 +191,9 @@ namespace LevelUp.Core
             if (!CanAddCard(card)) return false;
 
             Cards.Add(card);
-            if (Type == MeldType.Run)
-            {
-                Cards.Sort((a, b) => a.Value.CompareTo(b.Value));
-            }
+            // Tri systématique par valeur : obligatoire pour Run, cosmétique pour Set/Flush,
+            // garantit cohérence modèle ↔ vue quel que soit le type.
+            Cards.Sort((a, b) => a.Value.CompareTo(b.Value));
             return true;
         }
     }

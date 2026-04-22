@@ -22,6 +22,8 @@ namespace LevelUp.UI
 
         private readonly List<PileSlot> _pileSlots = new();
         private int _playerCount;
+        // Pour peek la nouvelle carte du dessus après une pioche depuis défausse.
+        private DeckManager? _deckManager;
 
         // Couleurs par joueur (mêmes que TableView)
         private static readonly Color[] PlayerBadgeColors =
@@ -52,7 +54,8 @@ namespace LevelUp.UI
 
         /// <summary>
         /// Un joueur a pioché depuis une pile de défausse → retirer la carte du dessus
-        /// et l'afficher dans l'état visuel correct (carte précédente si elle existe).
+        /// ET révéler la carte qui se trouvait juste en dessous, si elle existe.
+        /// La pile (List côté modèle) n'est PAS vidée, seule la top est retirée.
         /// </summary>
         private void OnCardDrawn(CardDrawnEvent evt)
         {
@@ -61,7 +64,7 @@ namespace LevelUp.UI
 
             PileSlot slot = _pileSlots[evt.DiscardPileIndex];
 
-            // Retire la carte du dessus (celle qui vient d'être piochée)
+            // 1. Retirer la carte du dessus (celle qui vient d'être piochée)
             if (slot.TopCardView != null)
             {
                 Destroy(slot.TopCardView.gameObject);
@@ -71,6 +74,23 @@ namespace LevelUp.UI
             slot.CardCount = Mathf.Max(0, slot.CardCount - 1);
             slot.CountText.text = slot.CardCount.ToString();
             slot.CountText.color = slot.CardCount > 3 ? Constants.CardYellow : Constants.TextSecondary;
+
+            // 2. Révéler la nouvelle carte du dessus si la pile n'est pas vide.
+            //    On peek le modèle (DeckManager a déjà pop) pour savoir quelle carte afficher.
+            if (_deckManager == null || _cardPrefab == null) return;
+
+            CardModel? newTop = _deckManager.PeekDiscard(evt.DiscardPileIndex);
+            if (!newTop.HasValue) return;
+
+            GameObject cardObj = Instantiate(_cardPrefab, slot.Root.transform);
+            CardView cardView = cardObj.GetComponent<CardView>();
+            if (cardView == null) return;
+
+            cardView.Setup(newTop.Value, true);
+            cardView.SetInteractable(true);
+            cardView.RectTransform.localScale = Vector3.one * 0.65f;
+            cardView.RectTransform.anchoredPosition = Vector2.zero;
+            slot.TopCardView = cardView;
         }
 
         private void OnGameStarted(GameStartedEvent evt)
@@ -80,11 +100,14 @@ namespace LevelUp.UI
 
         /// <summary>
         /// Initialise les emplacements de défausse pour tous les joueurs.
+        /// <paramref name="deckManager"/> permet de révéler la carte précédente
+        /// quand on pioche depuis une pile (peek de la nouvelle top).
         /// </summary>
-        public void Initialize(int playerCount, List<string> playerNames)
+        public void Initialize(int playerCount, List<string> playerNames, DeckManager? deckManager = null)
         {
             ClearSlots();
             _playerCount = playerCount;
+            _deckManager = deckManager;
 
             if (_container == null) return;
 

@@ -465,6 +465,57 @@ namespace LevelUp.UI
             RecalculateTargets();
         }
 
+        /// <summary>
+        /// Réordonne les CardView existantes pour matcher l'ordre du modèle
+        /// (après un tri). Ne recrée rien — la sélection et les instances sont
+        /// conservées, seul l'ordre de _cardViews change, puis Lerp anime.
+        /// </summary>
+        public void ApplySortedOrder(IReadOnlyList<CardModel> newOrder)
+        {
+            if (newOrder == null) return;
+
+            // Si on est en plein drag, on ne perturbe pas le geste en cours.
+            if (_draggedCard != null || _isReorderDrag)
+            {
+                return;
+            }
+
+            // Si le nombre ne correspond pas (desync rare), fallback rebuild propre.
+            if (newOrder.Count != _cardViews.Count)
+            {
+                RefreshHand(newOrder);
+                return;
+            }
+
+            List<CardView> sorted = new(newOrder.Count);
+            for (int i = 0; i < newOrder.Count; i++)
+            {
+                CardModel target = newOrder[i];
+                CardView? match = null;
+                for (int j = 0; j < _cardViews.Count; j++)
+                {
+                    if (_cardViews[j].CardModel.Id == target.Id)
+                    {
+                        match = _cardViews[j];
+                        break;
+                    }
+                }
+                if (match == null)
+                {
+                    RefreshHand(newOrder);
+                    return;
+                }
+                sorted.Add(match);
+            }
+
+            _cardViews.Clear();
+            _cardViews.AddRange(sorted);
+            // Le hover peut pointer vers un mauvais index après tri — on reset.
+            _hoveredIndex = -1;
+            _hoveredCard = null;
+            RecalculateTargets();
+        }
+
         // ═══════════════════════════════════════
         //  DRAG-TO-REORDER
         // ═══════════════════════════════════════
