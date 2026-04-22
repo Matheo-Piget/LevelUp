@@ -2,7 +2,10 @@
   "permissions": {
     "allow": [
       "Bash(find *)",
-      "Bash(python3 -c \" import sys, json for line in sys.stdin: try: obj = json.loads\\(line.strip\\(\\)\\) if obj.get\\('type'\\) == 'assistant': msg = obj.get\\('message', {}\\) content = msg.get\\('content', []\\) for c in content: if isinstance\\(c, dict\\) and c.get\\('type'\\) == 'text': print\\('ASSISTANT TEXT:', c['text'][:500]\\) elif isinstance\\(c, dict\\) and c.get\\('type'\\) == 'tool_use': print\\('TOOL USE:', c.get\\('name'\\), '-', json.dumps\\(c.get\\('input', {}\\)\\)[:300]\\) elif obj.get\\('type'\\) == 'human': msg = obj.get\\('message', {}\\) content = msg.get\\('content', []\\) for c in content: if isinstance\\(c, dict\\) and c.get\\('type'\\) == 'text': print\\('USER TEXT:', c['text'][:300]\\) except: pass \")"
+      "Bash(python3 -c \" import sys, json for line in sys.stdin: try: obj = json.loads\\(line.strip\\(\\)\\) if obj.get\\('type'\\) == 'assistant': msg = obj.get\\('message', {}\\) content = msg.get\\('content', []\\) for c in content: if isinstance\\(c, dict\\) and c.get\\('type'\\) == 'text': print\\('ASSISTANT TEXT:', c['text'][:500]\\) elif isinstance\\(c, dict\\) and c.get\\('type'\\) == 'tool_use': print\\('TOOL USE:', c.get\\('name'\\), '-', json.dumps\\(c.get\\('input', {}\\)\\)[:300]\\) elif obj.get\\('type'\\) == 'human': msg = obj.get\\('message', {}\\) content = msg.get\\('content', []\\) for c in content: if isinstance\\(c, dict\\) and c.get\\('type'\\) == 'text': print\\('USER TEXT:', c['text'][:300]\\) except: pass \")",
+      "Bash(grep -n -A 20 \"^--- !u!1 &280071618$\" \"C:\\\\Users\\\\mathe\\\\Documents\\\\Projet Perso\\\\levelup\\\\LevelUp\\\\Assets\\\\Scenes\\\\Game.unity\")",
+      "Bash(grep -n -B 2 -A 20 \"m_Name: HandView\\\\|m_Name: Hand$\\\\|HandView$\" \"C:\\\\Users\\\\mathe\\\\Documents\\\\Projet Perso\\\\levelup\\\\LevelUp\\\\Assets\\\\Scenes\\\\Game.unity\")",
+      "Bash(awk '/^--- !u!224 &1264877169$/,/^--- !/' \"C:\\\\Users\\\\mathe\\\\Documents\\\\Projet Perso\\\\levelup\\\\LevelUp\\\\Assets\\\\Scenes\\\\Game.unity\")"
     ]
   }
 }

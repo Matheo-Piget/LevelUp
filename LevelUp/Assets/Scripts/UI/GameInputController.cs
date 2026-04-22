@@ -246,19 +246,34 @@ namespace LevelUp.UI
                 return;
             }
 
-            // Phase LAY DOWN : horizontal = reorder, vers le haut = action drag
+            // Phase LAY DOWN : horizontal = reorder, vers le haut = action drag.
+            // Si on est déjà en reorder ET que le curseur monte au-dessus de la main,
+            // on bascule en action drag pour ne pas bloquer une défausse.
             if (phase == TurnPhase.LayDown && _isReorderCandidate)
             {
                 if (dragDist > ReorderDragThreshold)
                 {
+                    bool draggingUp = (pos.y - _dragStartPos.y) > DragUpThreshold;
+
                     if (_handView.IsReorderDragging)
                     {
-                        _handView.ContinueReorderDrag(pos);
+                        // Bascule reorder → action si le joueur sort vers le haut
+                        if (draggingUp || IsAboveHand(pos))
+                        {
+                            _handView.EndReorderDrag();
+                            _isReorderCandidate = false;
+                            _handView.SelectSingleCard(_dragCardIndex);
+                            _handView.BeginDrag(_dragCardIndex, _dragStartPos);
+                            _handView.ContinueDrag(pos);
+                        }
+                        else
+                        {
+                            _handView.ContinueReorderDrag(pos);
+                        }
                         return;
                     }
 
-                    bool draggingUp = (pos.y - _dragStartPos.y) > DragUpThreshold;
-                    if (draggingUp)
+                    if (draggingUp || IsAboveHand(pos))
                     {
                         _isReorderCandidate = false;
                         _handView.SelectSingleCard(_dragCardIndex);
@@ -280,7 +295,24 @@ namespace LevelUp.UI
                 if (dragDist > ReorderDragThreshold)
                 {
                     bool draggingUp = (pos.y - _dragStartPos.y) > DragUpThreshold;
-                    if (draggingUp)
+
+                    if (_handView.IsReorderDragging)
+                    {
+                        if (draggingUp || IsAboveHand(pos))
+                        {
+                            _handView.EndReorderDrag();
+                            _isReorderCandidate = false;
+                            _handView.BeginDrag(_dragCardIndex, _dragStartPos);
+                            _handView.ContinueDrag(pos);
+                        }
+                        else
+                        {
+                            _handView.ContinueReorderDrag(pos);
+                        }
+                        return;
+                    }
+
+                    if (draggingUp || IsAboveHand(pos))
                     {
                         _isReorderCandidate = false;
                         _handView.BeginDrag(_dragCardIndex, _dragStartPos);
@@ -288,10 +320,7 @@ namespace LevelUp.UI
                     }
                     else
                     {
-                        if (!_handView.IsReorderDragging)
-                        {
-                            _handView.BeginReorderDrag(_dragCardIndex, _dragStartPos);
-                        }
+                        _handView.BeginReorderDrag(_dragCardIndex, _dragStartPos);
                         _handView.ContinueReorderDrag(pos);
                     }
                 }
@@ -381,17 +410,24 @@ namespace LevelUp.UI
                 return;
             }
 
-            // Phase LayDown : drop sur défausse → skip + défausser
+            // Phase LayDown : drop sur défausse → avance jusqu'à Discard puis défausse.
+            // Si le joueur a déjà posé son niveau ce round, LayDown avance vers
+            // AddToMelds (pas Discard) — on doit donc enchaîner les skips.
             if (phase == TurnPhase.LayDown && IsDropOnDiscardZone(pos))
             {
                 _handView.EndDrag(pos);
                 _handView.DeselectAll();
-                ExecuteSkipPhase(TurnPhase.LayDown);
-                ExecuteDiscard(card);
+                AdvanceToDiscardAndDiscard(card);
                 return;
             }
 
-            // Phase AddToMelds : drop sur combinaison ou défausse
+            // Phase AddToMelds : zones STRICTES.
+            // 1. Drop précis sur une combinaison → ajout.
+            // 2. Drop précis sur une pile de défausse → skip + discard.
+            // 3. Ailleurs (y compris au-dessus de la main dans le vide) → snap-back.
+            //    On n'utilise PAS IsDropOnDiscardZone ici car IsAboveHand est une
+            //    bande très large qui recouvre l'aire des melds adverses et ferait
+            //    défausser par erreur dès qu'on rate le meld de quelques pixels.
             if (phase == TurnPhase.AddToMelds)
             {
                 if (_tableView != null &&
@@ -403,17 +439,39 @@ namespace LevelUp.UI
                     return;
                 }
 
-                if (IsDropOnDiscardZone(pos))
+                if (IsDropOnDiscardPile(pos))
                 {
                     _handView.EndDrag(pos);
                     _handView.DeselectAll();
-                    ExecuteSkipPhase(TurnPhase.AddToMelds);
-                    ExecuteDiscard(card);
+                    AdvanceToDiscardAndDiscard(card);
                     return;
                 }
             }
 
             FinishDrag(pos);
+        }
+
+        /// <summary>
+        /// Enchaîne les SkipPhase nécessaires pour atteindre la phase Discard,
+        /// puis défausse. Gère le cas où le joueur a déjà posé son niveau
+        /// (LayDown → AddToMelds → Discard).
+        /// </summary>
+        private void AdvanceToDiscardAndDiscard(CardModel card)
+        {
+            if (_gameManager?.TurnManager == null) return;
+
+            int safety = 4;
+            while (_gameManager.TurnManager.CurrentPhase != TurnPhase.Discard && safety-- > 0)
+            {
+                TurnPhase p = _gameManager.TurnManager.CurrentPhase;
+                if (p == TurnPhase.Draw) return; // impossible normalement, abandon
+                ExecuteSkipPhase(p);
+            }
+
+            if (_gameManager.TurnManager.CurrentPhase == TurnPhase.Discard)
+            {
+                ExecuteDiscard(card);
+            }
         }
 
         private bool IsDropOnDiscardZone(Vector2 pos)
@@ -592,6 +650,10 @@ namespace LevelUp.UI
         //  HELPERS
         // ──────────────────────────────────────────────
 
+        /// <summary>
+        /// Vrai si le curseur est au-dessus (ou dans la zone haute) de la main.
+        /// Indépendant du pivot du RectTransform : on compare à rect.yMax.
+        /// </summary>
         private bool IsAboveHand(Vector2 screenPos)
         {
             if (_handView == null) return false;
@@ -600,7 +662,10 @@ namespace LevelUp.UI
 
             RectTransformUtility.ScreenPointToLocalPointInRectangle(
                 handRect, screenPos, null, out Vector2 local);
-            return local.y > -handRect.rect.height * 0.1f;
+            // Dans l'espace local du rect, yMax est le bord supérieur (quel que soit le pivot).
+            // On tolère une petite marge (20% du haut du rect) pour un seuil plus indulgent.
+            float topThreshold = handRect.rect.yMax - handRect.rect.height * 0.2f;
+            return local.y > topThreshold;
         }
 
         private static bool HitsRect(RectTransform? rect, Vector2 screenPos)

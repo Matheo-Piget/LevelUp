@@ -156,113 +156,148 @@ namespace LevelUp.UI
         private IEnumerator AnimateDrawCoroutine(RectTransform card, Action? onComplete)
         {
             IsAnimating = true;
-
-            Vector2 targetPos = card.anchoredPosition;
-            Vector3 targetScale = card.localScale;
-
-            // Position du deck en local
-            Vector3 deckWorldPos = _deckPosition!.position;
-            Transform? cardParent = card.parent;
-            Vector3 deckLocalPos = cardParent != null
-                ? cardParent.InverseTransformPoint(deckWorldPos)
-                : deckWorldPos;
-
-            Vector2 startPos = new(deckLocalPos.x, deckLocalPos.y);
-            Vector3 startScale = targetScale * 0.4f;
-            float startRotation = 15f;
-
-            card.anchoredPosition = startPos;
-            card.localScale = startScale;
-            card.localRotation = Quaternion.Euler(0, 0, startRotation);
-
-            // Arc plus haut pour un effet spectaculaire
-            Vector2 midPoint = Vector2.Lerp(startPos, targetPos, 0.5f) + Vector2.up * 120f;
-
-            float elapsed = 0f;
-            float duration = Constants.AnimDrawDuration;
-
-            while (elapsed < duration)
+            try
             {
-                elapsed += Time.deltaTime;
-                float rawT = Mathf.Clamp01(elapsed / duration);
-                float t = OvershootCurve.Evaluate(rawT);
+                if (card == null) yield break;
 
-                // Bézier quadratique
-                Vector2 a = Vector2.Lerp(startPos, midPoint, t);
-                Vector2 b = Vector2.Lerp(midPoint, targetPos, t);
-                card.anchoredPosition = Vector2.Lerp(a, b, t);
+                Vector2 targetPos = card.anchoredPosition;
+                Vector3 targetScale = card.localScale;
 
-                // Scale avec bounce
-                float scaleT = BounceCurve.Evaluate(rawT);
-                card.localScale = Vector3.Lerp(startScale, targetScale, scaleT);
+                // Position du deck en local
+                Vector3 deckWorldPos = _deckPosition!.position;
+                Transform? cardParent = card.parent;
+                Vector3 deckLocalPos = cardParent != null
+                    ? cardParent.InverseTransformPoint(deckWorldPos)
+                    : deckWorldPos;
 
-                // Rotation revient à 0
-                float rot = Mathf.Lerp(startRotation, 0f, rawT);
-                card.localRotation = Quaternion.Euler(0, 0, rot);
+                Vector2 startPos = new(deckLocalPos.x, deckLocalPos.y);
+                Vector3 startScale = targetScale * 0.4f;
+                float startRotation = 15f;
 
-                yield return null;
+                card.anchoredPosition = startPos;
+                card.localScale = startScale;
+                card.localRotation = Quaternion.Euler(0, 0, startRotation);
+
+                // Arc plus haut pour un effet spectaculaire
+                Vector2 midPoint = Vector2.Lerp(startPos, targetPos, 0.5f) + Vector2.up * 120f;
+
+                float elapsed = 0f;
+                float duration = Constants.AnimDrawDuration;
+
+                while (elapsed < duration)
+                {
+                    if (card == null) yield break;
+                    elapsed += Time.deltaTime;
+                    float rawT = Mathf.Clamp01(elapsed / duration);
+                    float t = OvershootCurve.Evaluate(rawT);
+
+                    // Bézier quadratique
+                    Vector2 a = Vector2.Lerp(startPos, midPoint, t);
+                    Vector2 b = Vector2.Lerp(midPoint, targetPos, t);
+                    card.anchoredPosition = Vector2.Lerp(a, b, t);
+
+                    // Scale avec bounce
+                    float scaleT = BounceCurve.Evaluate(rawT);
+                    card.localScale = Vector3.Lerp(startScale, targetScale, scaleT);
+
+                    // Rotation revient à 0
+                    float rot = Mathf.Lerp(startRotation, 0f, rawT);
+                    card.localRotation = Quaternion.Euler(0, 0, rot);
+
+                    yield return null;
+                }
+
+                if (card != null)
+                {
+                    card.anchoredPosition = targetPos;
+                    card.localScale = targetScale;
+                    card.localRotation = Quaternion.identity;
+                }
             }
-
-            card.anchoredPosition = targetPos;
-            card.localScale = targetScale;
-            card.localRotation = Quaternion.identity;
-            IsAnimating = false;
-            onComplete?.Invoke();
+            finally
+            {
+                IsAnimating = false;
+                // Toujours notifier pour que l'appelant libère ses locks
+                // (_animatingDraw, etc.), même si l'objet a été détruit.
+                onComplete?.Invoke();
+            }
         }
 
         private IEnumerator AnimateMoveAndScale(RectTransform rt, Vector2 fromPos, Vector2 toPos,
             Vector3 fromScale, Vector3 toScale, float duration, Action? onComplete)
         {
             IsAnimating = true;
-            float elapsed = 0f;
-
-            while (elapsed < duration)
+            try
             {
-                elapsed += Time.deltaTime;
-                float t = OvershootCurve.Evaluate(Mathf.Clamp01(elapsed / duration));
-                rt.anchoredPosition = Vector2.LerpUnclamped(fromPos, toPos, t);
-                rt.localScale = Vector3.LerpUnclamped(fromScale, toScale, t);
-                yield return null;
-            }
+                if (rt == null) yield break;
+                float elapsed = 0f;
 
-            rt.anchoredPosition = toPos;
-            rt.localScale = toScale;
-            IsAnimating = false;
-            onComplete?.Invoke();
+                while (elapsed < duration)
+                {
+                    if (rt == null) yield break;
+                    elapsed += Time.deltaTime;
+                    float t = OvershootCurve.Evaluate(Mathf.Clamp01(elapsed / duration));
+                    rt.anchoredPosition = Vector2.LerpUnclamped(fromPos, toPos, t);
+                    rt.localScale = Vector3.LerpUnclamped(fromScale, toScale, t);
+                    yield return null;
+                }
+
+                if (rt != null)
+                {
+                    rt.anchoredPosition = toPos;
+                    rt.localScale = toScale;
+                }
+            }
+            finally
+            {
+                IsAnimating = false;
+                onComplete?.Invoke();
+            }
         }
 
         private IEnumerator AnimateDiscardCoroutine(RectTransform rt, CanvasGroup? cg,
             Vector2 target, Action? onComplete)
         {
             IsAnimating = true;
-            float elapsed = 0f;
-            float duration = Constants.AnimDiscardDuration;
-            Vector2 start = rt.anchoredPosition;
-            Vector3 startScale = rt.localScale;
-            float startAlpha = cg != null ? cg.alpha : 1f;
-            float startRot = rt.localEulerAngles.z;
-
-            // Rotation aléatoire légère pour un feel organique
-            float targetRot = startRot + UnityEngine.Random.Range(-15f, 15f);
-
-            while (elapsed < duration)
+            try
             {
-                elapsed += Time.deltaTime;
-                float rawT = Mathf.Clamp01(elapsed / duration);
-                float t = _moveCurve.Evaluate(rawT);
+                if (rt == null) yield break;
+                float elapsed = 0f;
+                float duration = Constants.AnimDiscardDuration;
+                Vector2 start = rt.anchoredPosition;
+                Vector3 startScale = rt.localScale;
+                float startAlpha = cg != null ? cg.alpha : 1f;
+                float startRot = rt.localEulerAngles.z;
 
-                rt.anchoredPosition = Vector2.LerpUnclamped(start, target, t);
-                rt.localScale = Vector3.Lerp(startScale, startScale * 0.6f, rawT);
-                rt.localRotation = Quaternion.Euler(0, 0, Mathf.Lerp(startRot, targetRot, rawT));
+                // Rotation aléatoire légère pour un feel organique
+                float targetRot = startRot + UnityEngine.Random.Range(-15f, 15f);
 
-                if (cg != null) cg.alpha = Mathf.Lerp(startAlpha, 0f, rawT * rawT);
-                yield return null;
+                while (elapsed < duration)
+                {
+                    if (rt == null) yield break;
+                    elapsed += Time.deltaTime;
+                    float rawT = Mathf.Clamp01(elapsed / duration);
+                    float t = _moveCurve.Evaluate(rawT);
+
+                    rt.anchoredPosition = Vector2.LerpUnclamped(start, target, t);
+                    rt.localScale = Vector3.Lerp(startScale, startScale * 0.6f, rawT);
+                    rt.localRotation = Quaternion.Euler(0, 0, Mathf.Lerp(startRot, targetRot, rawT));
+
+                    if (cg != null) cg.alpha = Mathf.Lerp(startAlpha, 0f, rawT * rawT);
+                    yield return null;
+                }
+
+                if (rt != null)
+                {
+                    rt.anchoredPosition = target;
+                    if (cg != null) cg.alpha = 0f;
+                }
             }
-
-            rt.anchoredPosition = target;
-            if (cg != null) cg.alpha = 0f;
-            IsAnimating = false;
-            onComplete?.Invoke();
+            finally
+            {
+                IsAnimating = false;
+                onComplete?.Invoke();
+            }
         }
 
         private IEnumerator AnimateFlipCoroutine(RectTransform rt, Action? onHalf, Action? onComplete)
@@ -319,27 +354,15 @@ namespace LevelUp.UI
 
         private IEnumerator AnimatePulseCoroutine(RectTransform rt, Action? onComplete)
         {
+            if (rt == null) yield break;
             Vector3 original = rt.localScale;
-            float duration = Constants.AnimBounceDuration;
-            float elapsed = 0f;
-
-            while (elapsed < duration)
-            {
-                elapsed += Time.deltaTime;
-                float t = Mathf.Clamp01(elapsed / duration);
-                float scale = BounceCurve.Evaluate(t);
-                rt.localScale = original * Mathf.Lerp(1f, 1.25f, scale - 1f + 1f);
-                yield return null;
-            }
-
-            // Simplified: just bounce to 1.25x and back
-            elapsed = 0f;
             Vector3 big = original * 1.25f;
             float halfDur = 0.1f;
 
-            rt.localScale = original;
+            float elapsed = 0f;
             while (elapsed < halfDur)
             {
+                if (rt == null) yield break;
                 elapsed += Time.deltaTime;
                 float t = BounceCurve.Evaluate(Mathf.Clamp01(elapsed / halfDur));
                 rt.localScale = Vector3.LerpUnclamped(original, big, t);
@@ -349,12 +372,14 @@ namespace LevelUp.UI
             elapsed = 0f;
             while (elapsed < halfDur * 1.5f)
             {
+                if (rt == null) yield break;
                 elapsed += Time.deltaTime;
                 float t = Mathf.Clamp01(elapsed / (halfDur * 1.5f));
                 rt.localScale = Vector3.Lerp(big, original, t);
                 yield return null;
             }
 
+            if (rt == null) yield break;
             rt.localScale = original;
             onComplete?.Invoke();
         }
@@ -396,28 +421,39 @@ namespace LevelUp.UI
         private IEnumerator AnimateCascadeCoroutine(RectTransform[] cards, Vector2[] targets, Action? onComplete)
         {
             IsAnimating = true;
-            int remaining = cards.Length;
-
-            for (int i = 0; i < cards.Length; i++)
+            try
             {
-                int idx = i;
-                StartCoroutine(AnimateMoveAndScale(
-                    cards[idx],
-                    cards[idx].anchoredPosition,
-                    targets[idx],
-                    cards[idx].localScale,
-                    cards[idx].localScale * 0.7f,
-                    Constants.AnimPlayDuration,
-                    () => remaining--));
+                int remaining = cards.Length;
 
-                yield return new WaitForSeconds(Constants.AnimCascadeDelay);
+                for (int i = 0; i < cards.Length; i++)
+                {
+                    int idx = i;
+                    if (cards[idx] == null) { remaining--; continue; }
+                    StartCoroutine(AnimateMoveAndScale(
+                        cards[idx],
+                        cards[idx].anchoredPosition,
+                        targets[idx],
+                        cards[idx].localScale,
+                        cards[idx].localScale * 0.7f,
+                        Constants.AnimPlayDuration,
+                        () => remaining--));
+
+                    yield return new WaitForSeconds(Constants.AnimCascadeDelay);
+                }
+
+                // Attendre que toutes les animations finissent (avec timeout de sécurité)
+                float guard = 0f;
+                while (remaining > 0 && guard < 5f)
+                {
+                    guard += Time.deltaTime;
+                    yield return null;
+                }
             }
-
-            // Attendre que toutes les animations finissent
-            while (remaining > 0) yield return null;
-
-            IsAnimating = false;
-            onComplete?.Invoke();
+            finally
+            {
+                IsAnimating = false;
+                onComplete?.Invoke();
+            }
         }
 
         private IEnumerator AnimateScreenFlashCoroutine(Color color, float duration)

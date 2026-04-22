@@ -224,12 +224,16 @@ namespace LevelUp.UI
         }
 
         /// <summary>
-        /// Anime l'arrivée d'une carte sur la pile de défausse.
+        /// Anime l'arrivée d'une carte sur la pile de défausse. Tous les accès à rt/cg
+        /// sont gardés : la carte peut être détruite à tout moment (tour suivant,
+        /// nouveau round) sans que la coroutine ne crashe.
         /// </summary>
         private IEnumerator AnimateCardArrival(CardView card, PileSlot slot)
         {
+            if (card == null) yield break;
             RectTransform rt = card.RectTransform;
             CanvasGroup cg = card.GetComponent<CanvasGroup>();
+            if (rt == null) yield break;
 
             // Commence au-dessus avec un scale plus grand
             Vector2 targetPos = Vector2.zero;
@@ -247,6 +251,7 @@ namespace LevelUp.UI
 
             while (elapsed < duration)
             {
+                if (card == null || rt == null) yield break;
                 elapsed += Time.deltaTime;
                 float t = Mathf.Clamp01(elapsed / duration);
                 // Overshoot ease
@@ -262,12 +267,13 @@ namespace LevelUp.UI
                 yield return null;
             }
 
+            if (card == null || rt == null) yield break;
             rt.anchoredPosition = targetPos;
             rt.localScale = targetScale;
             if (cg != null) cg.alpha = 1f;
 
-            // Petit bounce final
-            if (_animController != null)
+            // Petit bounce final — uniquement si la carte est toujours là
+            if (_animController != null && rt != null && card != null)
             {
                 _animController.AnimatePulse(rt);
             }

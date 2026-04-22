@@ -19,6 +19,13 @@ namespace LevelUp.UI
         [SerializeField] private float _meldSpacing = 25f;
         [SerializeField] private float _cardInMeldSpacing = 30f;
         [SerializeField] private float _playerZoneSpacing = 30f;
+        // Marge gauche depuis le bord du TableContainer.
+        [SerializeField] private float _leftMargin = 40f;
+        // Largeur max occupée par les melds (0 = toute la largeur dispo).
+        // Utilisé pour laisser de la place à la pioche/défausse à droite.
+        [SerializeField] private float _maxContentWidth = 900f;
+        // Padding autour du rect d'un meld pour le hit-test (drop généreux).
+        [SerializeField] private float _meldHitPadding = 25f;
 
         private readonly Dictionary<int, List<MeldGroupView>> _playerMeldGroups = new();
 
@@ -191,12 +198,17 @@ namespace LevelUp.UI
         {
             if (_tableContainer == null) return;
 
-            float maxWidth = _tableContainer.rect.width;
-            if (maxWidth <= 0f) maxWidth = 680f; // fallback si le layout n'est pas encore résolu
+            float containerWidth = _tableContainer.rect.width;
+            if (containerWidth <= 0f) containerWidth = 1400f;
+
+            // Largeur effectivement utilisable pour les melds : container - marge gauche,
+            // capée par _maxContentWidth si > 0 pour laisser la pioche à droite.
+            float availableWidth = containerWidth - _leftMargin;
+            if (_maxContentWidth > 0f) availableWidth = Mathf.Min(availableWidth, _maxContentWidth);
 
             const float meldHeight = 135f;
 
-            // Collecte les melds en ligne dans l'ordre d'apparition (joueur par joueur)
+            // Collecte les melds en lignes (wrap quand la ligne dépasse availableWidth).
             List<List<MeldGroupView>> rows = new();
             List<MeldGroupView> currentRow = new();
             float currentRowWidth = 0f;
@@ -210,7 +222,7 @@ namespace LevelUp.UI
                         ? w
                         : currentRowWidth + _meldSpacing + w;
 
-                    if (currentRow.Count > 0 && widthIfAdded > maxWidth)
+                    if (currentRow.Count > 0 && widthIfAdded > availableWidth)
                     {
                         rows.Add(currentRow);
                         currentRow = new List<MeldGroupView>();
@@ -224,24 +236,26 @@ namespace LevelUp.UI
             }
             if (currentRow.Count > 0) rows.Add(currentRow);
 
-            // Positionne chaque ligne centrée, empilée verticalement
+            // Empile les lignes verticalement, centrées verticalement.
             float totalHeight = rows.Count * meldHeight + Mathf.Max(0, rows.Count - 1) * _playerZoneSpacing;
             float startY = totalHeight / 2f - meldHeight / 2f;
+
+            // Left-align : le bord gauche de la zone de layout est à -containerWidth/2 + _leftMargin
+            // dans l'espace local du TableContainer (pivot 0.5, 0.5).
+            float leftEdgeLocal = -containerWidth / 2f + _leftMargin;
 
             for (int r = 0; r < rows.Count; r++)
             {
                 List<MeldGroupView> row = rows[r];
-                float rowWidth = 0f;
-                foreach (MeldGroupView g in row) rowWidth += g.GetWidth();
-                rowWidth += Mathf.Max(0, row.Count - 1) * _meldSpacing;
-
-                float currentX = -rowWidth / 2f;
+                float currentX = leftEdgeLocal;
                 float y = startY - r * (meldHeight + _playerZoneSpacing);
 
                 foreach (MeldGroupView g in row)
                 {
                     RectTransform rt = g.GetComponent<RectTransform>();
-                    rt.anchoredPosition = new Vector2(currentX, y);
+                    float halfW = g.GetWidth() / 2f;
+                    // Pivot (0.5,0.5) par défaut : on place le centre à leftEdge + halfW
+                    rt.anchoredPosition = new Vector2(currentX + halfW, y);
                     currentX += g.GetWidth() + _meldSpacing;
                 }
             }
@@ -249,6 +263,7 @@ namespace LevelUp.UI
 
         /// <summary>
         /// Vérifie si une position écran correspond à une combinaison.
+        /// Hit-test avec padding (_meldHitPadding) pour un drop plus généreux.
         /// </summary>
         public bool GetMeldAtPosition(Vector2 screenPosition, out int ownerIndex, out int meldIndex)
         {
@@ -260,7 +275,7 @@ namespace LevelUp.UI
                 for (int i = 0; i < kvp.Value.Count; i++)
                 {
                     RectTransform rt = kvp.Value[i].GetComponent<RectTransform>();
-                    if (RectTransformUtility.RectangleContainsScreenPoint(rt, screenPosition))
+                    if (IsInsidePaddedRect(rt, screenPosition, _meldHitPadding))
                     {
                         ownerIndex = kvp.Key;
                         meldIndex = i;
@@ -270,6 +285,19 @@ namespace LevelUp.UI
             }
 
             return false;
+        }
+
+        /// <summary>
+        /// Hit-test d'un rect étendu par <paramref name="padding"/> dans son espace local.
+        /// </summary>
+        private static bool IsInsidePaddedRect(RectTransform rt, Vector2 screenPos, float padding)
+        {
+            if (rt == null) return false;
+            if (!RectTransformUtility.ScreenPointToLocalPointInRectangle(rt, screenPos, null, out Vector2 local))
+                return false;
+            Rect r = rt.rect;
+            return local.x >= r.xMin - padding && local.x <= r.xMax + padding
+                && local.y >= r.yMin - padding && local.y <= r.yMax + padding;
         }
 
         /// <summary>

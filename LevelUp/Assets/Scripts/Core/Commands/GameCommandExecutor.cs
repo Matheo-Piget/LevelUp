@@ -78,7 +78,7 @@ namespace LevelUp.Core
             });
 
             PublishHandChanged(player);
-            _turnManager.AdvanceToPhase(TurnPhase.LayDown);
+            _turnManager.AdvanceToPhase(NextPhaseAfterDraw(player));
 
             return CommandResult.OkWithCard(card.Value);
         }
@@ -104,9 +104,22 @@ namespace LevelUp.Core
             });
 
             PublishHandChanged(player);
-            _turnManager.AdvanceToPhase(TurnPhase.LayDown);
+            _turnManager.AdvanceToPhase(NextPhaseAfterDraw(player));
 
             return CommandResult.OkWithCard(card.Value);
+        }
+
+        /// <summary>
+        /// Phase à enchaîner après une pioche.
+        /// Si le joueur a déjà posé son niveau ce round, LayDown est inutile
+        /// (il ne peut pas reposer) → on saute directement à AddToMelds pour
+        /// lui permettre de compléter les combinaisons existantes.
+        /// </summary>
+        private static TurnPhase NextPhaseAfterDraw(PlayerModel player)
+        {
+            return player.HasLaidDownThisRound
+                ? TurnPhase.AddToMelds
+                : TurnPhase.LayDown;
         }
 
         // ────────────────────────────────────────────────────
