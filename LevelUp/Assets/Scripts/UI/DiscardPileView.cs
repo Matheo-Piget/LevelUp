@@ -144,7 +144,9 @@ namespace LevelUp.UI
             bgRt.anchoredPosition = Vector2.zero;
 
             Image bgImg = emptyBg.GetComponent<Image>();
-            bgImg.color = new Color(0.08f, 0.12f, 0.18f, 0.6f);
+            bgImg.sprite = UIFactory.RoundedSprite;
+            bgImg.type = Image.Type.Sliced;
+            bgImg.color = new Color(0.08f, 0.12f, 0.18f, 0.55f);
             bgImg.raycastTarget = true;
 
             // Badge joueur
@@ -160,6 +162,8 @@ namespace LevelUp.UI
             badgeRt.sizeDelta = new Vector2(70f, 20f);
 
             Image badgeImg = badgeObj.GetComponent<Image>();
+            badgeImg.sprite = UIFactory.RoundedSprite;
+            badgeImg.type = Image.Type.Sliced;
             badgeImg.color = badgeColor;
             badgeImg.raycastTarget = false;
 

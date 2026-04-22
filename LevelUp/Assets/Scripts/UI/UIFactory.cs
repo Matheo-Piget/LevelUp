@@ -75,22 +75,9 @@ namespace LevelUp.UI
             img.type = Image.Type.Sliced;
             img.color = color;
 
-            if (withBorder)
-            {
-                GameObject border = new("Border", typeof(RectTransform), typeof(Image));
-                border.transform.SetParent(panel.transform, false);
-                RectTransform brt = border.GetComponent<RectTransform>();
-                brt.anchorMin = Vector2.zero;
-                brt.anchorMax = Vector2.one;
-                brt.sizeDelta = new Vector2(4f, 4f);
-                brt.anchoredPosition = Vector2.zero;
-
-                Image bimg = border.GetComponent<Image>();
-                bimg.sprite = RingSprite;
-                bimg.type = Image.Type.Sliced;
-                bimg.color = borderColor ?? Constants.PanelBorder;
-                bimg.raycastTarget = false;
-            }
+            // withBorder / borderColor conservés pour compat API mais plus rendus :
+            // le design s'appuie désormais uniquement sur des surfaces arrondies sans contour.
+            _ = withBorder; _ = borderColor;
 
             return panel;
         }
@@ -167,19 +154,7 @@ namespace LevelUp.UI
             img.type = Image.Type.Sliced;
             img.color = Constants.PanelHighlight;
 
-            // Bordure lumineuse
-            GameObject border = new("Border", typeof(RectTransform), typeof(Image));
-            border.transform.SetParent(btnObj.transform, false);
-            RectTransform brt = border.GetComponent<RectTransform>();
-            brt.anchorMin = Vector2.zero;
-            brt.anchorMax = Vector2.one;
-            brt.sizeDelta = new Vector2(2f, 2f);
-            brt.anchoredPosition = Vector2.zero;
-            Image bimg = border.GetComponent<Image>();
-            bimg.sprite = RingSprite;
-            bimg.type = Image.Type.Sliced;
-            bimg.color = new Color(accent.r, accent.g, accent.b, 0.85f);
-            bimg.raycastTarget = false;
+            // Pas de bordure dure — la teinte + le glow au hover suffisent.
 
             // Glow extérieur (cache, apparaît au hover)
             GameObject glow = new("Glow", typeof(RectTransform), typeof(Image), typeof(CanvasGroup));
@@ -212,15 +187,13 @@ namespace LevelUp.UI
             EventTrigger trigger = btnObj.AddComponent<EventTrigger>();
             AddTrigger(trigger, EventTriggerType.PointerEnter, _ =>
             {
-                img.color = Color.Lerp(Constants.PanelHighlight, accent, 0.25f);
-                bimg.color = new Color(accent.r, accent.g, accent.b, 1f);
+                img.color = Color.Lerp(Constants.PanelHighlight, accent, 0.32f);
                 UITween.FadeTo(btnObj, gcg, 1f, 0.18f);
                 UITween.ScaleTo(btnObj, rt, Vector3.one * 1.04f, 0.16f);
             });
             AddTrigger(trigger, EventTriggerType.PointerExit, _ =>
             {
                 img.color = Constants.PanelHighlight;
-                bimg.color = new Color(accent.r, accent.g, accent.b, 0.85f);
                 UITween.FadeTo(btnObj, gcg, 0f, 0.25f);
                 UITween.ScaleTo(btnObj, rt, Vector3.one, 0.16f);
             });

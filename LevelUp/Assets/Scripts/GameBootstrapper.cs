@@ -168,10 +168,6 @@ namespace LevelUp.Core
                 // Fond animé avec blobs colorés qui dérivent
                 AnimatedBackground animBg = gameObject.AddComponent<AnimatedBackground>();
                 animBg.Setup(_mainCanvas);
-
-                // Glow coloré sur les bords selon le joueur actif
-                PlayerTurnGlow turnGlow = gameObject.AddComponent<PlayerTurnGlow>();
-                turnGlow.Setup(_mainCanvas);
             }
         }
 

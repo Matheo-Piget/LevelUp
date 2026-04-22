@@ -154,6 +154,8 @@ namespace LevelUp.UI
             rt.anchoredPosition = Vector2.zero;
 
             Image img = bgObj.GetComponent<Image>();
+            img.sprite = UIFactory.RoundedSprite;
+            img.type = Image.Type.Sliced;
             img.color = Constants.PanelBackground;
             img.raycastTarget = false;
         }
@@ -258,14 +260,7 @@ namespace LevelUp.UI
                 _                    => ""
             };
 
-            Color phaseColor = phase switch
-            {
-                TurnPhase.Draw       => Constants.CardBlue,
-                TurnPhase.LayDown    => Constants.CardGreen,
-                TurnPhase.AddToMelds => Constants.CardPurple,
-                TurnPhase.Discard    => Constants.CardOrange,
-                _                    => Constants.TextSecondary
-            };
+            Color phaseColor = Constants.GetPhaseColor(phase);
             _currentPhaseText.color = phaseColor;
 
             if (animated && _initialized)

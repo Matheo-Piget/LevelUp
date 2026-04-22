@@ -89,6 +89,8 @@ namespace LevelUp.UI
                 rt.anchoredPosition = new Vector2(-(i + 1) * 2f, (i + 1) * 2f);
 
                 Image img = stackObj.GetComponent<Image>();
+                img.sprite = UIFactory.RoundedSprite;
+                img.type = Image.Type.Sliced;
                 float darken = 1f - (i + 1) * 0.15f;
                 img.color = new Color(
                     Constants.CardBack.r * darken,

@@ -73,7 +73,9 @@ namespace LevelUp.UI
             rt.sizeDelta = new Vector2(500f, 76f);
 
             _bg = _root.GetComponent<Image>();
-            _bg.color = new Color(0.06f, 0.10f, 0.16f, 0.92f);
+            _bg.sprite = UIFactory.RoundedSprite;
+            _bg.type = Image.Type.Sliced;
+            _bg.color = new Color(0.06f, 0.10f, 0.16f, 0.88f);
             _bg.raycastTarget = false;
 
             _canvasGroup = _root.GetComponent<CanvasGroup>();

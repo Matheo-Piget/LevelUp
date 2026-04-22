@@ -418,17 +418,7 @@ namespace LevelUp.UI
             };
         }
 
-        private Color GetActionCardColor()
-        {
-            return _cardModel.Type switch
-            {
-                CardType.Skip      => new Color32(0xFF, 0x4D, 0x6A, 0xFF), // rose vif
-                CardType.Draw2     => new Color32(0xFF, 0x8C, 0x42, 0xFF), // orange vif
-                CardType.Wild      => new Color32(0x4D, 0xFF, 0x91, 0xFF), // vert néon
-                CardType.WildDraw2 => new Color32(0xBB, 0x6B, 0xFF, 0xFF), // violet néon
-                _                  => Color.white
-            };
-        }
+        private Color GetActionCardColor() => Constants.GetActionColor(_cardModel.Type);
 
         /// <summary>
         /// Retourne la carte face visible ou face cachée.

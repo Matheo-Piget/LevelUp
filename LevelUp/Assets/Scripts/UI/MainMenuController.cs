@@ -239,17 +239,17 @@ namespace LevelUp.UI
                 img.color = tinted;
                 img.raycastTarget = false;
 
-                // Bordure glow
-                GameObject ring = new("Ring", typeof(RectTransform), typeof(Image));
-                ring.transform.SetParent(card.transform, false);
-                RectTransform rRt = ring.GetComponent<RectTransform>();
+                // Halo coloré doux autour de la carte (remplace le contour dur)
+                GameObject halo = new("Halo", typeof(RectTransform), typeof(Image));
+                halo.transform.SetParent(card.transform, false);
+                halo.transform.SetAsFirstSibling();
+                RectTransform rRt = halo.GetComponent<RectTransform>();
                 rRt.anchorMin = Vector2.zero;
                 rRt.anchorMax = Vector2.one;
-                rRt.sizeDelta = new Vector2(2f, 2f);
-                Image rImg = ring.GetComponent<Image>();
-                rImg.sprite = UIFactory.RingSprite;
-                rImg.type = Image.Type.Sliced;
-                rImg.color = new Color(colors[i].r, colors[i].g, colors[i].b, 0.8f);
+                rRt.sizeDelta = new Vector2(40f, 40f);
+                Image rImg = halo.GetComponent<Image>();
+                rImg.sprite = UIFactory.SoftShadowSprite;
+                rImg.color = new Color(colors[i].r, colors[i].g, colors[i].b, 0.35f);
                 rImg.raycastTarget = false;
 
                 _floatingCards.Add(rt);

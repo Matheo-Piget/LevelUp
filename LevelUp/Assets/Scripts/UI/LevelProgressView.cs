@@ -154,21 +154,27 @@ namespace LevelUp.UI
                 stepLe.preferredHeight = _stepHeight;
 
                 Image stepImage = stepObj.GetComponent<Image>();
+                stepImage.sprite = UIFactory.RoundedSprite;
+                stepImage.type = Image.Type.Sliced;
                 stepImage.color = lvl == 1 ? _currentColor : _pendingColor;
                 steps.Add(stepImage);
 
-                // Bordure (enfant séparé pour le glow)
-                GameObject borderObj = new("Border", typeof(RectTransform), typeof(Image));
-                borderObj.transform.SetParent(stepObj.transform, false);
+                // Halo doux (SoftShadow) pour le niveau courant, au lieu d'un contour dur
+                GameObject glowObj = new("Glow", typeof(RectTransform), typeof(Image));
+                glowObj.transform.SetParent(stepObj.transform, false);
+                glowObj.transform.SetAsFirstSibling();
 
-                RectTransform borderRt = borderObj.GetComponent<RectTransform>();
-                borderRt.anchorMin = Vector2.zero;
-                borderRt.anchorMax = Vector2.one;
-                borderRt.sizeDelta = new Vector2(4f, 4f);
-                borderRt.anchoredPosition = Vector2.zero;
+                RectTransform glowRt = glowObj.GetComponent<RectTransform>();
+                glowRt.anchorMin = Vector2.zero;
+                glowRt.anchorMax = Vector2.one;
+                glowRt.sizeDelta = new Vector2(22f, 22f);
+                glowRt.anchoredPosition = Vector2.zero;
 
-                Image borderImg = borderObj.GetComponent<Image>();
-                borderImg.color = lvl == 1 ? _currentColor : Color.clear;
+                Image borderImg = glowObj.GetComponent<Image>();
+                borderImg.sprite = UIFactory.SoftShadowSprite;
+                borderImg.color = lvl == 1
+                    ? new Color(_currentColor.r, _currentColor.g, _currentColor.b, 0.55f)
+                    : Color.clear;
                 borderImg.raycastTarget = false;
                 stepBorders.Add(borderImg);
 
@@ -228,10 +234,12 @@ namespace LevelUp.UI
                     row.Steps[i].GetComponent<RectTransform>().localScale = Vector3.one;
                 }
 
-                // Bordure (glow sur current)
+                // Glow soft sur le niveau courant
                 if (i < row.StepBorders.Count)
                 {
-                    row.StepBorders[i].color = current ? _currentColor : Color.clear;
+                    row.StepBorders[i].color = current
+                        ? new Color(_currentColor.r, _currentColor.g, _currentColor.b, 0.55f)
+                        : Color.clear;
                 }
 
                 // Texte
