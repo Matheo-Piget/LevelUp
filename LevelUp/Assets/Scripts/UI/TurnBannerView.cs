@@ -72,7 +72,11 @@ namespace LevelUp.UI
 
         private void OnTurnStarted(TurnStartedEvent evt)
         {
-            ShowTurnBanner(evt.PlayerIndex, evt.PlayerLevel);
+            // Bannière cinématique désactivée : la pill "Tour de X" dans le HUD
+            // suffit comme indicateur de changement de tour. La bannière full-width
+            // créait un flash trop intrusif à chaque tour.
+            // (ShowTurnBanner reste exposée pour un trigger manuel éventuel.)
+            _ = evt;
         }
 
         private void OnAIThinking(AIThinkingEvent evt)
