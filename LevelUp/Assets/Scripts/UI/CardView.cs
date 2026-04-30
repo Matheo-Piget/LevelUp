@@ -277,6 +277,11 @@ namespace LevelUp.UI
             _radialSprite = Sprite.Create(tex, new Rect(0, 0, size, size), new Vector2(0.5f, 0.5f));
         }
 
+        /// <summary>
+        /// Sprite blanc avec alpha qui croît du haut vers le bas — utilisé en overlay
+        /// pour assombrir le bas de la carte (dégradé Tailwind 500 → 600). Le tint final
+        /// est appliqué via Image.color (couleur sombre cible).
+        /// </summary>
         private static Sprite CreateVerticalGradient()
         {
             const int width = 4;
@@ -290,13 +295,13 @@ namespace LevelUp.UI
             Color[] pixels = new Color[width * height];
             for (int y = 0; y < height; y++)
             {
-                float t = (float)y / (height - 1);
-                // Haut = blanc transparent, bas = noir transparent
-                float topAlpha = Mathf.Lerp(0.0f, 0.35f, Mathf.Pow(t, 1.5f));
-                float c = Mathf.Lerp(0.05f, 1f, t);
+                // y=0 → bas du sprite UI ; on veut alpha max ici (assombrissement bas).
+                float t = 1f - (float)y / (height - 1);
+                // Courbe douce, alpha 0 en haut, 1 en bas
+                float a = Mathf.Pow(t, 1.4f);
                 for (int x = 0; x < width; x++)
                 {
-                    pixels[y * width + x] = new Color(c, c, c, topAlpha);
+                    pixels[y * width + x] = new Color(1f, 1f, 1f, a);
                 }
             }
             tex.SetPixels(pixels);
@@ -321,7 +326,8 @@ namespace LevelUp.UI
         }
 
         /// <summary>
-        /// Met à jour tous les éléments visuels — style Balatro : fond sombre, accents vifs.
+        /// Style mockup : face saturée Tailwind 500, dégradé vertical vers Tailwind 600
+        /// en bas, texte en version très sombre de la couleur (Tailwind 950).
         /// </summary>
         private void UpdateVisuals()
         {
@@ -338,27 +344,31 @@ namespace LevelUp.UI
                 ? GetActionCardColor()
                 : Constants.GetColor(_cardModel.Color);
 
-            // Fond sombre avec un léger tint de la couleur de la carte
-            if (_background != null)
+            // Couleur dark (Tailwind 600) pour le bas du dégradé. Pour les actions on
+            // dérive de cardColor en l'assombrissant ~70%.
+            Color cardColorDark = _cardModel.IsAction
+                ? new Color(cardColor.r * 0.7f, cardColor.g * 0.7f, cardColor.b * 0.7f, 1f)
+                : Constants.GetDarkColor(_cardModel.Color);
+
+            // Face saturée Tailwind 500
+            if (_background != null) _background.color = cardColor;
+
+            // Bordure très discrète — un blanc translucide pour la finition
+            if (_border != null) _border.color = new Color(1f, 1f, 1f, 0.12f);
+
+            // Pas de bande accent dans le nouveau style
+            if (_colorBand != null) _colorBand.color = new Color(0f, 0f, 0f, 0f);
+
+            if (_shadowImage != null) _shadowImage.color = new Color(0f, 0f, 0f, 0.45f);
+
+            // Le gradient overlay devient un dégradé vertical vers cardColorDark
+            // (top transparent → bas cardColorDark à ~85% d'opacité).
+            if (_gradientOverlay != null)
             {
-                Color tinted = Color.Lerp(Constants.CardFaceColor, cardColor, 0.08f);
-                _background.color = tinted;
+                _gradientOverlay.color = new Color(
+                    cardColorDark.r, cardColorDark.g, cardColorDark.b, 0.85f);
             }
 
-            // Bordure colorée vive et un peu plus épaisse visuellement
-            if (_border != null) _border.color = cardColor;
-
-            // Bande de couleur sur le côté — plus lumineuse
-            if (_colorBand != null)
-            {
-                Color brightBand = Color.Lerp(cardColor, Color.white, 0.15f);
-                _colorBand.color = brightBand;
-            }
-
-            // Ombre plus prononcée
-            if (_shadowImage != null) _shadowImage.color = new Color(0f, 0f, 0f, 0.6f);
-
-            // Glow overlay prend la couleur de la carte
             if (_glowOverlay != null)
             {
                 Color glowColor = cardColor;
@@ -373,33 +383,35 @@ namespace LevelUp.UI
             }
 
             string displayText = GetDisplayText();
+            // Texte très sombre (Tailwind 950 ≈ cardColor × 0.15) pour contraste sur la couleur saturée.
+            Color darkText = new(cardColor.r * 0.18f, cardColor.g * 0.18f, cardColor.b * 0.18f, 1f);
 
-            // Texte principal — blanc pur, bien gros pour lisibilité instantanée
             if (_valueText != null)
             {
                 _valueText.text = displayText;
-                _valueText.color = Color.white;
+                _valueText.color = darkText;
                 _valueText.fontSize = _cardModel.IsAction ? 30f : 60f;
                 _valueText.fontStyle = FontStyles.Bold;
-                _valueText.outlineWidth = 0.15f;
-                _valueText.outlineColor = new Color32(0, 0, 0, 120);
+                _valueText.outlineWidth = 0f;
             }
 
-            // Coins — couleur de la carte, plus gros et lumineux
+            // Coins : même teinte dark, légèrement plus claire pour lisibilité
+            Color cornerText = new(darkText.r, darkText.g, darkText.b, 0.6f);
+
             if (_cornerValueTopLeft != null)
             {
                 _cornerValueTopLeft.text = displayText;
-                _cornerValueTopLeft.color = Color.Lerp(cardColor, Color.white, 0.25f);
+                _cornerValueTopLeft.color = cornerText;
                 _cornerValueTopLeft.fontStyle = FontStyles.Bold;
-                _cornerValueTopLeft.fontSize = 18f;
+                _cornerValueTopLeft.fontSize = 12f;
             }
 
             if (_cornerValueBottomRight != null)
             {
                 _cornerValueBottomRight.text = displayText;
-                _cornerValueBottomRight.color = Color.Lerp(cardColor, Color.white, 0.25f);
+                _cornerValueBottomRight.color = cornerText;
                 _cornerValueBottomRight.fontStyle = FontStyles.Bold;
-                _cornerValueBottomRight.fontSize = 18f;
+                _cornerValueBottomRight.fontSize = 12f;
             }
 
             UpdateSuitIcon();

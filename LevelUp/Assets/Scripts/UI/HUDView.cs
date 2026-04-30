@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.UI;
 using TMPro;
@@ -36,15 +37,27 @@ namespace LevelUp.UI
         private RectTransform? _statusRect;
         private bool _initialized;
 
-        private static readonly Color[] PlayerColors =
+        // Décor pill autour du texte "Tour de X" — flag d'idempotence pour ne pas
+        // recréer le décor à chaque restyle.
+        private bool _turnPillBuilt;
+        private bool _deckPillBuilt;
+
+        // Noms des joueurs (injectés par GameBootstrapper) — sert à afficher "Tour de Bot 2".
+        private List<string>? _playerNames;
+
+        // Le tour en cours utilise toujours l'indigo (couleur d'accent unique de l'UI).
+        // Les couleurs de cartes restent saturées car elles portent l'info de jeu,
+        // mais ici on parle de l'UI -> neutre + indigo.
+        private static readonly Color ActiveColor = Constants.AccentPrimary;
+
+        /// <summary>
+        /// Injecte les noms des joueurs pour afficher "Tour de Bot 2" plutôt que "PLAYER 2".
+        /// À appeler depuis GameBootstrapper après <see cref="GameManager.StartGame"/>.
+        /// </summary>
+        public void SetPlayerNames(List<string> names)
         {
-            Constants.CardBlue,
-            Constants.CardRed,
-            Constants.CardGreen,
-            Constants.CardPurple,
-            Constants.CardOrange,
-            Constants.CardYellow
-        };
+            _playerNames = names;
+        }
 
         private void OnEnable()
         {
@@ -84,38 +97,127 @@ namespace LevelUp.UI
         }
 
         /// <summary>
-        /// Applique le style Balatro aux éléments du HUD.
+        /// Style minimal et neutre : la topbar reste fine, lisible, pas de couleurs criardes.
+        /// Tailles inspirées de la spec : 12px pill, 13px body, 11px labels.
         /// </summary>
         private void StyleHUD()
         {
-            // Style du texte joueur
-            StyleText(_currentPlayerText, Constants.TextAccent, 22f, FontStyles.Bold);
+            // Joueur actif : "Tour de X" rendu en pill indigo (12px, indigo lighter)
+            StyleText(_currentPlayerText, Constants.AccentLighter, 12f, FontStyles.Bold);
+            BuildTurnPill(_currentPlayerText);
 
-            // Phase : plus lisible
-            StyleText(_currentPhaseText, Constants.TextSecondary, 16f, FontStyles.Normal);
+            // Phase : hint discret (TextSecondary, 13px). Plus de couleur verte criarde.
+            StyleText(_currentPhaseText, Constants.TextSecondary, 13f, FontStyles.Normal);
 
-            // Level : gros et doré, bien visible
-            StyleText(_currentLevelText, Constants.TextAccent, 22f, FontStyles.Bold);
+            // Niveau actif : texte primaire neutre, taille topbar (13px)
+            StyleText(_currentLevelText, Constants.TextSecondary, 13f, FontStyles.Normal);
 
-            // Deck count
-            StyleText(_deckCountText, Constants.TextPrimary, 18f, FontStyles.Bold);
+            // Deck count : chiffre lisible (12px, blanc) + pill subtile
+            StyleText(_deckCountText, Constants.TextPrimary, 12f, FontStyles.Bold);
+            BuildDeckPill(_deckCountText);
 
-            // Round
-            StyleText(_roundNumberText, Constants.TextSecondary, 16f, FontStyles.Normal);
+            // Round : label discret en majuscules avec letter-spacing
+            StyleText(_roundNumberText, Constants.TextMuted, 11f, FontStyles.Bold);
+            ApplyLetterSpacing(_roundNumberText, 6f);
 
             // Status message
-            StyleText(_statusText, Constants.TextPrimary, 24f, FontStyles.Bold);
+            StyleText(_statusText, Constants.TextPrimary, 22f, FontStyles.Bold);
 
             // Winner
-            StyleText(_winnerText, Constants.TextAccent, 36f, FontStyles.Bold);
-
-            // Ajouter des fonds arrondis derrière les groupes d'info
-            AddPanelBackground(_currentPlayerText, 10f, 6f);
-            AddPanelBackground(_currentLevelText, 10f, 6f);
-            AddPanelBackground(_deckCountText, 8f, 4f);
-            AddPanelBackground(_roundNumberText, 8f, 4f);
+            StyleText(_winnerText, Constants.AccentLight, 36f, FontStyles.Bold);
 
             _initialized = true;
+        }
+
+        /// <summary>
+        /// Habille _currentPlayerText d'une pill indigo (bg 0.12, border 0.35, dot 6px).
+        /// Idempotent : ne crée les éléments qu'une fois.
+        /// </summary>
+        private void BuildTurnPill(TextMeshProUGUI? text)
+        {
+            if (text == null || _turnPillBuilt) return;
+            _turnPillBuilt = true;
+
+            RectTransform rt = text.rectTransform;
+            // Padding interne : le bg et le border débordent du rect texte pour faire la pill.
+            const float padH = 14f;
+            const float padV = 6f;
+            const float dotRoom = 14f; // espace réservé à gauche pour le dot
+
+            // Background (Surface 1 indigo translucide)
+            CreatePillLayer(rt, "TurnPillBg", UIFactory.RoundedSprite,
+                Constants.PillIndigoBg, padH + dotRoom, padV);
+            // Border (Ring)
+            CreatePillLayer(rt, "TurnPillBorder", UIFactory.RingSprite,
+                Constants.PillIndigoBorder, padH + dotRoom, padV);
+
+            // Dot 6px à gauche du texte
+            GameObject dotObj = new("TurnPillDot",
+                typeof(RectTransform), typeof(Image));
+            dotObj.transform.SetParent(rt, false);
+            RectTransform drt = dotObj.GetComponent<RectTransform>();
+            drt.anchorMin = new Vector2(0f, 0.5f);
+            drt.anchorMax = new Vector2(0f, 0.5f);
+            drt.pivot = new Vector2(0f, 0.5f);
+            drt.sizeDelta = new Vector2(6f, 6f);
+            drt.anchoredPosition = new Vector2(-22f, 0f);
+            Image dotImg = dotObj.GetComponent<Image>();
+            dotImg.sprite = UIFactory.RoundedSprite;
+            dotImg.type = Image.Type.Sliced;
+            dotImg.color = Constants.AccentLight;
+            dotImg.raycastTarget = false;
+        }
+
+        private static void CreatePillLayer(RectTransform parent, string name,
+            Sprite sprite, Color color, float padHLeft, float padV)
+        {
+            GameObject obj = new(name, typeof(RectTransform), typeof(Image));
+            obj.transform.SetParent(parent, false);
+            obj.transform.SetAsFirstSibling();
+            RectTransform rt = obj.GetComponent<RectTransform>();
+            rt.anchorMin = Vector2.zero;
+            rt.anchorMax = Vector2.one;
+            // Le côté gauche reçoit dotRoom + pad (place pour le dot 6px),
+            // le côté droit garde un padding standard de 12px.
+            rt.offsetMin = new Vector2(-padHLeft, -padV);
+            rt.offsetMax = new Vector2(12f, padV);
+
+            Image img = obj.GetComponent<Image>();
+            img.sprite = sprite;
+            img.type = Image.Type.Sliced;
+            img.color = color;
+            img.raycastTarget = false;
+        }
+
+        /// <summary>
+        /// Pill discrète autour du compteur de pioche.
+        /// </summary>
+        private void BuildDeckPill(TextMeshProUGUI? text)
+        {
+            if (text == null || _deckPillBuilt) return;
+            _deckPillBuilt = true;
+
+            RectTransform rt = text.rectTransform;
+            GameObject bgObj = new("DeckPillBg",
+                typeof(RectTransform), typeof(Image));
+            bgObj.transform.SetParent(rt, false);
+            bgObj.transform.SetAsFirstSibling();
+            RectTransform bgRt = bgObj.GetComponent<RectTransform>();
+            bgRt.anchorMin = Vector2.zero;
+            bgRt.anchorMax = Vector2.one;
+            bgRt.offsetMin = new Vector2(-50f, -6f);
+            bgRt.offsetMax = new Vector2(10f, 6f);
+            Image bgImg = bgObj.GetComponent<Image>();
+            bgImg.sprite = UIFactory.RoundedSprite;
+            bgImg.type = Image.Type.Sliced;
+            bgImg.color = Constants.GlassTint;
+            bgImg.raycastTarget = false;
+        }
+
+        private static void ApplyLetterSpacing(TextMeshProUGUI? text, float spacing)
+        {
+            if (text == null) return;
+            text.characterSpacing = spacing;
         }
 
         /// <summary>
@@ -127,37 +229,6 @@ namespace LevelUp.UI
             text.color = color;
             text.fontSize = size;
             text.fontStyle = style;
-        }
-
-        /// <summary>
-        /// Ajoute un panneau de fond semi-transparent arrondi derrière un texte.
-        /// </summary>
-        private static void AddPanelBackground(TextMeshProUGUI? text, float paddingH, float paddingV)
-        {
-            if (text == null) return;
-
-            Transform parent = text.transform.parent;
-            if (parent == null) return;
-
-            // Vérifier si un background existe déjà
-            Transform? existingBg = parent.Find("PanelBg_" + text.name);
-            if (existingBg != null) return;
-
-            GameObject bgObj = new("PanelBg_" + text.name, typeof(RectTransform), typeof(Image));
-            bgObj.transform.SetParent(text.transform, false);
-            bgObj.transform.SetAsFirstSibling();
-
-            RectTransform rt = bgObj.GetComponent<RectTransform>();
-            rt.anchorMin = Vector2.zero;
-            rt.anchorMax = Vector2.one;
-            rt.sizeDelta = new Vector2(paddingH * 2f, paddingV * 2f);
-            rt.anchoredPosition = Vector2.zero;
-
-            Image img = bgObj.GetComponent<Image>();
-            img.sprite = UIFactory.RoundedSprite;
-            img.type = Image.Type.Sliced;
-            img.color = Constants.PanelBackground;
-            img.raycastTarget = false;
         }
 
         private void Update()
@@ -211,31 +282,32 @@ namespace LevelUp.UI
         {
             if (_currentPlayerText != null)
             {
-                _currentPlayerText.text = $"PLAYER {evt.PlayerIndex + 1}";
-                Color playerColor = PlayerColors[evt.PlayerIndex % PlayerColors.Length];
+                string playerName = ResolvePlayerName(evt.PlayerIndex);
+                _currentPlayerText.text = $"Tour de {playerName}";
+                _currentPlayerText.color = Constants.AccentLighter;
 
+                // Pulse de la pill au changement de tour : pop subtil, pas de flash de couleur.
                 if (_initialized)
                 {
-                    // Flash blanc → couleur joueur
-                    _currentPlayerText.color = Color.white;
-                    UITween.ColorTo(
-                        _currentPlayerText.gameObject, _currentPlayerText, playerColor, 0.4f);
-
-                    // Scale pop
                     RectTransform rt = _currentPlayerText.GetComponent<RectTransform>();
                     if (rt != null)
                     {
-                        rt.localScale = Vector3.one * 1.3f;
-                        UITween.ScaleTo(_currentPlayerText.gameObject, rt, Vector3.one, 0.35f);
+                        rt.localScale = Vector3.one * 1.05f;
+                        UITween.ScaleTo(_currentPlayerText.gameObject, rt, Vector3.one, 0.25f);
                     }
-                }
-                else
-                {
-                    _currentPlayerText.color = playerColor;
                 }
             }
             UpdateCurrentLevel(evt.PlayerLevel);
             UpdatePhaseText(evt.Phase);
+        }
+
+        private string ResolvePlayerName(int playerIndex)
+        {
+            if (_playerNames != null && playerIndex >= 0 && playerIndex < _playerNames.Count)
+            {
+                return _playerNames[playerIndex];
+            }
+            return $"Player {playerIndex + 1}";
         }
 
         private void OnPhaseChanged(TurnPhaseChangedEvent evt)
@@ -244,39 +316,34 @@ namespace LevelUp.UI
         }
 
         /// <summary>
-        /// Texte de phase court et punchy style Balatro.
-        /// Si animated=true, le texte fait un pop-in et le badge pulse.
+        /// Hint discret de phase : phrase courte, gris secondaire, puce indigo en préfixe.
+        /// Plus de couleurs criardes par phase — l'info portée est minimale et neutre.
         /// </summary>
         private void UpdatePhaseText(TurnPhase phase, bool animated = false)
         {
             if (_currentPhaseText == null) return;
 
-            _currentPhaseText.text = phase switch
+            string hint = phase switch
             {
-                TurnPhase.Draw       => "PIOCHE - Cliquez pioche ou defausse",
-                TurnPhase.LayDown    => "POSE - Selectionnez puis cliquez table",
-                TurnPhase.AddToMelds => "AJOUTE - Glissez sur combinaison",
-                TurnPhase.Discard    => "DEFAUSSE - Cliquez une carte",
+                TurnPhase.Draw       => "Pioche ou defausse pour commencer",
+                TurnPhase.LayDown    => "Selectionne tes cartes puis clique la table",
+                TurnPhase.AddToMelds => "Glisse une carte sur une combinaison",
+                TurnPhase.Discard    => "Clique une carte a defausser",
                 _                    => ""
             };
 
-            Color phaseColor = Constants.GetPhaseColor(phase);
-            _currentPhaseText.color = phaseColor;
+            // Puce indigo (●) + hint en TextSecondary — tout sobre, lisible.
+            _currentPhaseText.text = $"<color=#818CF8>●</color>  {hint}";
+            _currentPhaseText.color = Constants.TextSecondary;
 
             if (animated && _initialized)
             {
                 RectTransform phaseRt = _currentPhaseText.GetComponent<RectTransform>();
                 if (phaseRt != null)
                 {
-                    // Pop-in via UITween
                     UITween.ScaleTo(
-                        _currentPhaseText.gameObject, phaseRt, Vector3.one, 0.3f);
-                    phaseRt.localScale = Vector3.one * 0.7f;
-
-                    // Flash de couleur blanche puis retour à la phase color
-                    _currentPhaseText.color = Color.white;
-                    UITween.ColorTo(
-                        _currentPhaseText.gameObject, _currentPhaseText, phaseColor, 0.4f);
+                        _currentPhaseText.gameObject, phaseRt, Vector3.one, 0.25f);
+                    phaseRt.localScale = Vector3.one * 0.95f;
                 }
             }
         }
@@ -285,7 +352,9 @@ namespace LevelUp.UI
         {
             if (_deckCountText != null)
             {
-                _deckCountText.text = $"{evt.CardsRemaining}";
+                // "Pioche  42" — label muted + chiffre en blanc pour la hiérarchie.
+                _deckCountText.text =
+                    $"<color=#9CA3AF><size=11>Pioche</size></color>  {evt.CardsRemaining}";
             }
         }
 
@@ -293,7 +362,8 @@ namespace LevelUp.UI
         {
             if (_roundNumberText != null)
             {
-                _roundNumberText.text = $"ROUND {evt.RoundNumber}";
+                _roundNumberText.text = $"ROUND  {evt.RoundNumber}";
+                _roundNumberText.color = Constants.TextMuted;
             }
             ShowStatus($"ROUND {evt.RoundNumber}");
         }
@@ -365,15 +435,17 @@ namespace LevelUp.UI
             if (_currentLevelText == null) return;
 
             string req = DescribeLevelRequirement(level);
-            _currentLevelText.text = $"NIVEAU {level}  —  {req}";
+            // "Niveau X" en blanc, l'objectif en gris secondaire pour la hiérarchie.
+            _currentLevelText.text =
+                $"NIVEAU {level}  <color=#9CA3AF>· {req}</color>";
 
             if (_initialized)
             {
                 RectTransform rt = _currentLevelText.GetComponent<RectTransform>();
                 if (rt != null)
                 {
-                    rt.localScale = Vector3.one * 1.2f;
-                    UITween.ScaleTo(_currentLevelText.gameObject, rt, Vector3.one, 0.3f);
+                    rt.localScale = Vector3.one * 1.1f;
+                    UITween.ScaleTo(_currentLevelText.gameObject, rt, Vector3.one, 0.25f);
                 }
             }
         }

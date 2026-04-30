@@ -17,6 +17,8 @@ namespace LevelUp.UI
         private static Sprite? _roundedSprite;
         private static Sprite? _softShadowSprite;
         private static Sprite? _ringSprite;
+        private static Sprite? _smallPillSprite;
+        private static Sprite? _circleSprite;
 
         /// <summary>
         /// Sprite carré aux coins arrondis (procédural, caché pour réutilisation).
@@ -51,6 +53,32 @@ namespace LevelUp.UI
             {
                 if (_ringSprite == null) _ringSprite = CreateRingSprite(96, 18);
                 return _ringSprite;
+            }
+        }
+
+        /// <summary>
+        /// Sprite avec petits coins arrondis (radius 2) — pour barres fines / segments
+        /// où le RoundedSprite (radius 18) donnerait des ovales écrasés une fois slicé.
+        /// </summary>
+        public static Sprite SmallPillSprite
+        {
+            get
+            {
+                if (_smallPillSprite == null) _smallPillSprite = CreateRoundedSprite(16, 2);
+                return _smallPillSprite;
+            }
+        }
+
+        /// <summary>
+        /// Sprite parfaitement rond (radius = size/2) — pour les avatars cercle parfait,
+        /// les dots de status, etc.
+        /// </summary>
+        public static Sprite CircleSprite
+        {
+            get
+            {
+                if (_circleSprite == null) _circleSprite = CreateRoundedSprite(64, 32);
+                return _circleSprite;
             }
         }
 
@@ -105,6 +133,104 @@ namespace LevelUp.UI
             simg.raycastTarget = false;
         }
 
+        /// <summary>
+        /// Ajoute un anneau (border) fin par-dessus un élément. Pratique pour
+        /// les bordures translucides sans devoir gérer une second Image enfant.
+        /// </summary>
+        public static Image AddOutline(RectTransform target, Color color)
+        {
+            GameObject ring = new("Outline", typeof(RectTransform), typeof(Image));
+            ring.transform.SetParent(target, false);
+            ring.transform.SetAsLastSibling();
+
+            RectTransform rt = ring.GetComponent<RectTransform>();
+            rt.anchorMin = Vector2.zero;
+            rt.anchorMax = Vector2.one;
+            rt.sizeDelta = Vector2.zero;
+            rt.anchoredPosition = Vector2.zero;
+
+            Image img = ring.GetComponent<Image>();
+            img.sprite = RingSprite;
+            img.type = Image.Type.Sliced;
+            img.color = color;
+            img.raycastTarget = false;
+            return img;
+        }
+
+        /// <summary>
+        /// Crée une "pill" (badge arrondi) avec bg + border translucides + dot + texte,
+        /// comme le badge "● Tour de Bot 2" du HUD.
+        /// </summary>
+        /// <param name="parent">Parent RectTransform.</param>
+        /// <param name="name">Nom de l'objet.</param>
+        /// <param name="text">Texte affiché à droite du dot.</param>
+        /// <param name="bgColor">Couleur de fond translucide.</param>
+        /// <param name="borderColor">Couleur du contour translucide.</param>
+        /// <param name="dotColor">Couleur de la pastille indicative.</param>
+        /// <param name="textColor">Couleur du texte.</param>
+        /// <returns>Le GameObject root de la pill (pour positionner via RectTransform).</returns>
+        public static GameObject CreatePill(Transform parent, string name, string text,
+            Color bgColor, Color borderColor, Color dotColor, Color textColor)
+        {
+            GameObject pill = new(name,
+                typeof(RectTransform), typeof(Image), typeof(HorizontalLayoutGroup),
+                typeof(ContentSizeFitter));
+            pill.transform.SetParent(parent, false);
+
+            Image bg = pill.GetComponent<Image>();
+            bg.sprite = RoundedSprite;
+            bg.type = Image.Type.Sliced;
+            bg.color = bgColor;
+            bg.raycastTarget = false;
+
+            HorizontalLayoutGroup layout = pill.GetComponent<HorizontalLayoutGroup>();
+            layout.spacing = 8f;
+            layout.padding = new RectOffset(14, 14, 6, 6);
+            layout.childAlignment = TextAnchor.MiddleLeft;
+            layout.childControlWidth = true;
+            layout.childControlHeight = true;
+            layout.childForceExpandWidth = false;
+            layout.childForceExpandHeight = false;
+
+            ContentSizeFitter fitter = pill.GetComponent<ContentSizeFitter>();
+            fitter.horizontalFit = ContentSizeFitter.FitMode.PreferredSize;
+            fitter.verticalFit = ContentSizeFitter.FitMode.PreferredSize;
+
+            // Bordure translucide
+            AddOutline(pill.GetComponent<RectTransform>(), borderColor);
+
+            // Dot 6px (avec petit halo simulé par scale)
+            GameObject dotObj = new("Dot",
+                typeof(RectTransform), typeof(Image), typeof(LayoutElement));
+            dotObj.transform.SetParent(pill.transform, false);
+
+            LayoutElement dotLe = dotObj.GetComponent<LayoutElement>();
+            dotLe.preferredWidth = 8f;
+            dotLe.preferredHeight = 8f;
+
+            Image dotImg = dotObj.GetComponent<Image>();
+            dotImg.sprite = RoundedSprite;
+            dotImg.type = Image.Type.Sliced;
+            dotImg.color = dotColor;
+            dotImg.raycastTarget = false;
+
+            // Texte
+            GameObject textObj = new("Text",
+                typeof(RectTransform), typeof(TextMeshProUGUI), typeof(LayoutElement));
+            textObj.transform.SetParent(pill.transform, false);
+
+            TextMeshProUGUI tmp = textObj.GetComponent<TextMeshProUGUI>();
+            tmp.text = text;
+            tmp.fontSize = 12f;
+            tmp.color = textColor;
+            tmp.alignment = TextAlignmentOptions.MidlineLeft;
+            tmp.fontStyle = FontStyles.Bold;
+            tmp.raycastTarget = false;
+            tmp.enableWordWrapping = false;
+
+            return pill;
+        }
+
         // ═══════════════════════════════════════════════════════════
         //  TEXT
         // ═══════════════════════════════════════════════════════════
@@ -141,7 +267,8 @@ namespace LevelUp.UI
         public static Button CreateButton(Transform parent, string name, string label,
             Vector2 size, Action onClick, Color? accentColor = null)
         {
-            Color accent = accentColor ?? Constants.CardBlue;
+            // Une seule couleur d'accent dans toute l'UI : indigo.
+            Color accent = accentColor ?? Constants.AccentPrimary;
 
             GameObject btnObj = new(name, typeof(RectTransform), typeof(Image), typeof(Button), typeof(CanvasGroup));
             btnObj.transform.SetParent(parent, false);
@@ -227,7 +354,7 @@ namespace LevelUp.UI
             float min, float max, float current, float width, Action<float> onValueChanged,
             Color? accentColor = null)
         {
-            Color accent = accentColor ?? Constants.CardGreen;
+            Color accent = accentColor ?? Constants.AccentPrimary;
 
             GameObject container = new(name, typeof(RectTransform));
             container.transform.SetParent(parent, false);
@@ -276,7 +403,7 @@ namespace LevelUp.UI
             Image bgImg = bg.GetComponent<Image>();
             bgImg.sprite = RoundedSprite;
             bgImg.type = Image.Type.Sliced;
-            bgImg.color = Constants.PanelBorder;
+            bgImg.color = Constants.SurfaceC;
 
             // Fill
             GameObject fillArea = new("FillArea", typeof(RectTransform));
@@ -341,7 +468,7 @@ namespace LevelUp.UI
         public static GameObject CreateLabeledToggle(Transform parent, string name, string label,
             bool current, float width, Action<bool> onValueChanged, Color? accentColor = null)
         {
-            Color accent = accentColor ?? Constants.CardPurple;
+            Color accent = accentColor ?? Constants.AccentPrimary;
 
             GameObject container = new(name, typeof(RectTransform));
             container.transform.SetParent(parent, false);
@@ -370,7 +497,7 @@ namespace LevelUp.UI
             Image bg = swObj.GetComponent<Image>();
             bg.sprite = RoundedSprite;
             bg.type = Image.Type.Sliced;
-            bg.color = current ? accent : Constants.PanelBorder;
+            bg.color = current ? accent : Constants.SurfaceC;
 
             // Knob
             GameObject knob = new("Knob", typeof(RectTransform), typeof(Image));
@@ -392,7 +519,7 @@ namespace LevelUp.UI
             toggle.targetGraphic = bg;
             toggle.onValueChanged.AddListener(v =>
             {
-                bg.color = v ? accent : Constants.PanelBorder;
+                bg.color = v ? accent : Constants.SurfaceC;
                 UITween.MoveTo(swObj, krt, new Vector2(v ? 46f : 14f, 0f), 0.18f);
                 onValueChanged?.Invoke(v);
             });

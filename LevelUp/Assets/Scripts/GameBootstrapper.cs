@@ -225,6 +225,12 @@ namespace LevelUp.Core
                 _levelProgressView.Initialize(_gameManager.Players.Count, names);
             }
 
+            // Le HUD a besoin des noms pour afficher "Tour de Bot 2" plutôt que "Player N".
+            if (_hudView != null)
+            {
+                _hudView.SetPlayerNames(names);
+            }
+
             // Initialiser les piles de défausse (DeckManager pour peek après pioche)
             if (_discardPileView != null)
             {

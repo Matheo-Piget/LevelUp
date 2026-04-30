@@ -8,28 +8,35 @@ using LevelUp.Utils;
 namespace LevelUp.UI
 {
   /// <summary>
-  /// Affiche les combinaisons posées sur la table style Balatro :
-  /// fond arrondi semi-transparent, badge joueur coloré, overlap compact.
+  /// Affiche les combinaisons posées sur la table.
+  ///
+  /// Direction visuelle : minimaliste, beaucoup d'air. Chaque meld c'est :
+  ///   - un label discret au-dessus ("SUITE", "BRELAN", "FLUSH")
+  ///   - les cartes alignées, légèrement chevauchées
+  ///   - un fin liseré coloré (2px) en dessous → identité du joueur poseur
+  ///
+  /// Pas de fond plein, pas de bordure, pas de footer : le groupement est
+  /// purement spatial. L'œil voit "trois cartes ensemble + un trait coloré
+  /// en dessous" et comprend immédiatement.
   /// </summary>
   public class TableView : MonoBehaviour
   {
     [SerializeField] private RectTransform? _tableContainer;
     [SerializeField] private GameObject? _cardPrefab;
     [SerializeField] private GameObject? _meldGroupPrefab;
-    [SerializeField] private float _meldSpacing = 28f;
-    [SerializeField] private float _cardInMeldSpacing = 52f;
-    [SerializeField] private float _playerZoneSpacing = 32f;
-    // Marge gauche depuis le bord du TableContainer.
+    // Espacement BETWEEN melds : large pour bien séparer les groupes.
+    [SerializeField] private float _meldSpacing = 48f;
+    // Espacement DANS un meld : plus serré pour que les cartes "tiennent ensemble".
+    [SerializeField] private float _cardInMeldSpacing = 38f;
+    [SerializeField] private float _playerZoneSpacing = 40f;
     [SerializeField] private float _leftMargin = 40f;
-    // Largeur max occupée par les melds (0 = toute la largeur dispo).
-    // Utilisé pour laisser de la place à la pioche/défausse à droite.
     [SerializeField] private float _maxContentWidth = 900f;
-    // Padding autour du rect d'un meld pour le hit-test (drop généreux).
     [SerializeField] private float _meldHitPadding = 25f;
 
     private readonly Dictionary<int, List<MeldGroupView>> _playerMeldGroups = new();
 
-    // Couleurs de badge par joueur
+    // Couleurs joueur — utilisées UNIQUEMENT pour le liseré 2px sous chaque meld.
+    // Cohérent avec la sidebar (avatar) et la défausse (liseré du dessus).
     private static readonly Color[] PlayerColors =
     {
             Constants.CardBlue,
@@ -40,7 +47,6 @@ namespace LevelUp.UI
             Constants.CardYellow
         };
 
-    /// <summary>Événement quand on drop une carte sur une combinaison.</summary>
     public event System.Action<CardModel, int, int>? OnCardDroppedOnMeld;
 
     private void OnEnable()
@@ -91,13 +97,13 @@ namespace LevelUp.UI
     }
 
     /// <summary>
-    /// Crée un groupe de combinaison avec fond arrondi et badge joueur.
+    /// Crée un groupe de combinaison entièrement transparent : pas de fond,
+    /// pas de bordure. Le groupement est purement spatial.
     /// </summary>
     private void CreateMeldGroup(int playerIndex, List<CardModel> cards)
     {
       if (_tableContainer == null || _cardPrefab == null) return;
 
-      // Conteneur principal du meld avec fond
       GameObject groupObj;
       if (_meldGroupPrefab != null)
       {
@@ -105,93 +111,117 @@ namespace LevelUp.UI
       }
       else
       {
-        groupObj = new GameObject($"Meld_P{playerIndex}",
-            typeof(RectTransform), typeof(Image));
+        groupObj = new GameObject($"Meld_P{playerIndex}", typeof(RectTransform));
         groupObj.transform.SetParent(_tableContainer, false);
       }
 
-      // Fond doux arrondi, teinté subtilement par la couleur du joueur
-      Image? bgImage = groupObj.GetComponent<Image>();
-      if (bgImage == null) bgImage = groupObj.AddComponent<Image>();
-      bgImage.sprite = UIFactory.RoundedSprite;
-      bgImage.type = Image.Type.Sliced;
+      // Fond très léger pour le hover state. Invisible par défaut, visible
+      // seulement quand on drag une carte au-dessus du meld (signal de drop).
+      // On le garde séparé des cartes pour pouvoir l'animer indépendamment.
+      Image? hoverBg = groupObj.GetComponent<Image>();
+      if (hoverBg == null) hoverBg = groupObj.AddComponent<Image>();
+      hoverBg.sprite = UIFactory.RoundedSprite;
+      hoverBg.type = Image.Type.Sliced;
+      hoverBg.color = new Color(0f, 0f, 0f, 0f); // transparent par défaut
+      hoverBg.raycastTarget = true;
 
-      Color badgeColor = playerIndex < PlayerColors.Length
+      Color playerColor = playerIndex < PlayerColors.Length
           ? PlayerColors[playerIndex]
           : Constants.TextPrimary;
 
-      // Teinte très légère de la couleur joueur mélangée au surface sombre
-      Color surface = Constants.SurfaceA;
-      bgImage.color = new Color(
-          Mathf.Lerp(surface.r, badgeColor.r, 0.12f),
-          Mathf.Lerp(surface.g, badgeColor.g, 0.12f),
-          Mathf.Lerp(surface.b, badgeColor.b, 0.12f),
-          0.72f);
-      bgImage.raycastTarget = true;
+      MeldType meldType = ClassifyMeld(cards);
 
-      // Badge joueur discret en haut-gauche
-      CreatePlayerBadge(groupObj.transform, playerIndex, badgeColor);
+      // Header au-dessus : juste "SUITE" / "BRELAN" / "FLUSH" en typo discrète.
+      // Le compte est évident visuellement, pas besoin de "· 3 CARTES".
+      CreateMeldHeader(groupObj.transform, meldType);
+
+      // Liseré 2px en dessous : identité joueur.
+      Image accentBar = CreateAccentBar(groupObj.transform, playerColor);
 
       MeldGroupView groupView = groupObj.GetComponent<MeldGroupView>();
       if (groupView == null) groupView = groupObj.AddComponent<MeldGroupView>();
-      groupView.Initialize(playerIndex, _cardInMeldSpacing);
+      groupView.Initialize(playerIndex, _cardInMeldSpacing, meldType, playerColor,
+          hoverBg, accentBar);
 
       foreach (CardModel card in cards)
       {
         groupView.TryAddCard(card, _cardPrefab);
       }
 
-      // Ajuster la taille du fond
       groupView.UpdateBackgroundSize();
-
       _playerMeldGroups[playerIndex].Add(groupView);
     }
 
-    /// <summary>
-    /// Crée un petit badge coloré avec le nom du joueur.
-    /// </summary>
-    private static void CreatePlayerBadge(Transform parent, int playerIndex, Color color)
+    private static MeldType ClassifyMeld(List<CardModel> cards)
     {
-      // Pastille ronde discrète flottant au-dessus du meld
-      GameObject badgeObj = new("PlayerBadge",
-          typeof(RectTransform), typeof(Image));
-      badgeObj.transform.SetParent(parent, false);
+      if (CardExtensions.IsValidRun(cards)) return MeldType.Run;
+      if (CardExtensions.IsValidSet(cards)) return MeldType.Set;
+      if (CardExtensions.IsValidFlush(cards)) return MeldType.Flush;
+      return MeldType.Run;
+    }
 
-      RectTransform badgeRt = badgeObj.GetComponent<RectTransform>();
-      badgeRt.anchorMin = new Vector2(0, 1);
-      badgeRt.anchorMax = new Vector2(0, 1);
-      badgeRt.pivot = new Vector2(0, 1);
-      badgeRt.anchoredPosition = new Vector2(8f, 12f);
-      badgeRt.sizeDelta = new Vector2(22f, 22f);
+    private static string MeldTypeLabel(MeldType type) => type switch
+    {
+      MeldType.Run => "SUITE",
+      MeldType.Set => "BRELAN",
+      MeldType.Flush => "FLUSH",
+      _ => "MELD"
+    };
 
-      Image badgeImg = badgeObj.GetComponent<Image>();
-      badgeImg.sprite = UIFactory.RoundedSprite;
-      badgeImg.type = Image.Type.Sliced;
-      badgeImg.color = color;
-      badgeImg.raycastTarget = false;
-
-      GameObject textObj = new("BadgeText",
+    /// <summary>
+    /// Header au-dessus du meld : juste le type, en label minuscule
+    /// (10px, tracking 6px, gris muet). On laisse l'œil compter les cartes.
+    /// </summary>
+    private static void CreateMeldHeader(Transform parent, MeldType type)
+    {
+      GameObject lblObj = new("Header",
           typeof(RectTransform), typeof(TextMeshProUGUI));
-      textObj.transform.SetParent(badgeObj.transform, false);
+      lblObj.transform.SetParent(parent, false);
 
-      RectTransform textRt = textObj.GetComponent<RectTransform>();
-      textRt.anchorMin = Vector2.zero;
-      textRt.anchorMax = Vector2.one;
-      textRt.sizeDelta = Vector2.zero;
+      RectTransform lrt = lblObj.GetComponent<RectTransform>();
+      lrt.anchorMin = new Vector2(0f, 1f);
+      lrt.anchorMax = new Vector2(1f, 1f);
+      lrt.pivot = new Vector2(0.5f, 1f);
+      lrt.sizeDelta = new Vector2(0f, 14f);
+      lrt.anchoredPosition = new Vector2(0f, -2f);
 
-      TextMeshProUGUI text = textObj.GetComponent<TextMeshProUGUI>();
-      text.text = $"{playerIndex + 1}";
-      text.fontSize = 13;
-      text.color = Constants.BackgroundDark;
-      text.alignment = TextAlignmentOptions.Center;
-      text.fontStyle = FontStyles.Bold;
-      text.raycastTarget = false;
+      TextMeshProUGUI lbl = lblObj.GetComponent<TextMeshProUGUI>();
+      lbl.text = MeldTypeLabel(type);
+      lbl.fontSize = 10f;
+      lbl.characterSpacing = 6f;
+      lbl.color = Constants.TextMuted;
+      lbl.alignment = TextAlignmentOptions.Center;
+      lbl.fontStyle = FontStyles.Bold;
+      lbl.raycastTarget = false;
     }
 
     /// <summary>
-    /// Repositionne tous les groupes sur la table en flow horizontal avec wrap.
-    /// Utilise toute la largeur disponible avant de descendre à une nouvelle ligne.
+    /// Liseré 2px sous le meld, dans la couleur du poseur. Centré horizontalement,
+    /// largeur = ~70% du meld pour laisser de l'air sur les côtés.
     /// </summary>
+    private static Image CreateAccentBar(Transform parent, Color playerColor)
+    {
+      GameObject barObj = new("AccentBar",
+          typeof(RectTransform), typeof(Image));
+      barObj.transform.SetParent(parent, false);
+
+      RectTransform brt = barObj.GetComponent<RectTransform>();
+      brt.anchorMin = new Vector2(0.5f, 0f);
+      brt.anchorMax = new Vector2(0.5f, 0f);
+      brt.pivot = new Vector2(0.5f, 0f);
+      // sizeDelta.x sera ajusté dynamiquement par MeldGroupView selon le nombre de cartes
+      brt.sizeDelta = new Vector2(60f, 2f);
+      brt.anchoredPosition = new Vector2(0f, 4f);
+
+      Image img = barObj.GetComponent<Image>();
+      img.sprite = UIFactory.RoundedSprite;
+      img.type = Image.Type.Sliced;
+      img.color = playerColor;
+      img.raycastTarget = false;
+
+      return img;
+    }
+
     private void LayoutTable()
     {
       if (_tableContainer == null) return;
@@ -199,14 +229,11 @@ namespace LevelUp.UI
       float containerWidth = _tableContainer.rect.width;
       if (containerWidth <= 0f) containerWidth = 1400f;
 
-      // Largeur effectivement utilisable pour les melds : container - marge gauche,
-      // capée par _maxContentWidth si > 0 pour laisser la pioche à droite.
       float availableWidth = containerWidth - _leftMargin;
       if (_maxContentWidth > 0f) availableWidth = Mathf.Min(availableWidth, _maxContentWidth);
 
-      const float meldHeight = 150f;
+      const float meldHeight = 180f;
 
-      // Collecte les melds en lignes (wrap quand la ligne dépasse availableWidth).
       List<List<MeldGroupView>> rows = new();
       List<MeldGroupView> currentRow = new();
       float currentRowWidth = 0f;
@@ -234,12 +261,9 @@ namespace LevelUp.UI
       }
       if (currentRow.Count > 0) rows.Add(currentRow);
 
-      // Empile les lignes verticalement, centrées verticalement.
       float totalHeight = rows.Count * meldHeight + Mathf.Max(0, rows.Count - 1) * _playerZoneSpacing;
       float startY = totalHeight / 2f - meldHeight / 2f;
 
-      // Left-align : le bord gauche de la zone de layout est à -containerWidth/2 + _leftMargin
-      // dans l'espace local du TableContainer (pivot 0.5, 0.5).
       float leftEdgeLocal = -containerWidth / 2f + _leftMargin;
 
       for (int r = 0; r < rows.Count; r++)
@@ -252,17 +276,12 @@ namespace LevelUp.UI
         {
           RectTransform rt = g.GetComponent<RectTransform>();
           float halfW = g.GetWidth() / 2f;
-          // Pivot (0.5,0.5) par défaut : on place le centre à leftEdge + halfW
           rt.anchoredPosition = new Vector2(currentX + halfW, y);
           currentX += g.GetWidth() + _meldSpacing;
         }
       }
     }
 
-    /// <summary>
-    /// Vérifie si une position écran correspond à une combinaison.
-    /// Hit-test avec padding (_meldHitPadding) pour un drop plus généreux.
-    /// </summary>
     public bool GetMeldAtPosition(Vector2 screenPosition, out int ownerIndex, out int meldIndex)
     {
       ownerIndex = -1;
@@ -285,9 +304,6 @@ namespace LevelUp.UI
       return false;
     }
 
-    /// <summary>
-    /// Hit-test d'un rect étendu par <paramref name="padding"/> dans son espace local.
-    /// </summary>
     private static bool IsInsidePaddedRect(RectTransform rt, Vector2 screenPos, float padding)
     {
       if (rt == null) return false;
@@ -299,8 +315,25 @@ namespace LevelUp.UI
     }
 
     /// <summary>
-    /// Supprime tous les éléments de la table.
+    /// Active/désactive le hover state d'un meld donné (appelé par le drag system
+    /// quand une carte survole le meld). Affiche un fond indigo très doux.
     /// </summary>
+    public void SetMeldHover(int ownerIndex, int meldIndex, bool isHovered)
+    {
+      if (!_playerMeldGroups.TryGetValue(ownerIndex, out List<MeldGroupView>? groups)) return;
+      if (meldIndex < 0 || meldIndex >= groups.Count) return;
+      groups[meldIndex].SetHover(isHovered);
+    }
+
+    /// <summary>Coupe tous les hover states (utile quand le drag se termine).</summary>
+    public void ClearAllHovers()
+    {
+      foreach (var kvp in _playerMeldGroups)
+      {
+        foreach (var g in kvp.Value) g.SetHover(false);
+      }
+    }
+
     public void ClearTable()
     {
       foreach (KeyValuePair<int, List<MeldGroupView>> kvp in _playerMeldGroups)
@@ -315,31 +348,33 @@ namespace LevelUp.UI
   }
 
   /// <summary>
-  /// Vue d'un groupe de combinaison avec fond arrondi et overlap compact.
+  /// Vue d'un groupe de combinaison. Pas de fond visible (transparent par défaut),
+  /// juste un header au-dessus + un liseré coloré en dessous + les cartes.
   /// </summary>
   public class MeldGroupView : MonoBehaviour
   {
     private int _ownerIndex;
     private float _cardSpacing;
+    private MeldType _meldType;
+    private Color _ownerColor;
+    private Image? _hoverBg;
+    private Image? _accentBar;
     private readonly List<CardView> _cards = new();
 
-    /// <summary>Index du joueur propriétaire.</summary>
     public int OwnerIndex => _ownerIndex;
+    public MeldType MeldType => _meldType;
 
-    /// <summary>
-    /// Initialise le groupe.
-    /// </summary>
-    public void Initialize(int ownerIndex, float cardSpacing)
+    public void Initialize(int ownerIndex, float cardSpacing,
+        MeldType type, Color ownerColor, Image? hoverBg, Image? accentBar)
     {
       _ownerIndex = ownerIndex;
       _cardSpacing = cardSpacing;
+      _meldType = type;
+      _ownerColor = ownerColor == default ? Constants.TextSecondary : ownerColor;
+      _hoverBg = hoverBg;
+      _accentBar = accentBar;
     }
 
-    /// <summary>
-    /// Ajoute une carte au groupe.
-    /// Les cartes sont maintenues triées par valeur pour rester lisibles,
-    /// y compris quand on complète un meld existant.
-    /// </summary>
     public bool TryAddCard(CardModel card, GameObject? cardPrefab)
     {
       if (cardPrefab == null) return false;
@@ -351,12 +386,9 @@ namespace LevelUp.UI
 
       cardView.Setup(card, true);
       cardView.SetInteractable(false);
-
-      // Cartes sur la table — échelle 0.8 pour bonne lisibilité des valeurs
       cardView.RectTransform.localScale = Vector3.one * 0.8f;
 
       _cards.Add(cardView);
-      // Tri par valeur (même ordre que le modèle Meld.TryAddCard).
       _cards.Sort((a, b) => a.CardModel.Value.CompareTo(b.CardModel.Value));
       LayoutCards();
       UpdateBackgroundSize();
@@ -365,35 +397,72 @@ namespace LevelUp.UI
 
     // Largeur d'une carte à l'échelle 0.8 (prefab 120×180 → 96×144).
     private const float CardVisualWidth = 96f;
-    private const float PaddingH = 20f;
+    private const float CardVisualHeight = 144f;
+    private const float PaddingH = 16f;
+    // Hauteur réservée au header au-dessus + au liseré en dessous.
+    private const float HeaderSpace = 20f;
+    private const float AccentSpace = 12f;
 
     /// <summary>
-    /// Positionne les cartes avec un espacement lisible (chaque valeur visible).
+    /// Positionne les cartes en ligne, centrées dans la zone "carte" du meld
+    /// (entre le header en haut et le liseré en bas).
     /// </summary>
     private void LayoutCards()
     {
-      float startX = PaddingH + CardVisualWidth / 2f; // pivot centré
+      float startX = PaddingH + CardVisualWidth / 2f;
+      // Décalage vertical : on centre les cartes entre header (haut) et accent (bas)
+      // Le header prend HeaderSpace en haut, l'accent AccentSpace en bas → on décale
+      // les cartes vers le bas de (HeaderSpace - AccentSpace) / 2.
+      float yOffset = -(HeaderSpace - AccentSpace) / 2f;
+
       for (int i = 0; i < _cards.Count; i++)
       {
         _cards[i].RectTransform.anchoredPosition = new Vector2(
             startX + i * _cardSpacing - GetWidth() / 2f,
-            -4f);
-        _cards[i].RectTransform.SetSiblingIndex(i + 1);
+            yOffset);
+        // SetSiblingIndex décalé de +2 pour passer après hoverBg + header.
+        // L'accentBar est positionné après dans la hiérarchie volontairement
+        // pour qu'il s'affiche AU-DESSUS des cartes (sinon caché par les cartes).
+        _cards[i].RectTransform.SetSiblingIndex(i + 2);
+      }
+
+      // L'accent bar doit toujours être au-dessus des cartes et adapté à leur largeur
+      if (_accentBar != null)
+      {
+        _accentBar.transform.SetAsLastSibling();
+        // Liseré = ~70% de la largeur des cartes (pas du meld entier, pour aérer)
+        float cardsWidth = (_cards.Count - 1) * _cardSpacing + CardVisualWidth;
+        _accentBar.rectTransform.sizeDelta = new Vector2(cardsWidth * 0.7f, 2f);
       }
     }
 
     /// <summary>
-    /// Ajuste la taille du fond pour contenir toutes les cartes.
+    /// Active/désactive le fond hover indigo. Très doux (alpha 8%) — juste assez
+    /// pour signaler "tu peux drop ici" sans casser l'épure.
     /// </summary>
+    public void SetHover(bool isHovered)
+    {
+      if (_hoverBg == null) return;
+      if (isHovered)
+      {
+        Color c = Constants.AccentLight;
+        c.a = 0.08f;
+        _hoverBg.color = c;
+      }
+      else
+      {
+        _hoverBg.color = new Color(0f, 0f, 0f, 0f);
+      }
+    }
+
     public void UpdateBackgroundSize()
     {
       RectTransform rt = GetComponent<RectTransform>();
-      rt.sizeDelta = new Vector2(GetWidth(), 140f);
+      // Hauteur totale = header + carte + accent + un peu d'air
+      float h = HeaderSpace + CardVisualHeight + AccentSpace + 16f;
+      rt.sizeDelta = new Vector2(GetWidth(), h);
     }
 
-    /// <summary>
-    /// Retourne la largeur totale du groupe (cartes + paddings).
-    /// </summary>
     public float GetWidth()
     {
       int n = Mathf.Max(1, _cards.Count);
