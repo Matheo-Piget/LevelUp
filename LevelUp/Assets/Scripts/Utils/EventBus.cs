@@ -16,14 +16,18 @@ namespace LevelUp.Utils
         private static readonly Dictionary<Type, Delegate> Events = new();
 
         /// <summary>
-        /// S'abonner à un événement de type T.
+        /// S'abonner à un événement de type T. Idempotent : un même handler
+        /// abonné deux fois (ex: OnEnable rappelé après SetActive) ne sera
+        /// pas invoqué deux fois.
         /// </summary>
         public static void Subscribe<T>(Action<T> handler) where T : struct
         {
             Type type = typeof(T);
             if (Events.TryGetValue(type, out Delegate? existing))
             {
-                Events[type] = Delegate.Combine(existing, handler);
+                // Dédoublonnage : retire le handler s'il est déjà présent.
+                Delegate? without = Delegate.Remove(existing, handler);
+                Events[type] = Delegate.Combine(without, handler);
             }
             else
             {

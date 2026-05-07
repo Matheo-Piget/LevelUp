@@ -135,14 +135,40 @@ namespace LevelUp.Core
             if (player.HasLaidDownThisRound)
                 return CommandResult.Failure("Niveau déjà posé ce round");
 
-            if (!LevelValidator.IsLevelComplete(player.Hand, player.CurrentLevel,
-                    _config, out List<Meld> _))
-                return CommandResult.Failure("Combinaison invalide pour ce niveau");
+            if (melds == null || melds.Count == 0)
+                return CommandResult.Failure("Aucune combinaison fournie");
 
-            // Retirer les cartes des melds de la main
+            // 1. Chaque meld doit être structurellement valide.
+            foreach (Meld meld in melds)
+            {
+                bool structurallyValid = meld.Type switch
+                {
+                    MeldType.Run   => CardExtensions.IsValidRun(meld.Cards),
+                    MeldType.Set   => CardExtensions.IsValidSet(meld.Cards),
+                    MeldType.Flush => CardExtensions.IsValidFlush(meld.Cards),
+                    _              => false
+                };
+                if (!structurallyValid)
+                    return CommandResult.Failure("Combinaison invalide");
+            }
+
+            // 2. Aucune carte ne peut apparaître deux fois et toutes doivent être en main.
             List<CardModel> allCards = new();
             foreach (Meld meld in melds)
-                allCards.AddRange(meld.Cards);
+            {
+                foreach (CardModel card in meld.Cards)
+                {
+                    if (!player.HandContains(card))
+                        return CommandResult.Failure("Carte introuvable dans la main");
+                    if (allCards.Contains(card))
+                        return CommandResult.Failure("Une carte ne peut pas être utilisée deux fois");
+                    allCards.Add(card);
+                }
+            }
+
+            // 3. La structure des melds doit correspondre aux exigences du niveau.
+            if (!LevelValidator.MeldsSatisfyLevel(melds, player.CurrentLevel, _config))
+                return CommandResult.Failure("Combinaisons ne correspondent pas au niveau");
 
             player.RemoveFromHand(allCards);
 

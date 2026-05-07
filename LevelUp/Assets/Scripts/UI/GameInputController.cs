@@ -448,7 +448,26 @@ namespace LevelUp.UI
                 }
             }
 
+            // Drop ailleurs : la carte va lerper vers sa position d'origine via
+            // HandView.LerpCardsToTarget. On ajoute un shake léger sur la carte
+            // pour signaler "drop invalide" (snap-back animé, spec UX A.3).
+            OnInvalidDrop(dragged, pos);
+        }
+
+        /// <summary>
+        /// Drop ailleurs que sur une zone valide : termine le drag (la carte va
+        /// snap-back vers sa position d'origine via HandView.LerpCardsToTarget)
+        /// et superpose un léger pulse de scale pour rendre l'échec lisible.
+        /// On évite AnimateShake qui mute anchoredPosition et entrerait en conflit
+        /// avec le lerp de la main.
+        /// </summary>
+        private void OnInvalidDrop(CardView dragged, Vector2 pos)
+        {
             FinishDrag(pos);
+            if (dragged != null && _animController != null)
+            {
+                _animController.AnimatePulse(dragged.RectTransform);
+            }
         }
 
         /// <summary>

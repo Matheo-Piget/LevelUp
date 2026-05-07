@@ -327,15 +327,13 @@ namespace LevelUp.UI
         }
 
         /// <summary>
-        /// Reconstruit la main. Si dealAnimation=true, anime un cascade deal.
+        /// Reconstruit la main. Si <paramref name="dealAnimation"/> est vrai, anime
+        /// un cascade deal. Recycle les <see cref="CardView"/> existantes plutôt que
+        /// de tout détruire/réinstancier — bénéfice direct sur le GC à chaque action
+        /// (pioche, défausse, pose, ajout meld).
         /// </summary>
         public void RefreshHand(IReadOnlyList<CardModel> cards, bool dealAnimation = false)
         {
-            foreach (CardView view in _cardViews)
-            {
-                if (view != null) Destroy(view.gameObject);
-            }
-            _cardViews.Clear();
             _selectedCards.Clear();
             _hoveredIndex = -1;
             _hoveredCard = null;
@@ -343,14 +341,33 @@ namespace LevelUp.UI
 
             if (_cardPrefab == null || _handContainer == null) return;
 
+            // Reduire le surplus.
+            while (_cardViews.Count > cards.Count)
+            {
+                int last = _cardViews.Count - 1;
+                if (_cardViews[last] != null) Destroy(_cardViews[last].gameObject);
+                _cardViews.RemoveAt(last);
+            }
+
+            // Reconfigurer les existantes + instancier le déficit.
             for (int i = 0; i < cards.Count; i++)
             {
-                GameObject cardObj = Instantiate(_cardPrefab, _handContainer);
-                CardView cardView = cardObj.GetComponent<CardView>();
-                if (cardView != null)
+                if (i < _cardViews.Count && _cardViews[i] != null)
                 {
-                    cardView.Setup(cards[i], true);
-                    _cardViews.Add(cardView);
+                    _cardViews[i].Setup(cards[i], faceUp: true);
+                }
+                else
+                {
+                    GameObject cardObj = Instantiate(_cardPrefab, _handContainer);
+                    CardView cardView = cardObj.GetComponent<CardView>();
+                    if (cardView == null)
+                    {
+                        Destroy(cardObj);
+                        continue;
+                    }
+                    cardView.Setup(cards[i], faceUp: true);
+                    if (i < _cardViews.Count) _cardViews[i] = cardView;
+                    else _cardViews.Add(cardView);
                 }
             }
 

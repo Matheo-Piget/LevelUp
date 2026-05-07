@@ -1,5 +1,4 @@
 using System.Collections.Generic;
-using System.Linq;
 using LevelUp.Utils;
 
 namespace LevelUp.Core
@@ -117,6 +116,58 @@ namespace LevelUp.Core
         }
 
         /// <summary>
+        /// Vérifie qu'un ensemble de melds proposés satisfait les exigences d'un niveau.
+        /// Utilisé par <see cref="GameCommandExecutor"/> pour valider une commande LayDown
+        /// sans faire confiance au caller (UI ou IA) sur la structure exigée.
+        /// L'ordre des melds proposés n'a pas d'importance : on cherche un appariement
+        /// entre les melds et les exigences (type + nombre de cartes).
+        /// </summary>
+        public static bool MeldsSatisfyLevel(List<Meld> proposedMelds, int level, GameConfig? config)
+        {
+            if (proposedMelds == null || proposedMelds.Count == 0) return false;
+
+            List<List<LevelRequirement>> requirementSets = GetRequirements(level, config);
+            if (requirementSets.Count == 0) return false;
+
+            foreach (List<LevelRequirement> requirements in requirementSets)
+            {
+                if (proposedMelds.Count != requirements.Count) continue;
+                if (TryMatchRequirements(proposedMelds, requirements, new bool[requirements.Count]))
+                    return true;
+            }
+            return false;
+        }
+
+        /// <summary>
+        /// Backtracking simple : pour chaque meld proposé, tente de l'apparier avec
+        /// une exigence non encore consommée. Match si Type identique et taille identique.
+        /// </summary>
+        private static bool TryMatchRequirements(List<Meld> proposedMelds,
+            List<LevelRequirement> requirements, bool[] consumed)
+        {
+            return Match(0);
+
+            bool Match(int meldIdx)
+            {
+                if (meldIdx >= proposedMelds.Count) return true;
+                Meld meld = proposedMelds[meldIdx];
+
+                for (int r = 0; r < requirements.Count; r++)
+                {
+                    if (consumed[r]) continue;
+                    LevelRequirement req = requirements[r];
+                    if (req.Type != meld.Type) continue;
+                    if (req.CardCount != meld.Cards.Count) continue;
+
+                    consumed[r] = true;
+                    if (Match(meldIdx + 1)) return true;
+                    consumed[r] = false;
+                }
+                return false;
+            }
+        }
+
+        /// <summary>
         /// Essaie récursivement de trouver des combinaisons satisfaisant les exigences.
         /// Utilise le backtracking pour explorer toutes les possibilités.
         /// </summary>
@@ -177,34 +228,75 @@ namespace LevelUp.Core
 
         /// <summary>
         /// Trouve toutes les suites possibles de longueur donnée.
+        /// Pour chaque point de départ, tente de combler les trous avec des wilds.
+        /// On accepte de démarrer au-dessus de la valeur minimale du jeu : tous les
+        /// runs construits doivent rester dans les bornes définies par GameConfig
+        /// (ou Constants.DefaultCardMin/Max si pas de config).
         /// </summary>
         private static void FindRuns(List<CardModel> cards, int length, List<List<CardModel>> results)
         {
-            List<CardModel> normals = cards.Where(c => c.Type == CardType.Normal)
-                                           .OrderBy(c => c.Value).ToList();
-            List<CardModel> wilds = cards.GetWilds();
+            // Buckets par valeur pour accès O(1) — évite le FirstOrDefault dans la boucle.
+            Dictionary<int, List<CardModel>> normalsByValue = new();
+            List<CardModel> wilds = new();
+            int minValue = int.MaxValue;
+            int maxValue = int.MinValue;
 
-            // Essayer chaque point de départ possible
-            HashSet<int> startValues = normals.Select(c => c.Value).Distinct().ToHashSet();
-
-            foreach (int startVal in startValues)
+            foreach (CardModel c in cards)
             {
-                for (int endVal = startVal + length - 1; endVal >= startVal; endVal--)
+                if (c.Type == CardType.Normal)
                 {
-                    List<CardModel> run = new();
-                    int wildsUsed = 0;
-                    bool valid = true;
-
-                    for (int v = startVal; v < startVal + length; v++)
+                    if (!normalsByValue.TryGetValue(c.Value, out List<CardModel>? list))
                     {
-                        CardModel? card = normals.FirstOrDefault(c =>
-                            c.Value == v && !run.Contains(c));
+                        list = new List<CardModel>();
+                        normalsByValue[c.Value] = list;
+                    }
+                    list.Add(c);
+                    if (c.Value < minValue) minValue = c.Value;
+                    if (c.Value > maxValue) maxValue = c.Value;
+                }
+                else if (c.IsWild)
+                {
+                    wilds.Add(c);
+                }
+            }
 
-                        if (card.HasValue && card.Value.Value != 0)
+            if (normalsByValue.Count == 0 && wilds.Count < length) return;
+
+            // Bornes du run : du min des cartes possibles, jusqu'à un peu au-delà du max
+            // pour permettre les runs qui se prolongent uniquement avec des wilds en fin.
+            int rangeMin = normalsByValue.Count > 0 ? minValue - wilds.Count : 1;
+            int rangeMax = normalsByValue.Count > 0 ? maxValue + wilds.Count : length;
+            if (rangeMin < 1) rangeMin = 1;
+
+            // Pour chaque point de départ, construire un run candidat.
+            for (int startVal = rangeMin; startVal <= rangeMax - length + 1; startVal++)
+            {
+                List<CardModel> run = new(length);
+                int wildsUsed = 0;
+                bool valid = true;
+
+                // Compteurs de cartes normales déjà utilisées par valeur (pour éviter
+                // de réutiliser deux fois la même CardModel quand plusieurs cartes
+                // partagent une valeur — possible avec un deck "Level 8" custom).
+                Dictionary<int, int> usedByValue = new();
+
+                for (int v = startVal; v < startVal + length; v++)
+                {
+                    bool placed = false;
+                    if (normalsByValue.TryGetValue(v, out List<CardModel>? candidates))
+                    {
+                        usedByValue.TryGetValue(v, out int alreadyUsed);
+                        if (alreadyUsed < candidates.Count)
                         {
-                            run.Add(card.Value);
+                            run.Add(candidates[alreadyUsed]);
+                            usedByValue[v] = alreadyUsed + 1;
+                            placed = true;
                         }
-                        else if (wildsUsed < wilds.Count)
+                    }
+
+                    if (!placed)
+                    {
+                        if (wildsUsed < wilds.Count)
                         {
                             run.Add(wilds[wildsUsed]);
                             wildsUsed++;
@@ -215,47 +307,76 @@ namespace LevelUp.Core
                             break;
                         }
                     }
+                }
 
-                    if (valid && run.Count == length)
-                    {
-                        // Vérifier pas de doublon dans les résultats
-                        if (!results.Any(r => r.SequenceEqual(run)))
-                        {
-                            results.Add(run);
-                        }
-                    }
+                if (valid && run.Count == length && !ContainsSequence(results, run))
+                {
+                    results.Add(run);
                 }
             }
         }
 
         /// <summary>
+        /// Vrai si <paramref name="results"/> contient déjà une liste avec exactement
+        /// les mêmes CardModel dans le même ordre. Évite les doublons sans LINQ.
+        /// </summary>
+        private static bool ContainsSequence(List<List<CardModel>> results, List<CardModel> candidate)
+        {
+            for (int i = 0; i < results.Count; i++)
+            {
+                List<CardModel> existing = results[i];
+                if (existing.Count != candidate.Count) continue;
+                bool same = true;
+                for (int j = 0; j < existing.Count; j++)
+                {
+                    if (existing[j].Id != candidate[j].Id) { same = false; break; }
+                }
+                if (same) return true;
+            }
+            return false;
+        }
+
+        /// <summary>
         /// Trouve tous les sets (même valeur) possibles de taille donnée.
+        /// Réécrit sans LINQ pour réduire les allocations en hot path.
         /// </summary>
         private static void FindSets(List<CardModel> cards, int size, List<List<CardModel>> results)
         {
-            List<CardModel> wilds = cards.GetWilds();
-            Dictionary<int, List<CardModel>> groups = cards.GroupByValue();
+            // Group manuellement pour éviter LINQ.GroupBy (alloc IGrouping).
+            Dictionary<int, List<CardModel>> groups = new();
+            int wildCount = 0;
+            List<CardModel> wilds = new();
+
+            foreach (CardModel c in cards)
+            {
+                if (c.Type == CardType.Normal)
+                {
+                    if (!groups.TryGetValue(c.Value, out List<CardModel>? list))
+                    {
+                        list = new List<CardModel>();
+                        groups[c.Value] = list;
+                    }
+                    list.Add(c);
+                }
+                else if (c.IsWild)
+                {
+                    wilds.Add(c);
+                    wildCount++;
+                }
+            }
 
             foreach (KeyValuePair<int, List<CardModel>> group in groups)
             {
                 int normalsAvailable = group.Value.Count;
                 int wildsNeeded = size - normalsAvailable;
+                if (wildsNeeded < 0 || wildsNeeded > wildCount) continue;
 
-                if (wildsNeeded <= wilds.Count && wildsNeeded >= 0)
-                {
-                    List<CardModel> set = group.Value.Take(
-                        System.Math.Min(normalsAvailable, size)).ToList();
+                List<CardModel> set = new(size);
+                int normalsToTake = normalsAvailable < size ? normalsAvailable : size;
+                for (int i = 0; i < normalsToTake; i++) set.Add(group.Value[i]);
+                for (int w = 0; w < wildsNeeded; w++) set.Add(wilds[w]);
 
-                    for (int w = 0; w < wildsNeeded; w++)
-                    {
-                        set.Add(wilds[w]);
-                    }
-
-                    if (set.Count == size)
-                    {
-                        results.Add(set);
-                    }
-                }
+                if (set.Count == size) results.Add(set);
             }
         }
 
@@ -264,29 +385,40 @@ namespace LevelUp.Core
         /// </summary>
         private static void FindFlushes(List<CardModel> cards, int size, List<List<CardModel>> results)
         {
-            List<CardModel> wilds = cards.GetWilds();
-            Dictionary<CardColor, List<CardModel>> groups = cards.GroupByColor();
+            Dictionary<CardColor, List<CardModel>> groups = new();
+            int wildCount = 0;
+            List<CardModel> wilds = new();
+
+            foreach (CardModel c in cards)
+            {
+                if (c.Type == CardType.Normal)
+                {
+                    if (!groups.TryGetValue(c.Color, out List<CardModel>? list))
+                    {
+                        list = new List<CardModel>();
+                        groups[c.Color] = list;
+                    }
+                    list.Add(c);
+                }
+                else if (c.IsWild)
+                {
+                    wilds.Add(c);
+                    wildCount++;
+                }
+            }
 
             foreach (KeyValuePair<CardColor, List<CardModel>> group in groups)
             {
                 int normalsAvailable = group.Value.Count;
                 int wildsNeeded = size - normalsAvailable;
+                if (wildsNeeded < 0 || wildsNeeded > wildCount) continue;
 
-                if (wildsNeeded <= wilds.Count && wildsNeeded >= 0)
-                {
-                    List<CardModel> flush = group.Value.Take(
-                        System.Math.Min(normalsAvailable, size)).ToList();
+                List<CardModel> flush = new(size);
+                int normalsToTake = normalsAvailable < size ? normalsAvailable : size;
+                for (int i = 0; i < normalsToTake; i++) flush.Add(group.Value[i]);
+                for (int w = 0; w < wildsNeeded; w++) flush.Add(wilds[w]);
 
-                    for (int w = 0; w < wildsNeeded; w++)
-                    {
-                        flush.Add(wilds[w]);
-                    }
-
-                    if (flush.Count == size)
-                    {
-                        results.Add(flush);
-                    }
-                }
+                if (flush.Count == size) results.Add(flush);
             }
         }
     }

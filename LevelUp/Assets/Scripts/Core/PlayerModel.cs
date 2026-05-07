@@ -32,8 +32,15 @@ namespace LevelUp.Core
         /// <summary>Indique si le joueur a posé son niveau ce round.</summary>
         public bool HasLaidDownThisRound { get; internal set; }
 
-        /// <summary>Indique si le joueur est sauté ce tour.</summary>
-        public bool IsSkipped { get; internal set; }
+        /// <summary>
+        /// Nombre de tours que ce joueur doit sauter. Empilable : si plusieurs cartes
+        /// Skip ciblent le même joueur, le compteur s'accumule et chaque tour à venir
+        /// décrémente jusqu'à zéro. Remplace l'ancien <c>IsSkipped</c> qui écrasait.
+        /// </summary>
+        public int SkipCount { get; internal set; }
+
+        /// <summary>Compat : indique si le joueur sera sauté au moins une fois.</summary>
+        public bool IsSkipped => SkipCount > 0;
 
         /// <summary>La main du joueur (lecture seule).</summary>
         public IReadOnlyList<CardModel> Hand => _hand;
@@ -51,7 +58,7 @@ namespace LevelUp.Core
             IsAI = isAI;
             CurrentLevel = 1;
             HasLaidDownThisRound = false;
-            IsSkipped = false;
+            SkipCount = 0;
             _hand = new List<CardModel>();
             _laidMelds = new List<Meld>();
         }
@@ -93,7 +100,7 @@ namespace LevelUp.Core
             _hand.Clear();
             _laidMelds.Clear();
             HasLaidDownThisRound = false;
-            IsSkipped = false;
+            SkipCount = 0;
         }
 
         // ────────────────────────────────────────────────────

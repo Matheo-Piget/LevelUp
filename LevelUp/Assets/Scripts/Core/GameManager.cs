@@ -199,7 +199,11 @@ namespace LevelUp.Core
 
         private void OnDestroy()
         {
-            EventBus.Clear();
+            // Pas de EventBus.Clear() ici : les subscribers UI gèrent leur cycle via
+            // OnEnable/OnDisable. Vider le bus à la destruction de GameManager
+            // désynchroniserait les vues toujours vivantes (ex: au restart sans
+            // changement de scène). Clear ne doit être invoqué qu'à la transition
+            // de scène effective.
         }
     }
 }
