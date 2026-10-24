@@ -70,7 +70,7 @@ namespace LevelUp.UI
             rt.anchorMax = new Vector2(0.5f, 0f);
             rt.pivot = new Vector2(0.5f, 0f);
             rt.anchoredPosition = new Vector2(0f, 270f);
-            rt.sizeDelta = new Vector2(500f, 76f);
+            rt.sizeDelta = new Vector2(620f, 76f);
 
             _bg = _root.GetComponent<Image>();
             _bg.sprite = UIFactory.RoundedSprite;
@@ -159,7 +159,9 @@ namespace LevelUp.UI
             }
 
             PlayerModel current = tm.CurrentPlayer;
-            if (current.IsAI || tm.CurrentPhase != TurnPhase.LayDown || current.HasLaidDownThisRound)
+            // En ligne, n'aider que le joueur de CET appareil (pas la main d'un autre).
+            if (!GameSession.IsLocalHuman(current) || tm.CurrentPhase != TurnPhase.LayDown
+                || current.HasLaidDownThisRound)
             {
                 Hide();
                 return;
@@ -170,11 +172,27 @@ namespace LevelUp.UI
 
             if (selectedCount == 0)
             {
-                _label.text = $"NIVEAU {current.CurrentLevel}";
-                _label.color = Constants.TextAccent;
-                _hint.text = $"Objectif : {requirementText}  •  ou glissez ↑ pour défausser";
-                _hint.color = Constants.TextSecondary;
-                SetBarColor(Constants.TextSecondary);
+                // Progression de la main vers le contrat : lisible d'un coup d'œil.
+                bool ready = LevelValidator.IsLevelComplete(current.Hand, current.CurrentLevel,
+                    _gameManager.Config, out List<Meld> _);
+                string progress = DescribeProgress(current);
+
+                if (ready)
+                {
+                    _label.text = $"NIVEAU {current.CurrentLevel} · CONTRAT PRÊT !";
+                    _label.color = Constants.CardGreen;
+                    _hint.text = $"Sélectionne {requirementText} puis pose sur la table";
+                    _hint.color = Constants.CardGreen;
+                    SetBarColor(Constants.CardGreen);
+                }
+                else
+                {
+                    _label.text = $"NIVEAU {current.CurrentLevel}  <size=15><color=#9CA3AF>{requirementText}</color></size>";
+                    _label.color = Constants.TextAccent;
+                    _hint.text = $"{progress}  •  ou glisse ↑ pour défausser";
+                    _hint.color = Constants.TextSecondary;
+                    SetBarColor(Constants.TextSecondary);
+                }
                 Show();
                 return;
             }
@@ -215,20 +233,33 @@ namespace LevelUp.UI
             }
         }
 
-        private string DescribeRequirement(int level)
+        private static string DescribeRequirement(int level)
         {
-            return level switch
+            return ContractCatalog.DescribeLevel(level);
+        }
+
+        /// <summary>
+        /// "Suite de 3 3/3 · Brelan 2/3" — chaque exigence avec ce que la main
+        /// couvre déjà, en vert quand c'est rempli.
+        /// </summary>
+        private string DescribeProgress(PlayerModel player)
+        {
+            List<List<LevelValidator.LevelRequirement>> sets =
+                LevelValidator.GetRequirements(player.CurrentLevel, _gameManager?.Config);
+            if (sets.Count == 0) return "";
+
+            List<ContractProgress.Entry> entries = ContractProgress.Evaluate(player.Hand, sets[0]);
+            System.Text.StringBuilder sb = new();
+            foreach (ContractProgress.Entry e in entries)
             {
-                1 => "2 suites de 3",
-                2 => "1 suite de 3 + 1 brelan",
-                3 => "2 brelans",
-                4 => "1 suite de 4 + 1 paire",
-                5 => "1 flush de 5",
-                6 => "1 suite de 5",
-                7 => "1 carré + 1 paire",
-                8 => "1 flush de 7",
-                _ => "?"
-            };
+                if (sb.Length > 0) sb.Append("<color=#4B5563>  ·  </color>");
+                string color = e.IsMet ? "#4DFF91" : (e.Have > 0 ? "#FBBF24" : "#9CA3AF");
+                int have = Mathf.Min(e.Have, e.Requirement.CardCount);
+                sb.Append(ContractCatalog.Name(e.Requirement))
+                  .Append(' ')
+                  .Append($"<color={color}><b>{have}/{e.Requirement.CardCount}</b></color>");
+            }
+            return sb.ToString();
         }
 
         private void Show() => _targetAlpha = 1f;

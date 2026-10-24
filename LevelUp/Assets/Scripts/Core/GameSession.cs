@@ -1,0 +1,69 @@
+namespace LevelUp.Core
+{
+    /// <summary>
+    /// État de session partagé entre Core, UI et Network : qui est le joueur
+    /// local sur cet appareil, et la partie est-elle en ligne.
+    ///
+    /// En solo/pass-and-play : IsOnline = false et tout humain est "local".
+    /// En ligne : chaque appareil ne contrôle QUE le siège LocalPlayerIndex —
+    /// l'UI doit refuser d'émettre des commandes pour les autres sièges.
+    /// </summary>
+    public static class GameSession
+    {
+        /// <summary>Vrai quand une partie multijoueur en ligne est active.</summary>
+        public static bool IsOnline { get; set; }
+
+        /// <summary>Vrai si cet appareil est l'hôte de la partie en ligne.</summary>
+        public static bool IsHost { get; set; }
+
+        /// <summary>Index du joueur contrôlé par cet appareil (0 hors ligne).</summary>
+        public static int LocalPlayerIndex { get; set; }
+
+        /// <summary>
+        /// Contrats de la partie en cours (fixés par <see cref="GameManager.StartGame"/>).
+        /// Lu par <see cref="LevelValidator"/> : règles, IA et UI voient le même plan.
+        /// </summary>
+        public static ContractPlan Contracts { get; set; } = ContractPlan.Classic;
+
+        /// <summary>Retour à l'état hors ligne (solo).</summary>
+        public static void Reset()
+        {
+            IsOnline = false;
+            IsHost = false;
+            LocalPlayerIndex = 0;
+        }
+
+        /// <summary>
+        /// Vrai si ce joueur est un humain contrôlable depuis CET appareil.
+        /// Hors ligne, tout humain est local (comportement solo inchangé).
+        /// </summary>
+        public static bool IsLocalHuman(PlayerModel player)
+        {
+            if (player == null || player.IsAI) return false;
+            return !IsOnline || player.Index == LocalPlayerIndex;
+        }
+
+        /// <summary>
+        /// Le joueur contrôlé par cet appareil. Hors ligne : premier humain
+        /// de la liste (index 0 en pratique).
+        /// </summary>
+        public static PlayerModel? GetLocalPlayer(GameManager? gameManager)
+        {
+            if (gameManager == null) return null;
+
+            if (IsOnline)
+            {
+                var players = gameManager.Players;
+                return LocalPlayerIndex >= 0 && LocalPlayerIndex < players.Count
+                    ? players[LocalPlayerIndex]
+                    : null;
+            }
+
+            foreach (PlayerModel p in gameManager.Players)
+            {
+                if (!p.IsAI) return p;
+            }
+            return null;
+        }
+    }
+}

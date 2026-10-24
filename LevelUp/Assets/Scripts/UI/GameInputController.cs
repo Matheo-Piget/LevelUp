@@ -1,6 +1,8 @@
 using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.InputSystem;
+using UnityEngine.UI;
+using TMPro;
 using LevelUp.Core;
 using LevelUp.Utils;
 
@@ -34,8 +36,48 @@ namespace LevelUp.UI
 
         // Reorder drag tracking
         private bool _isReorderCandidate;
-        private const float ReorderDragThreshold = 15f;
-        private const float DragUpThreshold = 30f;
+
+        // Seuils de geste calibrés pour un écran desktop (~96 dpi). Sur mobile
+        // haute densité (S25 ≈ 416 dpi), 15 px font moins d'1 mm : on convertit
+        // en distance physique via le ratio dpi pour garder le même ressenti
+        // au doigt qu'à la souris.
+        private const float BaseReorderDragThreshold = 15f;
+        private const float BaseDragUpThreshold = 30f;
+
+        private static float _dpiScale = -1f;
+        private static float DpiScale
+        {
+            get
+            {
+                if (_dpiScale < 0f)
+                {
+                    float dpi = Screen.dpi;
+                    _dpiScale = dpi > 0f ? Mathf.Clamp(dpi / 96f, 1f, 4f) : 1f;
+                }
+                return _dpiScale;
+            }
+        }
+
+        private static float ReorderDragThreshold => BaseReorderDragThreshold * DpiScale;
+        private static float DragUpThreshold => BaseDragUpThreshold * DpiScale;
+
+        // Snap magnétique (phase AddToMelds) : meld le plus proche pendant le
+        // drag. En unités canvas (TryGetNearestMeld mesure dans le local space
+        // des melds) : déjà indépendant de la résolution, pas de scale dpi.
+        private const float MagnetRadius = 90f;
+        private bool _hasMagnetTarget;
+        private int _magnetOwner = -1;
+        private int _magnetMeld = -1;
+
+        private RectTransform? _handRect;
+
+        /// <summary>
+        /// Vrai pendant les animations de cartes (pioche, pose, défausse).
+        /// On ne bloque QUE les actions qui mutent le jeu — hover, sélection
+        /// et reorder restent fluides (zéro verrou d'input global).
+        /// </summary>
+        private bool ActionsLocked =>
+            _animController != null && _animController.IsAnimating;
 
         /// <summary>
         /// Initialise avec la référence au GameManager.
@@ -47,6 +89,75 @@ namespace LevelUp.UI
             if (_handView != null)
             {
                 _handView.OnCardsReordered += OnCardsReordered;
+            }
+
+            RestyleDeckPanel();
+        }
+
+        /// <summary>
+        /// Habille le panneau de pioche posé en scène (rect brut) en dos de
+        /// carte : coins arrondis, couleur CardBack, épaisseur de pile
+        /// simulée et label discret. La DeckView n'étant pas câblée en scène,
+        /// c'est ici (seul détenteur de la référence) qu'on le style.
+        /// </summary>
+        private void RestyleDeckPanel()
+        {
+            if (_deckHitArea == null) return;
+
+            Image? img = _deckHitArea.GetComponent<Image>();
+            if (img != null)
+            {
+                img.sprite = UIFactory.RoundedSprite;
+                img.type = Image.Type.Sliced;
+                img.color = Constants.CardBack;
+            }
+
+            // Liseré discret pour détacher la pioche du fond sombre
+            GameObject borderObj = new("DeckBorder", typeof(RectTransform), typeof(Image));
+            borderObj.transform.SetParent(_deckHitArea, false);
+            RectTransform brt = borderObj.GetComponent<RectTransform>();
+            brt.anchorMin = Vector2.zero;
+            brt.anchorMax = Vector2.one;
+            brt.sizeDelta = new Vector2(4f, 4f);
+            Image borderImg = borderObj.GetComponent<Image>();
+            borderImg.sprite = UIFactory.RoundedSprite;
+            borderImg.type = Image.Type.Sliced;
+            borderImg.fillCenter = false;
+            borderImg.color = Constants.PanelBorder;
+            borderImg.raycastTarget = false;
+
+            // Épaisseur de pile : deux couches décalées derrière
+            for (int i = 1; i <= 2; i++)
+            {
+                GameObject stack = new($"DeckStack_{i}", typeof(RectTransform), typeof(Image));
+                stack.transform.SetParent(_deckHitArea, false);
+                stack.transform.SetAsFirstSibling();
+                RectTransform srt = stack.GetComponent<RectTransform>();
+                srt.anchorMin = Vector2.zero;
+                srt.anchorMax = Vector2.one;
+                srt.sizeDelta = Vector2.zero;
+                srt.anchoredPosition = new Vector2(-3f * i, 3f * i);
+                Image simg = stack.GetComponent<Image>();
+                simg.sprite = UIFactory.RoundedSprite;
+                simg.type = Image.Type.Sliced;
+                float darken = 1f - 0.25f * i;
+                simg.color = new Color(
+                    Constants.CardBack.r * darken,
+                    Constants.CardBack.g * darken,
+                    Constants.CardBack.b * darken, 1f);
+                simg.raycastTarget = false;
+            }
+
+            // Label "PIOCHE" : petit, espacé, sous une icône de dos de carte
+            TextMeshProUGUI? label = _deckHitArea.GetComponentInChildren<TextMeshProUGUI>();
+            if (label != null)
+            {
+                label.text = "PIOCHE";
+                label.fontSize = 16f;
+                label.fontStyle = FontStyles.Bold;
+                label.color = Constants.TextSecondary;
+                label.characterSpacing = 10f;
+                label.alignment = TextAlignmentOptions.Center;
             }
         }
 
@@ -64,12 +175,10 @@ namespace LevelUp.UI
         /// </summary>
         private void OnCardsReordered(int fromIndex, int toIndex)
         {
-            if (_gameManager?.TurnManager == null) return;
-            PlayerModel player = _gameManager.TurnManager.CurrentPlayer;
-            if (!player.IsAI)
-            {
-                player.ReorderHand(fromIndex, toIndex);
-            }
+            // La HandView affiche toujours la main du joueur LOCAL : le reorder
+            // (cosmétique) s'applique à lui, jamais au joueur courant distant/IA.
+            PlayerModel? player = GameSession.GetLocalPlayer(_gameManager);
+            player?.ReorderHand(fromIndex, toIndex);
         }
 
         public void SetInputEnabled(bool enabled)
@@ -82,10 +191,16 @@ namespace LevelUp.UI
             if (!_inputEnabled || _gameManager == null) return;
             if (_gameManager.State != GameState.PlayerTurn) return;
             if (_gameManager.TurnManager == null) return;
-            if (_animController != null && _animController.IsAnimating) return;
+            // Seul le deal cascade (début de round) bloque tout l'input : les
+            // positions de toutes les cartes sont pilotées par les coroutines.
+            // Les autres animations ne verrouillent que les actions mutantes
+            // (voir ActionsLocked) — sélection et reorder restent disponibles.
+            if (_handView != null && _handView.IsAnimatingDeal) return;
 
+            // En ligne : cet appareil ne joue QUE son propre siège. Hors ligne,
+            // IsLocalHuman se réduit à !IsAI (comportement solo inchangé).
             PlayerModel currentPlayer = _gameManager.TurnManager.CurrentPlayer;
-            if (currentPlayer.IsAI) return;
+            if (!GameSession.IsLocalHuman(currentPlayer)) return;
 
             HandleInput();
         }
@@ -95,19 +210,26 @@ namespace LevelUp.UI
             Vector2 position;
             bool pressed, held, released;
 
-            if (Mouse.current != null)
+            // Tactile prioritaire dès qu'un doigt est actif : certains Android
+            // exposent un périphérique Mouse fantôme qui masquerait le touch
+            // si on testait la souris en premier.
+            var touch = Touchscreen.current?.primaryTouch;
+            bool touchActive = touch != null &&
+                (touch.press.isPressed || touch.press.wasReleasedThisFrame);
+
+            if (touchActive)
+            {
+                position = touch!.position.ReadValue();
+                pressed = touch.press.wasPressedThisFrame;
+                held = touch.press.isPressed;
+                released = touch.press.wasReleasedThisFrame;
+            }
+            else if (Mouse.current != null)
             {
                 position = Mouse.current.position.ReadValue();
                 pressed = Mouse.current.leftButton.wasPressedThisFrame;
                 held = Mouse.current.leftButton.isPressed;
                 released = Mouse.current.leftButton.wasReleasedThisFrame;
-            }
-            else if (Touchscreen.current != null)
-            {
-                position = Touchscreen.current.primaryTouch.position.ReadValue();
-                pressed = Touchscreen.current.primaryTouch.press.wasPressedThisFrame;
-                held = Touchscreen.current.primaryTouch.press.isPressed;
-                released = Touchscreen.current.primaryTouch.press.wasReleasedThisFrame;
             }
             else
             {
@@ -246,83 +368,14 @@ namespace LevelUp.UI
                 return;
             }
 
-            // Phase LAY DOWN : horizontal = reorder, vers le haut = action drag.
-            // Si on est déjà en reorder ET que le curseur monte au-dessus de la main,
-            // on bascule en action drag pour ne pas bloquer une défausse.
-            if (phase == TurnPhase.LayDown && _isReorderCandidate)
+            // Phases LAY DOWN / DISCARD : horizontal = reorder, vers le haut =
+            // action drag. Geste identique, seule différence : LayDown sélectionne
+            // la carte au moment de la bascule (Discard l'a déjà fait au press).
+            if ((phase == TurnPhase.LayDown || phase == TurnPhase.Discard) && _isReorderCandidate)
             {
                 if (dragDist > ReorderDragThreshold)
                 {
-                    bool draggingUp = (pos.y - _dragStartPos.y) > DragUpThreshold;
-
-                    if (_handView.IsReorderDragging)
-                    {
-                        // Bascule reorder → action si le joueur sort vers le haut
-                        if (draggingUp || IsAboveHand(pos))
-                        {
-                            _handView.EndReorderDrag();
-                            _isReorderCandidate = false;
-                            _handView.SelectSingleCard(_dragCardIndex);
-                            _handView.BeginDrag(_dragCardIndex, _dragStartPos);
-                            _handView.ContinueDrag(pos);
-                        }
-                        else
-                        {
-                            _handView.ContinueReorderDrag(pos);
-                        }
-                        return;
-                    }
-
-                    if (draggingUp || IsAboveHand(pos))
-                    {
-                        _isReorderCandidate = false;
-                        _handView.SelectSingleCard(_dragCardIndex);
-                        _handView.BeginDrag(_dragCardIndex, _dragStartPos);
-                        _handView.ContinueDrag(pos);
-                    }
-                    else
-                    {
-                        _handView.BeginReorderDrag(_dragCardIndex, _dragStartPos);
-                        _handView.ContinueReorderDrag(pos);
-                    }
-                }
-                return;
-            }
-
-            // Phase DISCARD : horizontal = reorder, vers le haut = action drag
-            if (phase == TurnPhase.Discard && _isReorderCandidate)
-            {
-                if (dragDist > ReorderDragThreshold)
-                {
-                    bool draggingUp = (pos.y - _dragStartPos.y) > DragUpThreshold;
-
-                    if (_handView.IsReorderDragging)
-                    {
-                        if (draggingUp || IsAboveHand(pos))
-                        {
-                            _handView.EndReorderDrag();
-                            _isReorderCandidate = false;
-                            _handView.BeginDrag(_dragCardIndex, _dragStartPos);
-                            _handView.ContinueDrag(pos);
-                        }
-                        else
-                        {
-                            _handView.ContinueReorderDrag(pos);
-                        }
-                        return;
-                    }
-
-                    if (draggingUp || IsAboveHand(pos))
-                    {
-                        _isReorderCandidate = false;
-                        _handView.BeginDrag(_dragCardIndex, _dragStartPos);
-                        _handView.ContinueDrag(pos);
-                    }
-                    else
-                    {
-                        _handView.BeginReorderDrag(_dragCardIndex, _dragStartPos);
-                        _handView.ContinueReorderDrag(pos);
-                    }
+                    HandleHandCardDrag(pos, selectOnPromote: phase == TurnPhase.LayDown);
                 }
                 return;
             }
@@ -334,8 +387,92 @@ namespace LevelUp.UI
             }
             else
             {
+                // Snap magnétique : en AddToMelds, le meld le plus proche est
+                // surligné et attire doucement la carte (spec UX A.3).
+                if (phase == TurnPhase.AddToMelds)
+                {
+                    pos = UpdateMeldMagnet(pos);
+                }
                 _handView.ContinueDrag(pos);
             }
+        }
+
+        /// <summary>
+        /// Geste partagé LayDown/Discard : drag horizontal = reorder de la main,
+        /// drag vers le haut (ou sortie au-dessus de la main) = action drag.
+        /// Bascule reorder → action en cours de geste si le curseur monte.
+        /// </summary>
+        private void HandleHandCardDrag(Vector2 pos, bool selectOnPromote)
+        {
+            bool draggingUp = (pos.y - _dragStartPos.y) > DragUpThreshold || IsAboveHand(pos);
+
+            if (_handView!.IsReorderDragging)
+            {
+                if (draggingUp)
+                {
+                    _handView.EndReorderDrag();
+                    PromoteToActionDrag(pos, selectOnPromote);
+                }
+                else
+                {
+                    _handView.ContinueReorderDrag(pos);
+                }
+                return;
+            }
+
+            if (draggingUp)
+            {
+                PromoteToActionDrag(pos, selectOnPromote);
+            }
+            else
+            {
+                _handView.BeginReorderDrag(_dragCardIndex, _dragStartPos);
+                _handView.ContinueReorderDrag(pos);
+            }
+        }
+
+        private void PromoteToActionDrag(Vector2 pos, bool select)
+        {
+            _isReorderCandidate = false;
+            if (select) _handView!.SelectSingleCard(_dragCardIndex);
+            _handView!.BeginDrag(_dragCardIndex, _dragStartPos);
+            _handView.ContinueDrag(pos);
+        }
+
+        /// <summary>
+        /// Snap magnétique : surligne le meld le plus proche du curseur (rayon
+        /// généreux) et attire doucement la carte vers son centre. Au release,
+        /// la cible mémorisée gagne même si on rate le rect de quelques pixels.
+        /// </summary>
+        private Vector2 UpdateMeldMagnet(Vector2 pos)
+        {
+            if (_tableView == null) return pos;
+
+            if (_tableView.TryGetNearestMeld(pos, MagnetRadius,
+                    out int owner, out int meld, out Vector2 center))
+            {
+                if (!_hasMagnetTarget || owner != _magnetOwner || meld != _magnetMeld)
+                {
+                    _tableView.ClearAllHovers();
+                    _tableView.SetMeldHover(owner, meld, true);
+                    _hasMagnetTarget = true;
+                    _magnetOwner = owner;
+                    _magnetMeld = meld;
+                }
+                // Attraction douce vers le centre du meld, le curseur garde la main.
+                return Vector2.Lerp(pos, center, 0.35f);
+            }
+
+            ClearMagnet();
+            return pos;
+        }
+
+        private void ClearMagnet()
+        {
+            if (_hasMagnetTarget) _tableView?.ClearAllHovers();
+            _hasMagnetTarget = false;
+            _magnetOwner = -1;
+            _magnetMeld = -1;
         }
 
         // ──────────────────────────────────────────────
@@ -346,6 +483,13 @@ namespace LevelUp.UI
         {
             if (!_isDragging) return;
             _isDragging = false;
+
+            // Capture puis reset de la cible magnétique (et de son highlight) —
+            // elle est consommée plus bas par la branche AddToMelds.
+            bool hadMagnetTarget = _hasMagnetTarget;
+            int magnetOwner = _magnetOwner;
+            int magnetMeld = _magnetMeld;
+            ClearMagnet();
 
             if (_gameManager?.TurnManager == null || _handView == null)
             {
@@ -421,17 +565,30 @@ namespace LevelUp.UI
                 return;
             }
 
-            // Phase AddToMelds : zones STRICTES.
-            // 1. Drop précis sur une combinaison → ajout.
-            // 2. Drop précis sur une pile de défausse → skip + discard.
-            // 3. Ailleurs (y compris au-dessus de la main dans le vide) → snap-back.
+            // Phase AddToMelds :
+            // 1. Cible magnétique active (meld surligné pendant le drag) → ajout,
+            //    même si le release rate le rect de quelques pixels.
+            // 2. Sinon drop précis sur une combinaison → ajout.
+            // 3. Drop précis sur une pile de défausse → skip + discard.
+            // 4. Ailleurs (y compris au-dessus de la main dans le vide) → snap-back.
             //    On n'utilise PAS IsDropOnDiscardZone ici car IsAboveHand est une
             //    bande très large qui recouvre l'aire des melds adverses et ferait
             //    défausser par erreur dès qu'on rate le meld de quelques pixels.
             if (phase == TurnPhase.AddToMelds)
             {
-                if (_tableView != null &&
-                    _tableView.GetMeldAtPosition(pos, out int ownerIdx, out int meldIdx))
+                int ownerIdx = magnetOwner;
+                int meldIdx = magnetMeld;
+                bool onMeld = hadMagnetTarget;
+
+                if (!onMeld && _tableView != null &&
+                    _tableView.GetMeldAtPosition(pos, out int o, out int m))
+                {
+                    onMeld = true;
+                    ownerIdx = o;
+                    meldIdx = m;
+                }
+
+                if (onMeld)
                 {
                     _handView.EndDrag(pos);
                     _handView.DeselectAll();
@@ -468,6 +625,7 @@ namespace LevelUp.UI
             {
                 _animController.AnimatePulse(dragged.RectTransform);
             }
+            EventBus.Publish(new InvalidActionEvent());
         }
 
         /// <summary>
@@ -478,6 +636,9 @@ namespace LevelUp.UI
         private void AdvanceToDiscardAndDiscard(CardModel card)
         {
             if (_gameManager?.TurnManager == null) return;
+            // Guard ici (et pas seulement dans ExecuteDiscard) : sinon on
+            // skipperait des phases sans pouvoir défausser derrière.
+            if (ActionsLocked) return;
 
             int safety = 4;
             while (_gameManager.TurnManager.CurrentPhase != TurnPhase.Discard && safety-- > 0)
@@ -511,6 +672,7 @@ namespace LevelUp.UI
 
         private void FinishDrag(Vector2 pos)
         {
+            ClearMagnet();
             if (_handView != null)
             {
                 if (_handView.IsReorderDragging)
@@ -532,6 +694,7 @@ namespace LevelUp.UI
         private void ExecuteDrawFromDeck()
         {
             if (_gameManager == null || _handView == null) return;
+            if (ActionsLocked) return;
 
             // Verrouiller l'animation AVANT l'exécution pour que
             // HandChangedEvent soit mis en file d'attente
@@ -554,6 +717,7 @@ namespace LevelUp.UI
         private void ExecuteDrawFromDiscard(int pileIndex)
         {
             if (_gameManager == null || _handView == null) return;
+            if (ActionsLocked) return;
 
             _handView.SetAnimatingDraw(true);
 
@@ -572,12 +736,14 @@ namespace LevelUp.UI
                 {
                     _animController.AnimateShake(_deckHitArea);
                 }
+                EventBus.Publish(new InvalidActionEvent());
             }
         }
 
         private void ExecuteLayDown()
         {
             if (_gameManager == null || _handView == null) return;
+            if (ActionsLocked) return;
 
             PlayerModel player = _gameManager.TurnManager!.CurrentPlayer;
             List<CardModel> selected = _handView.GetSelectedCardModels();
@@ -624,12 +790,14 @@ namespace LevelUp.UI
                         _animController.AnimateShake(cv.RectTransform);
                     }
                 }
+                if (!isAutoMode) EventBus.Publish(new InvalidActionEvent());
             }
         }
 
         private void ExecuteAddToMeld(CardModel card, int ownerIdx, int meldIdx, CardView cardView)
         {
             if (_gameManager == null) return;
+            if (ActionsLocked) return;
 
             CommandResult result = _gameManager.ExecuteCommand(
                 new AddToMeldCommand(CurrentPlayerIndex, card, ownerIdx, meldIdx));
@@ -641,6 +809,7 @@ namespace LevelUp.UI
                 {
                     _animController.AnimateShake(cardView.RectTransform);
                 }
+                EventBus.Publish(new InvalidActionEvent());
             }
         }
 
@@ -653,6 +822,7 @@ namespace LevelUp.UI
         private void ExecuteDiscard(CardModel card)
         {
             if (_gameManager == null) return;
+            if (ActionsLocked) return;
 
             int targetIndex = -1;
             if (card.IsAction)
@@ -676,7 +846,9 @@ namespace LevelUp.UI
         private bool IsAboveHand(Vector2 screenPos)
         {
             if (_handView == null) return false;
-            RectTransform handRect = _handView.GetComponent<RectTransform>();
+            // GetComponent caché : IsAboveHand est appelé à chaque frame de drag.
+            if (_handRect == null) _handRect = _handView.GetComponent<RectTransform>();
+            RectTransform handRect = _handRect;
             if (handRect == null) return false;
 
             RectTransformUtility.ScreenPointToLocalPointInRectangle(
@@ -697,21 +869,33 @@ namespace LevelUp.UI
         //  BOUTONS UI
         // ──────────────────────────────────────────────
 
+        /// <summary>
+        /// Vrai si le joueur courant est un humain jouable depuis cet appareil.
+        /// Garde-fou des boutons publics : en ligne, un client ne doit pas pouvoir
+        /// émettre une commande pendant le tour d'un autre joueur.
+        /// </summary>
+        private bool IsLocalTurn =>
+            _gameManager?.TurnManager != null &&
+            GameSession.IsLocalHuman(_gameManager.TurnManager.CurrentPlayer);
+
         public void OnLayDownButton()
         {
             if (_gameManager?.TurnManager == null) return;
+            if (!IsLocalTurn) return;
             if (_gameManager.TurnManager.CurrentPhase != TurnPhase.LayDown) return;
             ExecuteLayDown();
         }
 
         public void OnSkipLayDownButton()
         {
+            if (!IsLocalTurn) return;
             _handView?.DeselectAll();
             ExecuteSkipPhase(TurnPhase.LayDown);
         }
 
         public void OnSkipAddToMeldsButton()
         {
+            if (!IsLocalTurn) return;
             _handView?.DeselectAll();
             ExecuteSkipPhase(TurnPhase.AddToMelds);
         }
@@ -733,8 +917,10 @@ namespace LevelUp.UI
             if (_gameManager?.TurnManager == null || _handView == null) return;
             if (_isDragging) return; // ne pas perturber un geste en cours
 
-            PlayerModel player = _gameManager.TurnManager.CurrentPlayer;
-            if (player.IsAI) return;
+            // Trie la main du joueur LOCAL (celle que la HandView affiche) —
+            // cosmétique, donc autorisé même pendant le tour d'un autre joueur.
+            PlayerModel? player = GameSession.GetLocalPlayer(_gameManager);
+            if (player == null) return;
 
             player.SortHand(comparator);
             _handView.ApplySortedOrder(player.Hand);

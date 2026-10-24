@@ -14,6 +14,11 @@ namespace LevelUp.Core
         private int _nextCardId;
         private readonly GameConfig _config;
 
+        // RNG dédié (jamais UnityEngine.Random) : avec un seed partagé, tous les
+        // appareils d'une partie en ligne produisent exactement les mêmes mélanges,
+        // round après round — condition du modèle "simulation miroir".
+        private readonly System.Random _rng;
+
         /// <summary>Nombre de cartes restantes dans la pioche.</summary>
         public int DrawPileCount => _drawPile.Count;
 
@@ -21,11 +26,13 @@ namespace LevelUp.Core
         public int DiscardPileCount => _discardPiles.Count;
 
         /// <summary>
-        /// Constructeur avec config ScriptableObject.
+        /// Constructeur avec config ScriptableObject. Un seed identique garantit
+        /// des mélanges identiques (requis pour le multijoueur en ligne).
         /// </summary>
-        public DeckManager(GameConfig config)
+        public DeckManager(GameConfig config, int? seed = null)
         {
             _config = config;
+            _rng = seed.HasValue ? new System.Random(seed.Value) : new System.Random();
         }
 
         /// <summary>
@@ -77,7 +84,7 @@ namespace LevelUp.Core
         {
             for (int i = _drawPile.Count - 1; i > 0; i--)
             {
-                int j = Random.Range(0, i + 1);
+                int j = _rng.Next(0, i + 1);
                 (_drawPile[i], _drawPile[j]) = (_drawPile[j], _drawPile[i]);
             }
         }
@@ -166,6 +173,13 @@ namespace LevelUp.Core
 
             List<CardModel> pile = _discardPiles[discardPileIndex];
             return pile.Count > 0 ? pile[^1] : null;
+        }
+
+        /// <summary>Nombre de cartes dans la défausse d'un joueur (0 si index invalide).</summary>
+        public int GetDiscardCount(int discardPileIndex)
+        {
+            if (discardPileIndex < 0 || discardPileIndex >= _discardPiles.Count) return 0;
+            return _discardPiles[discardPileIndex].Count;
         }
 
         /// <summary>

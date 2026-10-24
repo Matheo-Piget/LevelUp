@@ -64,7 +64,16 @@ namespace LevelUp.Core
 
             CardModel? card = _deckManager.DrawFromPile();
             if (!card.HasValue)
-                return CommandResult.Failure("La pioche est vide");
+            {
+                // Deck définitivement vide même après recyclage (toutes les défausses
+                // ont au plus une carte, donc rien à recycler). Le round se termine
+                // forcément : on désigne comme gagnant le joueur avec la main la
+                // plus courte (variante "match au plus court").
+                int forcedWinner = FindPlayerWithSmallestHand();
+                EventBus.Publish(new DeckExhaustedEvent { WinnerIndex = forcedWinner });
+                return CommandResult.RoundCompleteWithWinner(
+                    forcedWinner, "Pioche épuisée");
+            }
 
             PlayerModel player = _turnManager.CurrentPlayer;
             player.AddToHand(card.Value);
@@ -81,6 +90,22 @@ namespace LevelUp.Core
             _turnManager.AdvanceToPhase(NextPhaseAfterDraw(player));
 
             return CommandResult.OkWithCard(card.Value);
+        }
+
+        /// <summary>
+        /// Retourne l'index du joueur avec le moins de cartes en main.
+        /// En cas d'égalité, retourne le premier (ordre des joueurs).
+        /// </summary>
+        private int FindPlayerWithSmallestHand()
+        {
+            int best = 0;
+            int min = int.MaxValue;
+            for (int i = 0; i < _players.Count; i++)
+            {
+                int n = _players[i].Hand.Count;
+                if (n < min) { min = n; best = i; }
+            }
+            return best;
         }
 
         private CommandResult ExecuteDrawFromDiscard(int discardPileIndex)

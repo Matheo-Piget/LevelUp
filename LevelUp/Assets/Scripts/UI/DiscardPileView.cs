@@ -361,6 +361,43 @@ namespace LevelUp.UI
       }
     }
 
+    /// <summary>
+    /// Recale toutes les piles sur le modèle (compteurs + carte du dessus),
+    /// sans animation — reprise d'une partie en ligne après reconnexion / resync.
+    /// </summary>
+    public void SyncFromModel()
+    {
+      if (_deckManager == null) return;
+
+      for (int i = 0; i < _pileSlots.Count; i++)
+      {
+        PileSlot slot = _pileSlots[i];
+        if (slot.TopCardView != null)
+        {
+          Destroy(slot.TopCardView.gameObject);
+          slot.TopCardView = null;
+        }
+
+        slot.CardCount = _deckManager.GetDiscardCount(i);
+        CardModel? top = _deckManager.PeekDiscard(i);
+        if (top.HasValue && _cardPrefab != null)
+        {
+          GameObject cardObj = Instantiate(_cardPrefab, slot.CardAnchor.transform);
+          CardView cardView = cardObj.GetComponent<CardView>();
+          if (cardView != null)
+          {
+            cardView.Setup(top.Value, true);
+            cardView.SetInteractable(true);
+            cardView.RectTransform.localScale = Vector3.one * 0.65f;
+            cardView.RectTransform.anchoredPosition = Vector2.zero;
+            slot.TopCardView = cardView;
+          }
+        }
+        UpdateCountLabel(slot);
+        UpdateEmptyState(slot);
+      }
+    }
+
     private void OnRoundStarted(RoundStartedEvent evt)
     {
       foreach (PileSlot slot in _pileSlots)

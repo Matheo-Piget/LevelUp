@@ -18,7 +18,11 @@ namespace LevelUp.UI
         private CanvasGroup? _rootCanvasGroup;
         private RectTransform? _panel;
         private OptionsPanel? _optionsPanel;
+        private Button? _pauseButton;
         private bool _isPaused;
+        // La pause n'a de sens qu'en jeu : verrouillée sur le menu principal
+        // (sinon ESC rouvrirait l'overlay par-dessus le menu).
+        private bool _pauseAllowed = true;
 
         /// <summary>Déclenché quand le joueur choisit "Menu principal".</summary>
         public event Action? OnMainMenuRequested;
@@ -56,7 +60,10 @@ namespace LevelUp.UI
             vrt.sizeDelta = Vector2.zero;
             Image vImg = veil.GetComponent<Image>();
             vImg.color = new Color(0f, 0f, 0f, 0.7f);
-            veil.GetComponent<Button>().transition = Selectable.Transition.None;
+            Button veilBtn = veil.GetComponent<Button>();
+            veilBtn.transition = Selectable.Transition.None;
+            // Tap en dehors du panneau = reprendre (essentiel en tactile)
+            veilBtn.onClick.AddListener(Hide);
 
             // Panel
             GameObject panelObj = UIFactory.CreatePanel(_root, "PausePanel",
@@ -111,6 +118,46 @@ namespace LevelUp.UI
                 new Vector2(300f, 64f), HandleMainMenu, Constants.CardRed);
 
             _root.gameObject.SetActive(false);
+
+            CreatePauseButton(canvas);
+        }
+
+        /// <summary>
+        /// Bouton pause flottant en haut à droite — indispensable en tactile
+        /// (ESC / bouton Retour Android restent actifs en parallèle).
+        /// Placé sous la safe area pour éviter punch-hole et coins arrondis.
+        /// </summary>
+        private void CreatePauseButton(Canvas canvas)
+        {
+            Transform parent = canvas.transform;
+            SafeAreaFitter? fitter = canvas.GetComponentInChildren<SafeAreaFitter>();
+            if (fitter != null) parent = fitter.transform;
+
+            _pauseButton = UIFactory.CreateButton(parent, "BtnPause", "II",
+                new Vector2(64f, 64f), Toggle, Constants.CardYellow);
+
+            RectTransform rt = _pauseButton.GetComponent<RectTransform>();
+            rt.anchorMin = new Vector2(1f, 1f);
+            rt.anchorMax = new Vector2(1f, 1f);
+            rt.pivot = new Vector2(1f, 1f);
+            rt.anchoredPosition = new Vector2(-20f, -20f);
+            _pauseButton.transform.SetAsLastSibling();
+
+            TextMeshProUGUI label = _pauseButton.GetComponentInChildren<TextMeshProUGUI>();
+            if (label != null)
+            {
+                label.fontSize = 24f;
+                label.characterSpacing = 8f;
+            }
+        }
+
+        /// <summary>
+        /// Affiche/masque le bouton pause flottant (masqué sur le menu principal).
+        /// </summary>
+        public void SetPauseButtonVisible(bool visible)
+        {
+            _pauseAllowed = visible;
+            if (_pauseButton != null) _pauseButton.gameObject.SetActive(visible);
         }
 
         private void OpenOptions()
@@ -125,8 +172,9 @@ namespace LevelUp.UI
 
         private void HandleMainMenu()
         {
-            Time.timeScale = 1f;
-            _isPaused = false;
+            // Hide() gère _isPaused et Time.timeScale — le faire avant nous
+            // ferait tomber sur sa garde d'idempotence et l'overlay resterait
+            // affiché par-dessus le menu principal.
             Hide();
             OnMainMenuRequested?.Invoke();
         }
@@ -153,10 +201,15 @@ namespace LevelUp.UI
         /// </summary>
         public void Show()
         {
-            if (_isPaused || _root == null || _rootCanvasGroup == null || _panel == null) return;
+            if (!_pauseAllowed || _isPaused || _root == null || _rootCanvasGroup == null || _panel == null) return;
 
             _isPaused = true;
-            Time.timeScale = 0f;
+            // En ligne, le temps ne se fige pas : la partie continue chez les
+            // autres joueurs et les commandes réseau doivent être rejouées.
+            if (!LevelUp.Core.GameSession.IsOnline)
+            {
+                Time.timeScale = 0f;
+            }
             _root.gameObject.SetActive(true);
             _rootCanvasGroup.blocksRaycasts = true;
             _rootCanvasGroup.alpha = 0f;

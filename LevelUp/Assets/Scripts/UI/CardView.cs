@@ -92,7 +92,17 @@ namespace LevelUp.UI
 
         private void Update()
         {
-            _glowAlpha = Mathf.Lerp(_glowAlpha, _targetGlowAlpha, Time.deltaTime * 15f);
+            // Early-out : quand le glow a convergé, ne pas réécrire Image.color
+            // chaque frame (chaque écriture re-tessellate le graphic → dirty Canvas).
+            if (_glowAlpha == _targetGlowAlpha) return;
+
+            // Amortissement exponentiel : même vitesse perçue à 30 et 144 fps.
+            _glowAlpha = Mathf.Lerp(_glowAlpha, _targetGlowAlpha,
+                1f - Mathf.Exp(-15f * Time.deltaTime));
+            if (Mathf.Abs(_glowAlpha - _targetGlowAlpha) < 0.003f)
+            {
+                _glowAlpha = _targetGlowAlpha;
+            }
 
             if (_glowOverlay != null)
             {
@@ -134,6 +144,8 @@ namespace LevelUp.UI
             _outerGlow.color = new Color(1f, 1f, 1f, 0f);
             _outerGlow.raycastTarget = false;
             _outerGlow.type = Image.Type.Simple;
+            // À alpha 0 (état de repos), le mesh est cullé : zéro draw call.
+            _outerGlow.canvasRenderer.cullTransparentMesh = true;
 
             // Glow proche, plus net
             GameObject glowObj = new("GlowOverlay", typeof(RectTransform), typeof(Image));
@@ -151,6 +163,7 @@ namespace LevelUp.UI
             _glowOverlay.color = new Color(1f, 1f, 1f, 0f);
             _glowOverlay.raycastTarget = false;
             _glowOverlay.type = Image.Type.Simple;
+            _glowOverlay.canvasRenderer.cullTransparentMesh = true;
         }
 
         /// <summary>
@@ -356,8 +369,9 @@ namespace LevelUp.UI
             // Bordure très discrète — un blanc translucide pour la finition
             if (_border != null) _border.color = new Color(1f, 1f, 1f, 0.12f);
 
-            // Pas de bande accent dans le nouveau style
-            if (_colorBand != null) _colorBand.color = new Color(0f, 0f, 0f, 0f);
+            // Pas de bande accent dans le nouveau style — désactivé plutôt que
+            // peint à alpha 0 (un graphic transparent génère quand même son mesh).
+            if (_colorBand != null) _colorBand.enabled = false;
 
             if (_shadowImage != null) _shadowImage.color = new Color(0f, 0f, 0f, 0.45f);
 
@@ -395,15 +409,18 @@ namespace LevelUp.UI
                 _valueText.outlineWidth = 0f;
             }
 
-            // Coins : même teinte dark, légèrement plus claire pour lisibilité
-            Color cornerText = new(darkText.r, darkText.g, darkText.b, 0.6f);
+            // Coins : même teinte dark, pleine opacité et taille lisible sur
+            // mobile (12pt à 60 % était illisible sur un écran 6 pouces).
+            Color cornerText = new(darkText.r, darkText.g, darkText.b, 0.95f);
+            float cornerSize = _cardModel.IsAction ? 16f : 24f;
 
             if (_cornerValueTopLeft != null)
             {
                 _cornerValueTopLeft.text = displayText;
                 _cornerValueTopLeft.color = cornerText;
                 _cornerValueTopLeft.fontStyle = FontStyles.Bold;
-                _cornerValueTopLeft.fontSize = 12f;
+                _cornerValueTopLeft.fontSize = cornerSize;
+                EnlargeCornerRect(_cornerValueTopLeft.rectTransform);
             }
 
             if (_cornerValueBottomRight != null)
@@ -411,10 +428,30 @@ namespace LevelUp.UI
                 _cornerValueBottomRight.text = displayText;
                 _cornerValueBottomRight.color = cornerText;
                 _cornerValueBottomRight.fontStyle = FontStyles.Bold;
-                _cornerValueBottomRight.fontSize = 12f;
+                _cornerValueBottomRight.fontSize = cornerSize;
+                EnlargeCornerRect(_cornerValueBottomRight.rectTransform);
             }
 
             UpdateSuitIcon();
+        }
+
+        /// <summary>
+        /// Agrandit le rect d'un coin (30×25 dans le prefab, trop petit pour la
+        /// police 24) sans toucher au prefab : l'ancre du coin est conservée,
+        /// seule la boîte grandit vers l'intérieur de la carte.
+        /// </summary>
+        private static void EnlargeCornerRect(RectTransform rt)
+        {
+            if (rt.sizeDelta.x >= 46f) return; // déjà agrandi
+            rt.sizeDelta = new Vector2(46f, 34f);
+            // Décale le centre pour garder le texte collé au coin (la position
+            // du prefab visait une boîte 30×25).
+            Vector2 pos = rt.anchoredPosition;
+            float dx = (46f - 30f) / 2f;
+            float dy = (34f - 25f) / 2f;
+            rt.anchoredPosition = new Vector2(
+                pos.x + (pos.x >= 0f ? dx : -dx),
+                pos.y + (pos.y >= 0f ? dy : -dy));
         }
 
         private string GetDisplayText()

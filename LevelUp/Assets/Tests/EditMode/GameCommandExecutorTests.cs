@@ -187,5 +187,36 @@ namespace LevelUp.Tests
                 new LayDownLevelCommand(0, new List<Meld>()));
             Assert.IsFalse(result.Success);
         }
+
+        // ──────────────────────────────────────────────
+        //  Deck épuisé — fin de round forcée
+        // ──────────────────────────────────────────────
+
+        [Test]
+        public void DrawFromDeck_deckFullyEmpty_forcesRoundEndWithSmallestHand()
+        {
+            // Vider la pioche : on tire jusqu'à null.
+            int safety = 200;
+            while (safety-- > 0 && _deck.DrawFromPile().HasValue) { /* drain */ }
+
+            // Donner aux joueurs des mains de tailles différentes.
+            // P0 a 5 cartes, P1 en a 2 → P1 doit gagner.
+            for (int i = 0; i < 5; i++) _players[0].AddToHand(CardFactory.R(i + 1));
+            for (int i = 0; i < 2; i++) _players[1].AddToHand(CardFactory.B(i + 1));
+
+            // Tour de P0, phase Draw (StartRound l'a fait au SetUp).
+            // P0 tente de piocher : la pile est vide, aucune défausse à recycler.
+            int? capturedWinner = null;
+            EventBus.Subscribe<DeckExhaustedEvent>(e => capturedWinner = e.WinnerIndex);
+
+            CommandResult result = _executor.Execute(new DrawFromDeckCommand(0));
+
+            Assert.IsTrue(result.Success, "Doit retourner success (pas Failure)");
+            Assert.IsTrue(result.RoundEnded, "Le round doit se terminer");
+            Assert.AreEqual(1, result.WinnerOverride,
+                "Le gagnant override doit être P1 (main la plus courte)");
+            Assert.AreEqual(1, capturedWinner,
+                "DeckExhaustedEvent doit annoncer P1 comme gagnant");
+        }
     }
 }

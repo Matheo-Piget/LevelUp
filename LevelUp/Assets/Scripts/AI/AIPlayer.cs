@@ -8,6 +8,17 @@ using LevelUp.Utils;
 namespace LevelUp.AI
 {
     /// <summary>
+    /// Niveau de jeu des bots. Facile fait des erreurs d'évaluation et ignore
+    /// les défausses ; Difficile ramasse plus agressivement les cartes utiles.
+    /// </summary>
+    public enum AIDifficulty
+    {
+        Easy = 0,
+        Normal = 1,
+        Hard = 2
+    }
+
+    /// <summary>
     /// Intelligence artificielle heuristique pour un joueur bot.
     /// Évalue la main, décide de poser le niveau, choisit la meilleure défausse.
     ///
@@ -22,14 +33,20 @@ namespace LevelUp.AI
 
         private GameManager? _gameManager;
         private int _playerIndex = -1;
+        private AIDifficulty _difficulty = AIDifficulty.Normal;
+
+        /// <summary>Siège joué par ce bot.</summary>
+        public int PlayerIndex => _playerIndex;
 
         /// <summary>
         /// Initialise l'IA avec les références nécessaires.
         /// </summary>
-        public void Initialize(GameManager gameManager, int playerIndex)
+        public void Initialize(GameManager gameManager, int playerIndex,
+            AIDifficulty difficulty = AIDifficulty.Normal)
         {
             _gameManager = gameManager;
             _playerIndex = playerIndex;
+            _difficulty = difficulty;
         }
 
         private void OnEnable()
@@ -57,22 +74,37 @@ namespace LevelUp.AI
         }
 
         /// <summary>
+        /// Force le bot à jouer le tour EN COURS s'il lui appartient. Utilisé
+        /// quand un humain déconnecté (en ligne) est converti en bot au milieu
+        /// de son propre tour : sans ça, la partie resterait bloquée jusqu'au
+        /// prochain TurnStartedEvent.
+        /// </summary>
+        public void PlayTurnIfCurrent()
+        {
+            if (_gameManager?.TurnManager == null) return;
+            if (_gameManager.TurnManager.CurrentPlayerIndex != _playerIndex) return;
+
+            StartCoroutine(PlayTurnCoroutine());
+        }
+
+        /// <summary>
         /// Joue un tour complet avec des délais pour simuler la réflexion.
+        /// Reprend depuis la phase courante : si la pioche est déjà faite
+        /// (reprise après déconnexion), on enchaîne sur les phases suivantes.
         /// </summary>
         private IEnumerator PlayTurnCoroutine()
         {
             if (_gameManager?.TurnManager == null) yield break;
+            if (_gameManager.TurnManager.CurrentPlayerIndex != _playerIndex) yield break;
 
             EventBus.Publish(new AIThinkingEvent { PlayerIndex = _playerIndex, IsThinking = true });
 
-            // Phase 1 : Piocher
+            // Phase 1 : Piocher (sautée si le tour a déjà dépassé cette phase)
             yield return new WaitForSeconds(_thinkDelay);
-            if (_gameManager.TurnManager.CurrentPhase != TurnPhase.Draw)
+            if (_gameManager.TurnManager.CurrentPhase == TurnPhase.Draw)
             {
-                EventBus.Publish(new AIThinkingEvent { PlayerIndex = _playerIndex, IsThinking = false });
-                yield break;
+                DecideDraw();
             }
-            DecideDraw();
 
             // Phase 2 : Tenter de poser le niveau
             yield return new WaitForSeconds(_actionDelay);
@@ -114,7 +146,8 @@ namespace LevelUp.AI
             DeckManager deck = _gameManager.DeckManager;
             bool drewFromDiscard = false;
 
-            for (int i = 0; i < deck.DiscardPileCount; i++)
+            // Facile : ne regarde jamais les défausses, pioche toujours au deck.
+            for (int i = 0; _difficulty != AIDifficulty.Easy && i < deck.DiscardPileCount; i++)
             {
                 CardModel? topCard = deck.PeekDiscard(i);
                 if (!topCard.HasValue) continue;
@@ -183,6 +216,15 @@ namespace LevelUp.AI
             }
 
             PlayerModel player = _gameManager.TurnManager!.CurrentPlayer;
+
+            // Facile : oublie parfois de compléter les combinaisons posées.
+            if (_difficulty == AIDifficulty.Easy && Random.value < 0.4f)
+            {
+                _gameManager.ExecuteCommand(
+                    new SkipPhaseCommand(_playerIndex, TurnPhase.AddToMelds));
+                return;
+            }
+
             bool addedAny = true;
 
             while (addedAny && player.Hand.Count > 1)
@@ -268,7 +310,11 @@ namespace LevelUp.AI
         {
             if (card.IsWild) return 10f;
 
-            float score = 0f;
+            // Facile : bruit d'évaluation — le bot se trompe régulièrement sur
+            // la valeur d'une carte et défausse parfois une carte utile.
+            float score = _difficulty == AIDifficulty.Easy
+                ? Random.Range(-4f, 4f)
+                : 0f;
             int level = player.CurrentLevel;
 
             List<List<LevelValidator.LevelRequirement>> reqs =
@@ -314,7 +360,9 @@ namespace LevelUp.AI
 
         private bool IsCardUseful(CardModel card, PlayerModel player)
         {
-            return EvaluateCardUsefulness(card, player) >= 4f;
+            // Difficile : ramasse plus agressivement dans les défausses.
+            float threshold = _difficulty == AIDifficulty.Hard ? 3f : 4f;
+            return EvaluateCardUsefulness(card, player) >= threshold;
         }
 
         /// <summary>

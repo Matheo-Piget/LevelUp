@@ -102,25 +102,36 @@ namespace LevelUp.Core
         public string Message { get; }
         public bool RoundEnded { get; }
         public CardModel? DrawnCard { get; }
+        /// <summary>
+        /// Si non nul, surcharge l'index du joueur gagnant pour ce round.
+        /// Utilisé pour la fin de round forcée (deck épuisé) où le gagnant
+        /// n'est pas le joueur courant mais celui avec la main la plus courte.
+        /// </summary>
+        public int? WinnerOverride { get; }
 
-        private CommandResult(bool success, string message, bool roundEnded, CardModel? drawnCard)
+        private CommandResult(bool success, string message, bool roundEnded,
+            CardModel? drawnCard, int? winnerOverride)
         {
             Success = success;
             Message = message;
             RoundEnded = roundEnded;
             DrawnCard = drawnCard;
+            WinnerOverride = winnerOverride;
         }
 
         public static CommandResult Ok(string message = "")
-            => new(true, message, false, null);
+            => new(true, message, false, null, null);
 
         public static CommandResult OkWithCard(CardModel card, string message = "")
-            => new(true, message, false, card);
+            => new(true, message, false, card, null);
 
         public static CommandResult RoundComplete(string message = "")
-            => new(true, message, true, null);
+            => new(true, message, true, null, null);
+
+        public static CommandResult RoundCompleteWithWinner(int winnerIndex, string message = "")
+            => new(true, message, true, null, winnerIndex);
 
         public static CommandResult Failure(string reason)
-            => new(false, reason, false, null);
+            => new(false, reason, false, null, null);
     }
 }

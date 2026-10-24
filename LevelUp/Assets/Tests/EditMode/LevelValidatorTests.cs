@@ -34,28 +34,31 @@ namespace LevelUp.Tests
         }
 
         [Test]
-        public void Level3_twoSets_validates()
+        public void Level7_twoSets_validates()
         {
             List<CardModel> hand = new()
             {
                 CardFactory.R(3), CardFactory.B(3), CardFactory.G(3),
                 CardFactory.Y(8), CardFactory.P(8), CardFactory.O(8),
             };
-            Assert.IsTrue(LevelValidator.IsLevelComplete(hand, 3, null, out List<Meld> melds));
+            // Niveau 7 = 2 brelans
+            Assert.IsTrue(LevelValidator.IsLevelComplete(hand, 7, null, out List<Meld> melds));
             Assert.AreEqual(2, melds.Count);
             Assert.AreEqual(MeldType.Set, melds[0].Type);
             Assert.AreEqual(MeldType.Set, melds[1].Type);
         }
 
         [Test]
-        public void Level5_flushOf5_validates()
+        public void Level4_flushOf5AndRunOf3_validates()
         {
+            // Niveau 4 = 1 flush de 5 + 1 suite de 3
             List<CardModel> hand = new()
             {
                 CardFactory.R(2), CardFactory.R(5), CardFactory.R(7), CardFactory.R(11), CardFactory.R(14),
+                CardFactory.B(8), CardFactory.G(9), CardFactory.Y(10),
             };
-            Assert.IsTrue(LevelValidator.IsLevelComplete(hand, 5, null, out List<Meld> melds));
-            Assert.AreEqual(1, melds.Count);
+            Assert.IsTrue(LevelValidator.IsLevelComplete(hand, 4, null, out List<Meld> melds));
+            Assert.AreEqual(2, melds.Count);
             Assert.AreEqual(MeldType.Flush, melds[0].Type);
         }
 
@@ -82,25 +85,25 @@ namespace LevelUp.Tests
         }
 
         [Test]
-        public void Level7_quartetAndPair_validates()
+        public void Level2_setAndPair_validates()
         {
-            // 4 cartes de valeur 5 + 2 cartes de valeur 9
+            // Niveau 2 = 1 brelan + 1 paire
             List<CardModel> hand = new()
             {
-                CardFactory.R(5), CardFactory.B(5), CardFactory.G(5), CardFactory.Y(5),
+                CardFactory.R(5), CardFactory.B(5), CardFactory.G(5),
                 CardFactory.P(9), CardFactory.O(9),
             };
-            Assert.IsTrue(LevelValidator.IsLevelComplete(hand, 7, null, out List<Meld> _));
+            Assert.IsTrue(LevelValidator.IsLevelComplete(hand, 2, null, out List<Meld> _));
         }
 
         [Test]
-        public void Level8_flushOf7WithWilds_validates()
+        public void Level8_runOf8WithWilds_validates()
         {
-            // 5 cartes rouges + 2 wilds = flush de 7
+            // 3..9 avec deux trous comblés par des wilds = suite de 8
             List<CardModel> hand = new()
             {
-                CardFactory.R(2), CardFactory.R(4), CardFactory.R(7),
-                CardFactory.R(11), CardFactory.R(14),
+                CardFactory.R(3), CardFactory.B(4), CardFactory.G(6),
+                CardFactory.Y(7), CardFactory.P(9), CardFactory.O(10),
                 CardFactory.Wild(), CardFactory.Wild(),
             };
             Assert.IsTrue(LevelValidator.IsLevelComplete(hand, 8, null, out List<Meld> _));
@@ -152,7 +155,7 @@ namespace LevelUp.Tests
         [Test]
         public void MeldsSatisfyLevel_runTooShort_returnsFalse()
         {
-            // Niveau 6 = 1 run de 5, on envoie un run de 4
+            // Niveau 6 = 1 run de 7, on envoie un run de 4
             List<Meld> melds = new()
             {
                 new Meld(MeldType.Run, new List<CardModel>
@@ -165,7 +168,7 @@ namespace LevelUp.Tests
         [Test]
         public void MeldsSatisfyLevel_orderIndependent()
         {
-            // Niveau 2 = 1 run de 3 + 1 brelan, peu importe l'ordre des melds.
+            // Niveau 3 = 1 run de 3 + 1 brelan, peu importe l'ordre des melds.
             List<Meld> melds = new()
             {
                 new Meld(MeldType.Set, new List<CardModel>
@@ -173,7 +176,7 @@ namespace LevelUp.Tests
                 new Meld(MeldType.Run, new List<CardModel>
                     { CardFactory.Y(8), CardFactory.P(9), CardFactory.O(10) }, ownerIndex: 0),
             };
-            Assert.IsTrue(LevelValidator.MeldsSatisfyLevel(melds, 2, null));
+            Assert.IsTrue(LevelValidator.MeldsSatisfyLevel(melds, 3, null));
         }
     }
 }

@@ -10,10 +10,37 @@ namespace LevelUp.Utils
     ///
     /// Robustesse : chaque subscriber est invoqué dans un try/catch isolé.
     /// Un handler qui lève une exception ne bloque pas les suivants.
+    ///
+    /// Performance : Publish n'alloue rien tant que les abonnements ne changent
+    /// pas — le snapshot d'invocation est mis en cache et invalidé uniquement
+    /// par Subscribe/Unsubscribe. Itérer un snapshot immuable protège aussi
+    /// contre les (dés)abonnements effectués par un handler pendant le dispatch.
     /// </summary>
     public static class EventBus
     {
-        private static readonly Dictionary<Type, Delegate> Events = new();
+        private sealed class Subscription
+        {
+            public Delegate? Combined;
+            public Delegate[]? InvocationCache;
+        }
+
+        private static readonly Dictionary<Type, Subscription> Events = new();
+
+        // Avec "Enter Play Mode Options" (sans domain reload), les statics
+        // survivent entre deux Play : on repart proprement à chaque lancement.
+        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
+        private static void ResetStatics()
+        {
+            Events.Clear();
+            Muted = false;
+        }
+
+        /// <summary>
+        /// Coupe toute publication tant que vrai. Sert à rejouer silencieusement
+        /// l'historique d'une partie (resynchronisation en ligne) sans déclencher
+        /// des centaines d'animations ; les vues sont ensuite resynchronisées d'un bloc.
+        /// </summary>
+        public static bool Muted { get; set; }
 
         /// <summary>
         /// S'abonner à un événement de type T. Idempotent : un même handler
@@ -23,16 +50,16 @@ namespace LevelUp.Utils
         public static void Subscribe<T>(Action<T> handler) where T : struct
         {
             Type type = typeof(T);
-            if (Events.TryGetValue(type, out Delegate? existing))
+            if (!Events.TryGetValue(type, out Subscription? sub))
             {
-                // Dédoublonnage : retire le handler s'il est déjà présent.
-                Delegate? without = Delegate.Remove(existing, handler);
-                Events[type] = Delegate.Combine(without, handler);
+                sub = new Subscription();
+                Events[type] = sub;
             }
-            else
-            {
-                Events[type] = handler;
-            }
+
+            // Dédoublonnage : retire le handler s'il est déjà présent.
+            Delegate? without = Delegate.Remove(sub.Combined, handler);
+            sub.Combined = Delegate.Combine(without, handler);
+            sub.InvocationCache = null;
         }
 
         /// <summary>
@@ -41,17 +68,13 @@ namespace LevelUp.Utils
         public static void Unsubscribe<T>(Action<T> handler) where T : struct
         {
             Type type = typeof(T);
-            if (Events.TryGetValue(type, out Delegate? existing))
+            if (!Events.TryGetValue(type, out Subscription? sub)) return;
+
+            sub.Combined = Delegate.Remove(sub.Combined, handler);
+            sub.InvocationCache = null;
+            if (sub.Combined == null)
             {
-                Delegate? result = Delegate.Remove(existing, handler);
-                if (result == null)
-                {
-                    Events.Remove(type);
-                }
-                else
-                {
-                    Events[type] = result;
-                }
+                Events.Remove(type);
             }
         }
 
@@ -62,19 +85,21 @@ namespace LevelUp.Utils
         /// </summary>
         public static void Publish<T>(T eventData) where T : struct
         {
-            Type type = typeof(T);
-            if (!Events.TryGetValue(type, out Delegate? existing)) return;
-            if (existing is not Action<T> action) return;
+            if (Muted) return;
+            if (!Events.TryGetValue(typeof(T), out Subscription? sub)) return;
+            if (sub.Combined is not Action<T>) return;
 
-            foreach (Delegate d in action.GetInvocationList())
+            Delegate[] handlers = sub.InvocationCache ??= sub.Combined.GetInvocationList();
+
+            for (int i = 0; i < handlers.Length; i++)
             {
                 try
                 {
-                    ((Action<T>)d).Invoke(eventData);
+                    ((Action<T>)handlers[i]).Invoke(eventData);
                 }
                 catch (Exception ex)
                 {
-                    Debug.LogError($"[EventBus] Exception in {type.Name} handler: {ex}");
+                    Debug.LogError($"[EventBus] Exception in {typeof(T).Name} handler: {ex}");
                 }
             }
         }

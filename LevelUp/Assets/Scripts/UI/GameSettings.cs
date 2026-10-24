@@ -14,11 +14,17 @@ namespace LevelUp.UI
         private const string KeySfx = "levelup.sfx";
         private const string KeyQuality = "levelup.quality";
         private const string KeyColorblind = "levelup.colorblind";
+        private const string KeyPlayerCount = "levelup.playercount";
+        private const string KeyDifficulty = "levelup.difficulty";
+        private const string KeyRandomContracts = "levelup.randomcontracts";
 
         private static float _musicVolume = 0.6f;
         private static float _sfxVolume = 0.8f;
         private static int _qualityIndex = 2;
         private static bool _colorblindMode;
+        private static int _playerCount = 4;
+        private static int _difficulty = 1;
+        private static bool _randomContracts;
         private static bool _loaded;
 
         /// <summary>Déclenché à chaque modification de paramètre.</summary>
@@ -77,6 +83,54 @@ namespace LevelUp.UI
             }
         }
 
+        /// <summary>
+        /// Nombre total de joueurs (humain + bots), 2–4.
+        /// Appliqué à la prochaine partie.
+        /// </summary>
+        public static int PlayerCount
+        {
+            get { EnsureLoaded(); return _playerCount; }
+            set
+            {
+                EnsureLoaded();
+                _playerCount = Mathf.Clamp(value, 2, 4);
+                PlayerPrefs.SetInt(KeyPlayerCount, _playerCount);
+                Notify();
+            }
+        }
+
+        /// <summary>
+        /// Difficulté des bots (0=Facile, 1=Normal, 2=Difficile).
+        /// Appliquée à la prochaine partie.
+        /// </summary>
+        public static int Difficulty
+        {
+            get { EnsureLoaded(); return _difficulty; }
+            set
+            {
+                EnsureLoaded();
+                _difficulty = Mathf.Clamp(value, 0, 2);
+                PlayerPrefs.SetInt(KeyDifficulty, _difficulty);
+                Notify();
+            }
+        }
+
+        /// <summary>
+        /// Contrats variés : chaque niveau tire un contrat parmi des variantes de
+        /// difficulté équivalente. Appliqué à la prochaine partie (en ligne : réglage de l'hôte).
+        /// </summary>
+        public static bool RandomContracts
+        {
+            get { EnsureLoaded(); return _randomContracts; }
+            set
+            {
+                EnsureLoaded();
+                _randomContracts = value;
+                PlayerPrefs.SetInt(KeyRandomContracts, value ? 1 : 0);
+                Notify();
+            }
+        }
+
         private static void EnsureLoaded()
         {
             if (_loaded) return;
@@ -84,6 +138,9 @@ namespace LevelUp.UI
             _sfxVolume = PlayerPrefs.GetFloat(KeySfx, 0.8f);
             _qualityIndex = PlayerPrefs.GetInt(KeyQuality, 2);
             _colorblindMode = PlayerPrefs.GetInt(KeyColorblind, 0) == 1;
+            _playerCount = Mathf.Clamp(PlayerPrefs.GetInt(KeyPlayerCount, 4), 2, 4);
+            _difficulty = Mathf.Clamp(PlayerPrefs.GetInt(KeyDifficulty, 1), 0, 2);
+            _randomContracts = PlayerPrefs.GetInt(KeyRandomContracts, 0) == 1;
             _loaded = true;
             ApplyQuality();
         }

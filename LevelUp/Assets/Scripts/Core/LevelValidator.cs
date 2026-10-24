@@ -25,7 +25,8 @@ namespace LevelUp.Core
 
         /// <summary>
         /// Retourne les exigences pour un niveau donné (1-8).
-        /// Configurable via GameConfig, sinon utilise les valeurs par défaut.
+        /// Priorité : définitions explicites du GameConfig, sinon le plan de
+        /// contrats de la partie (<see cref="GameSession.Contracts"/>, cf. <see cref="ContractCatalog"/>).
         /// </summary>
         public static List<List<LevelRequirement>> GetRequirements(int level, GameConfig? config = null)
         {
@@ -34,58 +35,10 @@ namespace LevelUp.Core
                 return config.LevelDefinitions[level - 1].ToRequirements();
             }
 
-            return GetDefaultRequirements(level);
-        }
-
-        /// <summary>
-        /// Exigences par défaut pour les 8 niveaux.
-        /// </summary>
-        private static List<List<LevelRequirement>> GetDefaultRequirements(int level)
-        {
-            return level switch
-            {
-                // 1 → 2 suites de 3
-                1 => new List<List<LevelRequirement>>
-                {
-                    new() { new LevelRequirement(MeldType.Run, 3), new LevelRequirement(MeldType.Run, 3) }
-                },
-                // 2 → 1 suite de 3 + 1 brelan
-                2 => new List<List<LevelRequirement>>
-                {
-                    new() { new LevelRequirement(MeldType.Run, 3), new LevelRequirement(MeldType.Set, 3) }
-                },
-                // 3 → 2 brelans
-                3 => new List<List<LevelRequirement>>
-                {
-                    new() { new LevelRequirement(MeldType.Set, 3), new LevelRequirement(MeldType.Set, 3) }
-                },
-                // 4 → 1 suite de 4 + 1 paire
-                4 => new List<List<LevelRequirement>>
-                {
-                    new() { new LevelRequirement(MeldType.Run, 4), new LevelRequirement(MeldType.Set, 2) }
-                },
-                // 5 → 1 flush de 5
-                5 => new List<List<LevelRequirement>>
-                {
-                    new() { new LevelRequirement(MeldType.Flush, 5) }
-                },
-                // 6 → 1 suite de 5
-                6 => new List<List<LevelRequirement>>
-                {
-                    new() { new LevelRequirement(MeldType.Run, 5) }
-                },
-                // 7 → 1 carré + 1 paire
-                7 => new List<List<LevelRequirement>>
-                {
-                    new() { new LevelRequirement(MeldType.Set, 4), new LevelRequirement(MeldType.Set, 2) }
-                },
-                // 8 → 1 flush de 7
-                8 => new List<List<LevelRequirement>>
-                {
-                    new() { new LevelRequirement(MeldType.Flush, 7) }
-                },
-                _ => new List<List<LevelRequirement>>()
-            };
+            List<LevelRequirement> reqs = GameSession.Contracts.GetRequirements(level);
+            return reqs.Count == 0
+                ? new List<List<LevelRequirement>>()
+                : new List<List<LevelRequirement>> { reqs };
         }
 
         /// <summary>

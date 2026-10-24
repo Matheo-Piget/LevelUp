@@ -90,6 +90,18 @@ namespace LevelUp.UI
         private void Start()
         {
             if (_gameOverPanel != null) _gameOverPanel.SetActive(false);
+
+            // Filet de sécurité : sans CanvasGroup, le fade de ShowStatus
+            // n'agit sur rien et le statut ("ROUND 1"…) reste affiché à vie.
+            if (_statusCanvasGroup == null && _statusText != null)
+            {
+                _statusCanvasGroup = _statusText.GetComponent<CanvasGroup>();
+                if (_statusCanvasGroup == null)
+                {
+                    _statusCanvasGroup = _statusText.gameObject.AddComponent<CanvasGroup>();
+                }
+            }
+
             if (_statusCanvasGroup != null) _statusCanvasGroup.alpha = 0f;
             if (_statusText != null) _statusRect = _statusText.GetComponent<RectTransform>();
 
@@ -370,17 +382,17 @@ namespace LevelUp.UI
 
         private void OnLevelLaidDown(LevelLaidDownEvent evt)
         {
-            ShowStatus($"Player {evt.PlayerIndex + 1} pose le NIVEAU {evt.Level} !");
+            ShowStatus($"{ResolvePlayerName(evt.PlayerIndex)} pose le NIVEAU {evt.Level} !");
         }
 
         private void OnPlayerSkipped(PlayerSkippedEvent evt)
         {
-            ShowStatus($"Player {evt.PlayerIndex + 1} SKIP !");
+            ShowStatus($"{ResolvePlayerName(evt.PlayerIndex)} passe son tour !");
         }
 
         private void OnForcedDraw(ForcedDrawEvent evt)
         {
-            ShowStatus($"Player {evt.PlayerIndex + 1} +{evt.CardCount} CARTES !");
+            ShowStatus($"+{evt.CardCount} cartes pour {ResolvePlayerName(evt.PlayerIndex)} !");
         }
 
         private void OnActionCardPlayed(ActionCardPlayedEvent evt)
@@ -398,7 +410,7 @@ namespace LevelUp.UI
 
         private void OnRoundEnded(RoundEndedEvent evt)
         {
-            ShowStatus($"Player {evt.WinnerIndex + 1} WIN !");
+            ShowStatus($"{ResolvePlayerName(evt.WinnerIndex)} remporte la manche !");
         }
 
         private void OnGameOver(GameOverEvent evt)
@@ -423,7 +435,7 @@ namespace LevelUp.UI
             }
             if (_winnerText != null)
             {
-                _winnerText.text = $"PLAYER {evt.WinnerIndex + 1} WINS!";
+                _winnerText.text = $"{ResolvePlayerName(evt.WinnerIndex).ToUpperInvariant()} GAGNE !";
             }
         }
 
@@ -455,18 +467,7 @@ namespace LevelUp.UI
         /// </summary>
         private static string DescribeLevelRequirement(int level)
         {
-            return level switch
-            {
-                1 => "2 suites de 3",
-                2 => "1 suite de 3 + 1 brelan",
-                3 => "2 brelans",
-                4 => "1 suite de 4 + 1 paire",
-                5 => "1 flush de 5",
-                6 => "1 suite de 5",
-                7 => "1 carre + 1 paire",
-                8 => "1 flush de 7",
-                _ => "?"
-            };
+            return ContractCatalog.DescribeLevel(level);
         }
     }
 }

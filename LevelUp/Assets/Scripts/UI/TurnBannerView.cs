@@ -36,20 +36,7 @@ namespace LevelUp.UI
             Constants.CardYellow
         };
 
-        // Noms des objectifs par niveau (pour affichage rapide)
-        private static readonly string[] LevelObjectives =
-        {
-            "2 suites de 3",
-            "1 suite + 1 brelan",
-            "2 brelans",
-            "1 suite de 4 + 1 paire",
-            "1 flush de 5",
-            "1 suite de 5",
-            "1 carre + 1 paire",
-            "1 flush de 7"
-        };
-
-        private GameManager? _gameManager;
+private GameManager? _gameManager;
 
         public void Initialize(GameManager gm)
         {
@@ -144,8 +131,8 @@ namespace LevelUp.UI
                 ? PlayerColors[playerIndex]
                 : Constants.TextPrimary;
 
-            string objective = (playerLevel >= 1 && playerLevel <= LevelObjectives.Length)
-                ? LevelObjectives[playerLevel - 1]
+            string objective = playerLevel >= 1 && playerLevel <= Constants.MaxLevel
+                ? ContractCatalog.DescribeLevel(playerLevel)
                 : "";
 
             // ── Container principal ──

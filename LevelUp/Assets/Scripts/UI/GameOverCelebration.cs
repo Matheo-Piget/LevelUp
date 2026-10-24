@@ -50,12 +50,23 @@ namespace LevelUp.UI
             _root.gameObject.SetActive(false);
 
             EventBus.Subscribe<GameOverEvent>(OnGameOver);
+            EventBus.Subscribe<GameStartedEvent>(OnGameStarted);
         }
 
         private void OnDestroy()
         {
             EventBus.Unsubscribe<GameOverEvent>(OnGameOver);
+            EventBus.Unsubscribe<GameStartedEvent>(OnGameStarted);
             StopAllCoroutines();
+        }
+
+        /// <summary>
+        /// Une nouvelle partie démarre (ex: replay lancé par l'hôte en ligne) :
+        /// fermer l'overlay s'il est encore affiché sur cet appareil.
+        /// </summary>
+        private void OnGameStarted(GameStartedEvent evt)
+        {
+            if (_isShown) Hide();
         }
 
         private void OnGameOver(GameOverEvent evt)

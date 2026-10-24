@@ -22,7 +22,6 @@ namespace LevelUp.UI
             EventBus.Subscribe<LevelLaidDownEvent>(HandleLevelLaidDown);
             EventBus.Subscribe<RoundEndedEvent>(HandleRoundEnded);
             EventBus.Subscribe<GameOverEvent>(HandleGameOver);
-            EventBus.Subscribe<CardDrawnEvent>(HandleCardDrawn);
             EventBus.Subscribe<LevelCompletedEvent>(HandleLevelCompleted);
             EventBus.Subscribe<CardDiscardedEvent>(HandleCardDiscarded);
             EventBus.Subscribe<ActionCardPlayedEvent>(HandleActionCardPlayed);
@@ -34,7 +33,6 @@ namespace LevelUp.UI
             EventBus.Unsubscribe<LevelLaidDownEvent>(HandleLevelLaidDown);
             EventBus.Unsubscribe<RoundEndedEvent>(HandleRoundEnded);
             EventBus.Unsubscribe<GameOverEvent>(HandleGameOver);
-            EventBus.Unsubscribe<CardDrawnEvent>(HandleCardDrawn);
             EventBus.Unsubscribe<LevelCompletedEvent>(HandleLevelCompleted);
             EventBus.Unsubscribe<CardDiscardedEvent>(HandleCardDiscarded);
             EventBus.Unsubscribe<ActionCardPlayedEvent>(HandleActionCardPlayed);
@@ -74,14 +72,6 @@ namespace LevelUp.UI
         {
             if (_animController == null) return;
             StartCoroutine(RunGameOverSequence());
-        }
-
-        private void HandleCardDrawn(CardDrawnEvent evt)
-        {
-            if (_animController != null)
-            {
-                _animController.AnimateScreenFlash(new Color(1f, 1f, 1f, 0.05f), 0.15f);
-            }
         }
 
         private void HandleLevelCompleted(LevelCompletedEvent evt)

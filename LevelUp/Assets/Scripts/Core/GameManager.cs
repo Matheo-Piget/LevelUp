@@ -5,6 +5,23 @@ using LevelUp.Utils;
 namespace LevelUp.Core
 {
     /// <summary>
+    /// Description d'un siège au démarrage d'une partie : nom + humain/IA.
+    /// Utilisé par le multijoueur en ligne pour que tous les appareils
+    /// construisent exactement la même liste de joueurs.
+    /// </summary>
+    public readonly struct PlayerSetup
+    {
+        public readonly string Name;
+        public readonly bool IsAI;
+
+        public PlayerSetup(string name, bool isAI)
+        {
+            Name = name;
+            IsAI = isAI;
+        }
+    }
+
+    /// <summary>
     /// Machine à états principale du jeu : Setup → PlayerTurn → EndRound → GameOver.
     /// Orchestre les systèmes et expose le <see cref="GameCommandExecutor"/>
     /// comme point d'entrée unique pour toutes les actions.
@@ -21,6 +38,7 @@ namespace LevelUp.Core
         private GameCommandExecutor? _executor;
         private int _roundNumber;
         private int _roundStarterIndex;
+        private bool _rebuilding;
 
         /// <summary>État actuel de la partie.</summary>
         public GameState State => _state;
@@ -44,9 +62,36 @@ namespace LevelUp.Core
         public int RoundNumber => _roundNumber;
 
         /// <summary>
-        /// Initialise et démarre une nouvelle partie.
+        /// Publié après chaque commande exécutée AVEC SUCCÈS (fin de round incluse).
+        /// C'est le point d'accroche du multijoueur : la couche réseau relaie la
+        /// commande validée aux autres appareils, qui la rejouent à l'identique.
         /// </summary>
-        public void StartGame(int humanPlayers, int aiPlayers)
+        public event System.Action<IGameCommand, CommandResult>? CommandExecuted;
+
+        /// <summary>
+        /// Initialise et démarre une nouvelle partie (solo : humains puis bots).
+        /// </summary>
+        public void StartGame(int humanPlayers, int aiPlayers, bool randomContracts = false)
+        {
+            List<PlayerSetup> setups = new();
+            for (int i = 0; i < humanPlayers; i++)
+            {
+                setups.Add(new PlayerSetup($"Player {i + 1}", false));
+            }
+            for (int i = 0; i < aiPlayers; i++)
+            {
+                setups.Add(new PlayerSetup($"Bot {i + 1}", true));
+            }
+
+            StartGame(setups, System.Environment.TickCount, randomContracts);
+        }
+
+        /// <summary>
+        /// Initialise et démarre une partie avec une liste de sièges explicite et
+        /// un seed de mélange. Même (setups, seed, mode de contrats) ⇒ même partie
+        /// sur tous les appareils : c'est le point d'entrée du multijoueur en ligne.
+        /// </summary>
+        public void StartGame(IReadOnlyList<PlayerSetup> setups, int seed, bool randomContracts = false)
         {
             if (_config == null)
             {
@@ -57,18 +102,17 @@ namespace LevelUp.Core
             _state = GameState.Setup;
             _players.Clear();
             _roundNumber = 0;
+            GameSession.Contracts = randomContracts
+                ? ContractPlan.CreateRandom(seed)
+                : ContractPlan.Classic;
 
-            int totalPlayers = humanPlayers + aiPlayers;
-            for (int i = 0; i < humanPlayers; i++)
+            int totalPlayers = setups.Count;
+            for (int i = 0; i < totalPlayers; i++)
             {
-                _players.Add(new PlayerModel(i, $"Player {i + 1}", false));
-            }
-            for (int i = 0; i < aiPlayers; i++)
-            {
-                _players.Add(new PlayerModel(humanPlayers + i, $"Bot {i + 1}", true));
+                _players.Add(new PlayerModel(i, setups[i].Name, setups[i].IsAI));
             }
 
-            _deckManager = new DeckManager(_config);
+            _deckManager = new DeckManager(_config, seed);
             _actionHandler = new ActionCardHandler(_deckManager, _players);
             _turnManager = new TurnManager(_players, _actionHandler);
             _executor = new GameCommandExecutor(
@@ -183,10 +227,121 @@ namespace LevelUp.Core
 
             if (result.RoundEnded)
             {
-                OnRoundEnd(_turnManager!.CurrentPlayerIndex);
+                // Le gagnant par défaut est le joueur courant (cas standard : main vide
+                // après défausse). Si l'exécuteur fournit un override (deck épuisé),
+                // c'est lui qui prime.
+                int winner = result.WinnerOverride ?? _turnManager!.CurrentPlayerIndex;
+                OnRoundEnd(winner);
+            }
+
+            // Notifier APRÈS le traitement complet (fin de round comprise) : le
+            // relais réseau n'envoie que des commandes intégralement appliquées.
+            if (result.Success && !_rebuilding)
+            {
+                CommandExecuted?.Invoke(command, result);
             }
 
             return result;
+        }
+
+        /// <summary>
+        /// Reconstruit une partie en rejouant son historique complet (même sièges,
+        /// même seed, mêmes commandes ⇒ même état, cf. simulation miroir).
+        /// Silencieux : aucun événement publié, aucune commande relayée — l'appelant
+        /// resynchronise ensuite les vues. Retourne false si une commande échoue.
+        /// </summary>
+        public bool RebuildFromHistory(IReadOnlyList<PlayerSetup> setups, int seed,
+            bool randomContracts, IReadOnlyList<IGameCommand> history)
+        {
+            bool wasMuted = EventBus.Muted;
+            EventBus.Muted = true;
+            _rebuilding = true;
+            try
+            {
+                StartGame(setups, seed, randomContracts);
+                foreach (IGameCommand command in history)
+                {
+                    if (!ExecuteCommand(command).Success) return false;
+                }
+                return true;
+            }
+            finally
+            {
+                _rebuilding = false;
+                EventBus.Muted = wasMuted;
+            }
+        }
+
+        /// <summary>
+        /// Convertit un joueur humain en bot (déconnexion en ligne). L'appelant
+        /// est responsable d'attacher un <c>AIPlayer</c> côté hôte.
+        /// </summary>
+        public void ConvertPlayerToAI(int playerIndex)
+        {
+            if (playerIndex < 0 || playerIndex >= _players.Count) return;
+            _players[playerIndex].IsAI = true;
+        }
+
+        /// <summary>
+        /// Rend un siège à son joueur humain (reconnexion en ligne après qu'un
+        /// bot a pris le relais). L'appelant retire l'<c>AIPlayer</c> côté hôte.
+        /// </summary>
+        public void ConvertAIToPlayer(int playerIndex)
+        {
+            if (playerIndex < 0 || playerIndex >= _players.Count) return;
+            _players[playerIndex].IsAI = false;
+        }
+
+        /// <summary>
+        /// Empreinte de l'état de jeu partagé, pour détecter une désynchronisation
+        /// entre appareils. Indépendante de l'ordre des cartes en main (le tri de
+        /// la main est local à chaque appareil) ; inclut tout ce qui influe sur
+        /// les règles : tour, phase, niveaux, mains, combinaisons, défausses, pioche.
+        /// </summary>
+        public int ComputeStateHash()
+        {
+            unchecked
+            {
+                int h = 17;
+                h = h * 31 + _roundNumber;
+                h = h * 31 + (int)_state;
+                if (_turnManager != null)
+                {
+                    h = h * 31 + _turnManager.CurrentPlayerIndex;
+                    h = h * 31 + (int)_turnManager.CurrentPhase;
+                }
+
+                foreach (PlayerModel p in _players)
+                {
+                    h = h * 31 + p.CurrentLevel;
+                    h = h * 31 + (p.HasLaidDownThisRound ? 1 : 0);
+                    h = h * 31 + p.SkipCount;
+
+                    // Somme commutative : l'ordre local de la main n'influe pas.
+                    int handSum = 0;
+                    foreach (CardModel c in p.Hand) handSum += (c.Id + 1) * -1640531535; // Knuth
+                    h = h * 31 + handSum;
+                    h = h * 31 + p.Hand.Count;
+
+                    foreach (Meld m in p.LaidMelds)
+                    {
+                        h = h * 31 + (int)m.Type;
+                        foreach (CardModel c in m.Cards) h = h * 31 + c.Id;
+                    }
+                }
+
+                if (_deckManager != null)
+                {
+                    h = h * 31 + _deckManager.DrawPileCount;
+                    for (int i = 0; i < _deckManager.DiscardPileCount; i++)
+                    {
+                        h = h * 31 + _deckManager.GetDiscardCount(i);
+                        CardModel? top = _deckManager.PeekDiscard(i);
+                        h = h * 31 + (top.HasValue ? top.Value.Id : -1);
+                    }
+                }
+                return h;
+            }
         }
 
         /// <summary>

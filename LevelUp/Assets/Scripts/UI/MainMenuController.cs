@@ -32,8 +32,14 @@ namespace LevelUp.UI
         /// <summary>Déclenché quand le joueur clique sur Jouer.</summary>
         public event Action? OnPlayClicked;
 
+        /// <summary>Déclenché quand le joueur clique sur En ligne.</summary>
+        public event Action? OnOnlineClicked;
+
         /// <summary>Indique si le menu est actuellement visible.</summary>
         public bool IsVisible { get; private set; }
+
+        /// <summary>Racine du menu — pour y parenter des panels (ex: OnlinePanel).</summary>
+        public RectTransform? Root => _root;
 
         /// <summary>
         /// Construit le menu sous le canvas parent. Visible par défaut.
@@ -168,7 +174,7 @@ namespace LevelUp.UI
             _buttonColumn = col.GetComponent<RectTransform>();
             _buttonColumn.anchorMin = new Vector2(0.5f, 0.5f);
             _buttonColumn.anchorMax = new Vector2(0.5f, 0.5f);
-            _buttonColumn.sizeDelta = new Vector2(320f, 320f);
+            _buttonColumn.sizeDelta = new Vector2(320f, 400f);
             _buttonColumn.anchoredPosition = new Vector2(0f, -80f);
 
             VerticalLayoutGroup layout = col.AddComponent<VerticalLayoutGroup>();
@@ -181,6 +187,9 @@ namespace LevelUp.UI
 
             UIFactory.CreateButton(col.transform, "BtnPlay", "JOUER",
                 new Vector2(300f, 74f), HandlePlayClicked, Constants.CardGreen);
+
+            UIFactory.CreateButton(col.transform, "BtnOnline", "EN LIGNE",
+                new Vector2(300f, 74f), () => OnOnlineClicked?.Invoke(), Constants.CardBlue);
 
             UIFactory.CreateButton(col.transform, "BtnOptions", "OPTIONS",
                 new Vector2(300f, 74f), HandleOptionsClicked, Constants.CardPurple);

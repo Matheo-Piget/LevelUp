@@ -19,6 +19,26 @@ namespace LevelUp.UI
         [SerializeField] private AnimationController? _animController;
 
         private Coroutine? _activeTransition;
+        private GameObject? _activeOverlay;
+
+        /// <summary>
+        /// Interrompt la transition en cours et détruit son overlay : un
+        /// StopCoroutine seul laisserait l'overlay orphelin à l'écran
+        /// (le Destroy final de la coroutine ne s'exécutant jamais).
+        /// </summary>
+        private void CancelActiveTransition()
+        {
+            if (_activeTransition != null)
+            {
+                StopCoroutine(_activeTransition);
+                _activeTransition = null;
+            }
+            if (_activeOverlay != null)
+            {
+                Destroy(_activeOverlay);
+                _activeOverlay = null;
+            }
+        }
 
         private static readonly Color[] PlayerColors =
         {
@@ -46,19 +66,19 @@ namespace LevelUp.UI
 
         private void OnRoundStarted(RoundStartedEvent evt)
         {
-            if (_activeTransition != null) StopCoroutine(_activeTransition);
+            CancelActiveTransition();
             _activeTransition = StartCoroutine(RoundStartCoroutine(evt.RoundNumber));
         }
 
         private void OnRoundEnded(RoundEndedEvent evt)
         {
-            if (_activeTransition != null) StopCoroutine(_activeTransition);
+            CancelActiveTransition();
             _activeTransition = StartCoroutine(RoundEndCoroutine(evt.WinnerIndex));
         }
 
         private void OnGameOver(GameOverEvent evt)
         {
-            if (_activeTransition != null) StopCoroutine(_activeTransition);
+            CancelActiveTransition();
             _activeTransition = StartCoroutine(GameOverCoroutine(evt.WinnerIndex));
         }
 
@@ -402,6 +422,9 @@ namespace LevelUp.UI
             CanvasGroup cg = overlay.GetComponent<CanvasGroup>();
             cg.blocksRaycasts = false;
             cg.interactable = false;
+
+            // Mémorisé pour pouvoir le détruire si la transition est annulée
+            _activeOverlay = overlay;
 
             // Fond sombre
             GameObject bg = new("Bg", typeof(RectTransform), typeof(Image));

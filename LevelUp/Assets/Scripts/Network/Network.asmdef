@@ -4,7 +4,13 @@
     "references": [
         "LevelUp.Utils",
         "LevelUp.Core",
-        "Unity.TextMeshPro"
+        "Unity.TextMeshPro",
+        "Unity.Netcode.Runtime",
+        "Unity.Networking.Transport",
+        "Unity.Collections",
+        "Unity.Services.Core",
+        "Unity.Services.Relay",
+        "Unity.Services.Authentication"
     ],
     "includePlatforms": [],
     "excludePlatforms": [],

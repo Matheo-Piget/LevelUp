@@ -1,3 +1,4 @@
+using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.UI;
@@ -42,16 +43,37 @@ namespace LevelUp.UI
     private readonly List<PlayerRow> _rows = new();
     private int _activeIndex = -1;
 
+    // Référence lecture seule vers les joueurs de la partie en cours :
+    // permet d'afficher le nombre de cartes en main de chacun (info clé
+    // pour anticiper qui est sur le point de finir la manche).
+    private IReadOnlyList<PlayerModel>? _players;
+
     private void OnEnable()
     {
       EventBus.Subscribe<LevelCompletedEvent>(OnLevelCompleted);
       EventBus.Subscribe<TurnStartedEvent>(OnTurnStarted);
+      EventBus.Subscribe<HandChangedEvent>(OnHandChanged);
+      EventBus.Subscribe<ForcedDrawEvent>(OnForcedDraw);
+      EventBus.Subscribe<RoundStartedEvent>(OnRoundStarted);
     }
 
     private void OnDisable()
     {
       EventBus.Unsubscribe<LevelCompletedEvent>(OnLevelCompleted);
       EventBus.Unsubscribe<TurnStartedEvent>(OnTurnStarted);
+      EventBus.Unsubscribe<HandChangedEvent>(OnHandChanged);
+      EventBus.Unsubscribe<ForcedDrawEvent>(OnForcedDraw);
+      EventBus.Unsubscribe<RoundStartedEvent>(OnRoundStarted);
+    }
+
+    /// <summary>
+    /// Lie les modèles joueurs pour lire leur nombre de cartes en main.
+    /// À appeler après <see cref="Initialize"/> à chaque (re)démarrage de partie.
+    /// </summary>
+    public void BindPlayers(IReadOnlyList<PlayerModel> players)
+    {
+      _players = players;
+      RefreshCardCounts();
     }
 
     public void Initialize(int playerCount, List<string> playerNames)
@@ -219,34 +241,37 @@ namespace LevelUp.UI
       nameText.fontStyle = FontStyles.Bold;
       nameText.raycastTarget = false;
 
-      // Ligne 2 : "Niveau 1 / 8" en typographie discrète
-      GameObject levelObj = new("LevelLabel",
+      // Ligne 2 : piste des niveaux "1 2 3 4 5 6 7 8" — le niveau courant est
+      // surligné, les niveaux passés en indigo, les suivants estompés. On voit
+      // d'un coup d'œil qui est à quel niveau.
+      GameObject levelObj = new("LevelTrack",
           typeof(RectTransform), typeof(TextMeshProUGUI), typeof(LayoutElement));
       levelObj.transform.SetParent(textBlock.transform, false);
       LayoutElement levelLe = levelObj.GetComponent<LayoutElement>();
-      levelLe.preferredHeight = 16f;
+      levelLe.preferredHeight = 20f;
 
       TextMeshProUGUI levelText = levelObj.GetComponent<TextMeshProUGUI>();
-      levelText.text = $"Niveau 1<size=11><color=#6B7280> / {Constants.MaxLevel}</color></size>";
-      levelText.fontSize = 12f;
+      levelText.text = BuildLevelTrack(1);
+      levelText.fontSize = 13f;
       levelText.color = Constants.TextMuted;
-      levelText.alignment = TextAlignmentOptions.Left;
-      levelText.fontStyle = FontStyles.Normal;
+      levelText.alignment = TextAlignmentOptions.MidlineLeft;
+      levelText.fontStyle = FontStyles.Bold;
       levelText.richText = true;
+      levelText.enableWordWrapping = false;
       levelText.raycastTarget = false;
 
       // ─── Indicateur "actif" ────────────────────────────────────────────
-      // Petit point indigo en haut à droite de la rangée — invisible par défaut.
-      // Discret mais immédiatement repérable, pas besoin d'un fond entier.
-      GameObject dotObj = new("ActiveDot",
+      // Barre d'accent verticale collée au bord gauche de la rangée —
+      // invisible par défaut. Immédiatement repérable, sans surcharger.
+      GameObject dotObj = new("ActiveBar",
           typeof(RectTransform), typeof(Image));
       dotObj.transform.SetParent(rowObj.transform, false);
       RectTransform dotRt = dotObj.GetComponent<RectTransform>();
-      dotRt.anchorMin = new Vector2(1f, 0.5f);
-      dotRt.anchorMax = new Vector2(1f, 0.5f);
+      dotRt.anchorMin = new Vector2(0f, 0.5f);
+      dotRt.anchorMax = new Vector2(0f, 0.5f);
       dotRt.pivot = new Vector2(1f, 0.5f);
-      dotRt.sizeDelta = new Vector2(8f, 8f);
-      dotRt.anchoredPosition = new Vector2(-8f, 0f);
+      dotRt.sizeDelta = new Vector2(4f, 56f);
+      dotRt.anchoredPosition = new Vector2(-6f, 0f);
 
       Image dotImg = dotObj.GetComponent<Image>();
       dotImg.sprite = UIFactory.RoundedSprite;
@@ -254,8 +279,78 @@ namespace LevelUp.UI
       dotImg.color = new Color(0f, 0f, 0f, 0f);
       dotImg.raycastTarget = false;
 
+      // ─── Pastille "cartes en main" ─────────────────────────────────────
+      // Pill alignée sur la ligne du nom (haut-droite) : fond + bordure +
+      // mini dos de carte incliné + compteur. L'info d'anticipation clé.
+      GameObject countObj = new("CardCountPill", typeof(RectTransform));
+      countObj.transform.SetParent(rowObj.transform, false);
+      RectTransform ccRt = countObj.GetComponent<RectTransform>();
+      ccRt.anchorMin = new Vector2(1f, 0.5f);
+      ccRt.anchorMax = new Vector2(1f, 0.5f);
+      ccRt.pivot = new Vector2(1f, 0.5f);
+      ccRt.sizeDelta = new Vector2(54f, 26f);
+      // Centrée sur la ligne du nom (~+17 dans une rangée de 100px)
+      ccRt.anchoredPosition = new Vector2(-12f, 16f);
+
+      GameObject pillBgObj = new("Bg", typeof(RectTransform), typeof(Image));
+      pillBgObj.transform.SetParent(countObj.transform, false);
+      RectTransform pbRt = pillBgObj.GetComponent<RectTransform>();
+      pbRt.anchorMin = Vector2.zero;
+      pbRt.anchorMax = Vector2.one;
+      pbRt.sizeDelta = Vector2.zero;
+      Image pillBg = pillBgObj.GetComponent<Image>();
+      pillBg.sprite = UIFactory.RoundedSprite;
+      pillBg.type = Image.Type.Sliced;
+      pillBg.color = Constants.PillIndigoBg;
+      pillBg.raycastTarget = false;
+
+      GameObject pillBorderObj = new("Border", typeof(RectTransform), typeof(Image));
+      pillBorderObj.transform.SetParent(countObj.transform, false);
+      RectTransform pbrRt = pillBorderObj.GetComponent<RectTransform>();
+      pbrRt.anchorMin = Vector2.zero;
+      pbrRt.anchorMax = Vector2.one;
+      pbrRt.sizeDelta = Vector2.zero;
+      Image pillBorder = pillBorderObj.GetComponent<Image>();
+      pillBorder.sprite = UIFactory.RingSprite;
+      pillBorder.type = Image.Type.Sliced;
+      pillBorder.color = Constants.PillIndigoBorder;
+      pillBorder.raycastTarget = false;
+
+      // Mini dos de carte légèrement incliné, façon carte posée sur la table
+      GameObject miniObj = new("MiniCard", typeof(RectTransform), typeof(Image));
+      miniObj.transform.SetParent(countObj.transform, false);
+      RectTransform mcRt = miniObj.GetComponent<RectTransform>();
+      mcRt.anchorMin = new Vector2(0f, 0.5f);
+      mcRt.anchorMax = new Vector2(0f, 0.5f);
+      mcRt.pivot = new Vector2(0.5f, 0.5f);
+      mcRt.sizeDelta = new Vector2(13f, 18f);
+      mcRt.anchoredPosition = new Vector2(14f, 0f);
+      mcRt.localRotation = Quaternion.Euler(0f, 0f, -8f);
+      Image miniImg = miniObj.GetComponent<Image>();
+      miniImg.sprite = UIFactory.RoundedSprite;
+      miniImg.type = Image.Type.Sliced;
+      miniImg.color = new Color(1f, 1f, 1f, 0.28f);
+      miniImg.raycastTarget = false;
+
+      GameObject countTextObj = new("Count",
+          typeof(RectTransform), typeof(TextMeshProUGUI));
+      countTextObj.transform.SetParent(countObj.transform, false);
+      RectTransform ctRt = countTextObj.GetComponent<RectTransform>();
+      ctRt.anchorMin = Vector2.zero;
+      ctRt.anchorMax = Vector2.one;
+      ctRt.offsetMin = new Vector2(24f, 0f);
+      ctRt.offsetMax = new Vector2(-6f, 0f);
+
+      TextMeshProUGUI countText = countTextObj.GetComponent<TextMeshProUGUI>();
+      countText.text = "—";
+      countText.fontSize = 13f;
+      countText.color = Constants.TextPrimary;
+      countText.alignment = TextAlignmentOptions.Midline;
+      countText.fontStyle = FontStyles.Bold;
+      countText.raycastTarget = false;
+
       return new PlayerRow(playerIndex, nameText, levelText, dotImg,
-          playerName, ringSegments);
+          playerName, ringSegments, countText, miniImg, pillBg, pillBorder);
     }
 
     /// <summary>
@@ -385,17 +480,54 @@ namespace LevelUp.UI
       return l > 0.65f;
     }
 
+    // Piste de niveaux pré-construite par niveau courant (évite de re-générer
+    // la même chaîne rich text à chaque tour). Index = niveau courant
+    // (0 inutilisé, MaxLevel+1 = partie finie, tout complété).
+    private static readonly string[] _levelTrackCache = new string[Constants.MaxLevel + 2];
+
+    /// <summary>
+    /// "1 2 3 4 5 6 7 8" : niveaux passés en indigo, courant surligné blanc
+    /// sur fond indigo, suivants estompés.
+    /// </summary>
+    private static string BuildLevelTrack(int currentLevel)
+    {
+      int key = Mathf.Clamp(currentLevel, 0, Constants.MaxLevel + 1);
+      if (_levelTrackCache[key] != null) return _levelTrackCache[key];
+
+      System.Text.StringBuilder sb = new(220);
+      sb.Append("<mspace=1.15em>");
+      for (int lvl = 1; lvl <= Constants.MaxLevel; lvl++)
+      {
+        if (lvl == key)
+        {
+          // Surligné : blanc sur pastille indigo (tag <mark> de TMP)
+          sb.Append("<mark=#6366F1B4><color=#FFFFFF>").Append(lvl).Append("</color></mark>");
+        }
+        else if (lvl < key)
+        {
+          sb.Append("<color=#818CF8>").Append(lvl).Append("</color>");
+        }
+        else
+        {
+          sb.Append("<color=#4B5563>").Append(lvl).Append("</color>");
+        }
+      }
+      sb.Append("</mspace>");
+
+      _levelTrackCache[key] = sb.ToString();
+      return _levelTrackCache[key];
+    }
+
     public void UpdatePlayerLevel(int playerIndex, int currentLevel)
     {
       if (playerIndex < 0 || playerIndex >= _rows.Count) return;
 
       PlayerRow row = _rows[playerIndex];
 
-      // Met à jour le label "Niveau X / 8"
+      // Met à jour la piste des niveaux avec le courant surligné
       if (row.LevelText != null)
       {
-        row.LevelText.text =
-            $"Niveau {currentLevel}<size=11><color=#6B7280> / {Constants.MaxLevel}</color></size>";
+        row.LevelText.text = BuildLevelTrack(currentLevel);
       }
 
       // Anneau : segments < currentLevel = pleins, == currentLevel = en cours, > = vides
@@ -445,12 +577,7 @@ namespace LevelUp.UI
               ? Constants.TextPrimary
               : Constants.TextSecondary;
         }
-        if (row.LevelText != null)
-        {
-          row.LevelText.color = active
-              ? Constants.TextSecondary
-              : Constants.TextMuted;
-        }
+        // (La piste de niveaux porte ses couleurs en rich text — rien à teinter.)
         if (row.ActiveDot != null)
         {
           Color c = Constants.AccentLight;
@@ -464,11 +591,96 @@ namespace LevelUp.UI
     {
       SetActivePlayer(evt.PlayerIndex);
       UpdatePlayerLevel(evt.PlayerIndex, evt.PlayerLevel);
+      // Filet de sécurité : rattrape les mutations de main qui ne publient
+      // pas HandChangedEvent (ex. pioche forcée d'un +2 chez la victime).
+      RefreshCardCounts();
     }
 
     private void OnLevelCompleted(LevelCompletedEvent evt)
     {
       UpdatePlayerLevel(evt.PlayerIndex, evt.Level + 1);
+    }
+
+    private void OnHandChanged(HandChangedEvent evt)
+    {
+      SetCardCount(evt.PlayerIndex, evt.NewHand.Count);
+    }
+
+    private void OnForcedDraw(ForcedDrawEvent evt)
+    {
+      if (_players != null && evt.PlayerIndex >= 0 && evt.PlayerIndex < _players.Count)
+      {
+        SetCardCount(evt.PlayerIndex, _players[evt.PlayerIndex].Hand.Count);
+      }
+    }
+
+    private void OnRoundStarted(RoundStartedEvent evt)
+    {
+      // La distribution se termine juste après la publication de l'événement :
+      // on lit les mains une frame plus tard.
+      StartCoroutine(RefreshCountsNextFrame());
+    }
+
+    private IEnumerator RefreshCountsNextFrame()
+    {
+      yield return null;
+      RefreshCardCounts();
+    }
+
+    private void RefreshCardCounts()
+    {
+      if (_players == null) return;
+      for (int i = 0; i < _players.Count && i < _rows.Count; i++)
+      {
+        SetCardCount(i, _players[i].Hand.Count);
+      }
+    }
+
+    /// <summary>
+    /// Met à jour le badge "cartes en main". Passe en orange (et pulse) quand
+    /// le joueur est sur le point de finir — signal d'alerte pour les autres.
+    /// </summary>
+    private void SetCardCount(int playerIndex, int count)
+    {
+      if (playerIndex < 0 || playerIndex >= _rows.Count) return;
+
+      PlayerRow row = _rows[playerIndex];
+      if (row.CountText == null) return;
+
+      bool danger = count <= 2;
+      bool changed = row.LastCardCount != count;
+      row.LastCardCount = count;
+
+      Color orange = Constants.CardOrange;
+      row.CountText.text = count.ToString();
+      row.CountText.color = danger
+          ? Color.Lerp(orange, Color.white, 0.25f)
+          : Constants.TextPrimary;
+
+      if (row.CountIcon != null)
+      {
+        row.CountIcon.color = danger
+            ? new Color(orange.r, orange.g, orange.b, 0.9f)
+            : new Color(1f, 1f, 1f, 0.28f);
+      }
+      // Toute la pastille bascule en orange : fond + bordure, pas juste le chiffre.
+      if (row.CountBg != null)
+      {
+        row.CountBg.color = danger
+            ? new Color(orange.r, orange.g, orange.b, 0.16f)
+            : Constants.PillIndigoBg;
+      }
+      if (row.CountBorder != null)
+      {
+        row.CountBorder.color = danger
+            ? new Color(orange.r, orange.g, orange.b, 0.5f)
+            : Constants.PillIndigoBorder;
+      }
+
+      if (danger && changed && _animController != null)
+      {
+        _animController.AnimatePulse(row.CountText.rectTransform);
+      }
     }
 
     public void RefreshAll(IReadOnlyList<Core.PlayerModel> players)
@@ -505,9 +717,16 @@ namespace LevelUp.UI
       public Image? ActiveDot;
       public string PlayerName;
       public List<Image> RingSegments;
+      public TextMeshProUGUI? CountText;
+      public Image? CountIcon;
+      public Image? CountBg;
+      public Image? CountBorder;
+      public int LastCardCount = -1;
 
       public PlayerRow(int index, TextMeshProUGUI? name, TextMeshProUGUI? level,
-          Image? activeDot, string playerName, List<Image> ringSegments)
+          Image? activeDot, string playerName, List<Image> ringSegments,
+          TextMeshProUGUI? countText, Image? countIcon,
+          Image? countBg, Image? countBorder)
       {
         PlayerIndex = index;
         NameText = name;
@@ -515,6 +734,10 @@ namespace LevelUp.UI
         ActiveDot = activeDot;
         PlayerName = playerName;
         RingSegments = ringSegments;
+        CountText = countText;
+        CountIcon = countIcon;
+        CountBg = countBg;
+        CountBorder = countBorder;
       }
     }
   }

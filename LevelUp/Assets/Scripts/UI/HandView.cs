@@ -1,6 +1,8 @@
 using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.InputSystem;
+using UnityEngine.UI;
+using TMPro;
 using LevelUp.Core;
 using LevelUp.Utils;
 
@@ -70,6 +72,63 @@ namespace LevelUp.UI
         // toute désynchronisation entre la main du modèle et la vue.
         private List<CardModel>? _pendingHand;
 
+        private void Awake()
+        {
+            // Canvas imbriqué : la main bouge chaque frame (lerp, breathing, hover).
+            // L'isoler dans son propre Canvas évite de re-mesher tout le HUD à
+            // chaque frame — seul ce sous-canvas est rebuild. Gain majeur mobile.
+            if (_handContainer != null && _handContainer.GetComponent<Canvas>() == null)
+            {
+                _handContainer.gameObject.AddComponent<Canvas>();
+            }
+
+            // Les boutons de tri sont posés en scène avec le style uGUI blanc
+            // par défaut — on les aligne sur la DA sombre du jeu, et on les
+            // agrandit pour le tactile.
+            RestyleSortButton("SortButton");
+            RestyleSortButton("SortButtonColour");
+        }
+
+        /// <summary>
+        /// Applique le style sombre du jeu à un bouton de tri posé en scène :
+        /// fond Surface arrondi, texte clair, hauteur tactile confortable.
+        /// </summary>
+        private void RestyleSortButton(string childName)
+        {
+            Transform? t = transform.Find(childName);
+            if (t == null) return;
+
+            RectTransform rt = (RectTransform)t;
+            rt.sizeDelta = new Vector2(Mathf.Max(rt.sizeDelta.x, 210f), 48f);
+
+            Image? img = t.GetComponent<Image>();
+            if (img != null)
+            {
+                img.sprite = UIFactory.RoundedSprite;
+                img.type = Image.Type.Sliced;
+                img.color = Constants.SurfaceC;
+            }
+
+            Button? btn = t.GetComponent<Button>();
+            if (btn != null)
+            {
+                ColorBlock colors = btn.colors;
+                colors.normalColor = Color.white;
+                colors.highlightedColor = new Color(1.12f, 1.12f, 1.2f, 1f);
+                colors.pressedColor = new Color(0.8f, 0.8f, 0.85f, 1f);
+                colors.selectedColor = Color.white;
+                btn.colors = colors;
+            }
+
+            TextMeshProUGUI? label = t.GetComponentInChildren<TextMeshProUGUI>();
+            if (label != null)
+            {
+                label.color = Constants.TextPrimary;
+                label.fontSize = 20f;
+                label.fontStyle = FontStyles.Bold;
+            }
+        }
+
         private void OnEnable()
         {
             EventBus.Subscribe<HandChangedEvent>(OnHandChanged);
@@ -97,14 +156,16 @@ namespace LevelUp.UI
             Vector2 mousePos = Vector2.zero;
             bool hasPointer = false;
 
-            if (Mouse.current != null)
-            {
-                mousePos = Mouse.current.position.ReadValue();
-                hasPointer = true;
-            }
-            else if (Touchscreen.current != null && Touchscreen.current.primaryTouch.press.isPressed)
+            // Tactile prioritaire (cohérent avec GameInputController) : un doigt
+            // posé gagne sur un éventuel périphérique Mouse fantôme Android.
+            if (Touchscreen.current != null && Touchscreen.current.primaryTouch.press.isPressed)
             {
                 mousePos = Touchscreen.current.primaryTouch.position.ReadValue();
+                hasPointer = true;
+            }
+            else if (Mouse.current != null)
+            {
+                mousePos = Mouse.current.position.ReadValue();
                 hasPointer = true;
             }
 
@@ -143,8 +204,9 @@ namespace LevelUp.UI
         /// </summary>
         private void LerpCardsToTarget()
         {
-            float speed = Constants.CardLerpSpeed;
-            float dt = Time.deltaTime * speed;
+            // Amortissement exponentiel : convergence identique à 30 et 144 fps
+            // (un Lerp(a, b, deltaTime * k) brut est dépendant du framerate).
+            float dt = 1f - Mathf.Exp(-Constants.CardLerpSpeed * Time.deltaTime);
 
             for (int i = 0; i < _cardViews.Count; i++)
             {
@@ -182,14 +244,15 @@ namespace LevelUp.UI
                 }
                 rt.localScale = Vector3.Lerp(rt.localScale, targetScale, dt);
 
-                // Z-order
-                if (i == _hoveredIndex)
+                // Z-order : ne toucher à la hiérarchie que si elle change vraiment.
+                // SetSiblingIndex force un rebuild complet de la géométrie du Canvas,
+                // l'appeler chaque frame ruinait le batching.
+                int desiredIndex = (i == _hoveredIndex)
+                    ? rt.parent.childCount - 1
+                    : i;
+                if (rt.GetSiblingIndex() != desiredIndex)
                 {
-                    rt.SetAsLastSibling();
-                }
-                else
-                {
-                    rt.SetSiblingIndex(i);
+                    rt.SetSiblingIndex(desiredIndex);
                 }
             }
         }

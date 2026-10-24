@@ -23,8 +23,11 @@ namespace LevelUp.Core
         /// <summary>Nom affiché du joueur.</summary>
         public string Name { get; }
 
-        /// <summary>Indique si ce joueur est contrôlé par l'IA.</summary>
-        public bool IsAI { get; }
+        /// <summary>
+        /// Indique si ce joueur est contrôlé par l'IA. Setter internal : en ligne,
+        /// un humain déconnecté est reconverti en bot par <see cref="GameManager.ConvertPlayerToAI"/>.
+        /// </summary>
+        public bool IsAI { get; internal set; }
 
         /// <summary>Niveau actuel du joueur (1-8).</summary>
         public int CurrentLevel { get; internal set; }
@@ -192,16 +195,91 @@ namespace LevelUp.Core
         /// <summary>
         /// Tente d'ajouter une carte à la combinaison.
         /// Retourne true si la carte est compatible et a été ajoutée.
+        /// Le tri post-ajout dépend du type :
+        /// <list type="bullet">
+        /// <item><description><c>Run</c> : ordonne par valeur croissante en plaçant les
+        /// wilds dans les trous de la séquence (ou en extension à la fin).</description></item>
+        /// <item><description><c>Set</c> / <c>Flush</c> : pas de tri — on évite de
+        /// remettre les wilds (Value négative) en début de liste, et on garde
+        /// l'ordre logique de la pose.</description></item>
+        /// </list>
         /// </summary>
         public bool TryAddCard(CardModel card)
         {
             if (!CanAddCard(card)) return false;
 
             Cards.Add(card);
-            // Tri systématique par valeur : obligatoire pour Run, cosmétique pour Set/Flush,
-            // garantit cohérence modèle ↔ vue quel que soit le type.
-            Cards.Sort((a, b) => a.Value.CompareTo(b.Value));
+            if (Type == MeldType.Run)
+            {
+                SortRunCards(Cards);
+            }
             return true;
+        }
+
+        /// <summary>
+        /// Réordonne les cartes d'un Run pour que :
+        /// 1. les normales soient triées par Value croissante,
+        /// 2. les wilds soient placés dans les trous (positions manquantes
+        ///    dans la séquence), puis en extension à la fin si surplus.
+        ///
+        /// Pré-condition : les cartes forment un Run valide (vérifié en amont
+        /// par <see cref="CanAddCard"/>). On ne tente pas de gérer un input
+        /// dégénéré ici.
+        /// </summary>
+        private static void SortRunCards(List<CardModel> cards)
+        {
+            // Sépare normales et wilds.
+            List<CardModel> normals = new(cards.Count);
+            List<CardModel> wilds = new(cards.Count);
+            foreach (CardModel c in cards)
+            {
+                if (c.IsWild) wilds.Add(c);
+                else normals.Add(c);
+            }
+
+            // Cas dégénéré : que des wilds, l'ordre relatif n'a pas d'importance.
+            if (normals.Count == 0) return;
+
+            normals.Sort((a, b) => a.Value.CompareTo(b.Value));
+
+            int totalLength = cards.Count;
+            int minVal = normals[0].Value;
+
+            // Sortie ordonnée : on parcourt [minVal .. minVal+totalLength-1]
+            // et on place une normale si elle existe à cette valeur, sinon un wild.
+            cards.Clear();
+            int normalIdx = 0;
+            int wildIdx = 0;
+            for (int v = minVal; v < minVal + totalLength; v++)
+            {
+                if (normalIdx < normals.Count && normals[normalIdx].Value == v)
+                {
+                    cards.Add(normals[normalIdx]);
+                    normalIdx++;
+                }
+                else if (wildIdx < wilds.Count)
+                {
+                    cards.Add(wilds[wildIdx]);
+                    wildIdx++;
+                }
+                else
+                {
+                    // Sécurité : ne devrait jamais arriver si le run est valide.
+                    // On rajoute la prochaine normale s'il en reste pour ne pas
+                    // perdre une carte ; la liste en ressort cohérente même si
+                    // la séquence affichée saute une valeur.
+                    if (normalIdx < normals.Count)
+                    {
+                        cards.Add(normals[normalIdx]);
+                        normalIdx++;
+                    }
+                }
+            }
+
+            // Si des cartes n'ont pas pu être placées dans la fenêtre (cas pathologique),
+            // on les append pour ne rien perdre.
+            while (normalIdx < normals.Count) cards.Add(normals[normalIdx++]);
+            while (wildIdx < wilds.Count) cards.Add(wilds[wildIdx++]);
         }
     }
 }

@@ -1,3 +1,4 @@
+using System;
 using UnityEngine;
 using UnityEngine.UI;
 using TMPro;
@@ -39,7 +40,7 @@ namespace LevelUp.UI
             // Panel central — hauteur augmentée pour laisser de la place au bouton FERMER
             // sans qu'il chevauche les sliders/toggles au-dessus.
             GameObject panelObj = UIFactory.CreatePanel(veil.transform, "OptionsPanel",
-                Constants.PanelBackground, new Vector2(580f, 640f),
+                Constants.PanelBackground, new Vector2(580f, 880f),
                 withBorder: true, borderColor: Constants.CardPurple);
             _panel = panelObj.GetComponent<RectTransform>();
             _panel.anchorMin = new Vector2(0.5f, 0.5f);
@@ -90,7 +91,7 @@ namespace LevelUp.UI
             crt.anchorMin = new Vector2(0.5f, 1f);
             crt.anchorMax = new Vector2(0.5f, 1f);
             crt.pivot = new Vector2(0.5f, 1f);
-            crt.sizeDelta = new Vector2(500f, 340f);
+            crt.sizeDelta = new Vector2(500f, 560f);
             crt.anchoredPosition = new Vector2(0f, -120f);
 
             VerticalLayoutGroup vlg = content.AddComponent<VerticalLayoutGroup>();
@@ -109,12 +110,38 @@ namespace LevelUp.UI
                 v => GameSettings.SfxVolume = v, Constants.CardGreen);
 
             // Qualité : 3 boutons radio
-            CreateQualityRow(content.transform);
+            CreateChoiceRow(content.transform, "Qualité",
+                new[] { "BAS", "MOYEN", "ELEVE" },
+                () => GameSettings.QualityIndex,
+                v => GameSettings.QualityIndex = v);
+
+            // Réglages de partie (appliqués à la prochaine partie)
+            CreateChoiceRow(content.transform, "Joueurs",
+                new[] { "2", "3", "4" },
+                () => GameSettings.PlayerCount - 2,
+                v => GameSettings.PlayerCount = v + 2);
+
+            CreateChoiceRow(content.transform, "Bots",
+                new[] { "FACILE", "NORMAL", "EXPERT" },
+                () => GameSettings.Difficulty,
+                v => GameSettings.Difficulty = v);
+
+            // Contrats : fixes (classiques) ou tirés parmi des variantes équivalentes
+            CreateChoiceRow(content.transform, "Contrats",
+                new[] { "FIXES", "VARIÉS" },
+                () => GameSettings.RandomContracts ? 1 : 0,
+                v => GameSettings.RandomContracts = v == 1);
 
             // Toggle daltonisme
             UIFactory.CreateLabeledToggle(content.transform, "Colorblind",
                 "Mode daltonisme (icônes)", GameSettings.ColorblindMode, 500f,
                 v => GameSettings.ColorblindMode = v, Constants.CardOrange);
+
+            // Note : joueurs/bots pris en compte au lancement de la partie suivante
+            TextMeshProUGUI note = UIFactory.CreateText(content.transform, "MatchNote",
+                "Joueurs, bots et contrats : appliqués à la prochaine partie", 15f,
+                new Color(1f, 1f, 1f, 0.45f), TextAlignmentOptions.Center, FontStyles.Italic);
+            note.rectTransform.sizeDelta = new Vector2(460f, 24f);
 
             // Bouton fermer ancré en bas du panel — SetAsLastSibling() pour être
             // sûr d'être au-dessus du contenu et de recevoir les clics.
@@ -133,14 +160,19 @@ namespace LevelUp.UI
             veil.SetActive(false);
         }
 
-        private void CreateQualityRow(Transform parent)
+        /// <summary>
+        /// Ligne "label + N boutons radio" liée à un réglage entier (0..N-1).
+        /// Le bouton actif est teinté, les autres restent neutres.
+        /// </summary>
+        private static void CreateChoiceRow(Transform parent, string label,
+            string[] options, Func<int> getIndex, Action<int> setIndex)
         {
-            GameObject row = new("QualityRow", typeof(RectTransform));
+            GameObject row = new($"{label}Row", typeof(RectTransform));
             row.transform.SetParent(parent, false);
             RectTransform rrt = row.GetComponent<RectTransform>();
             rrt.sizeDelta = new Vector2(460f, 60f);
 
-            TextMeshProUGUI lbl = UIFactory.CreateText(row.transform, "Label", "Qualité", 20f,
+            TextMeshProUGUI lbl = UIFactory.CreateText(row.transform, "Label", label, 20f,
                 Constants.TextPrimary, TextAlignmentOptions.Left, FontStyles.Bold);
             RectTransform lrt = lbl.rectTransform;
             lrt.anchorMin = new Vector2(0f, 0.5f);
@@ -149,40 +181,64 @@ namespace LevelUp.UI
             lrt.sizeDelta = new Vector2(160f, 40f);
             lrt.anchoredPosition = new Vector2(4f, 0f);
 
-            string[] labels = { "BAS", "MOYEN", "ELEVE" };
-            Button[] buttons = new Button[3];
-            for (int i = 0; i < 3; i++)
+            Button[] buttons = new Button[options.Length];
+            for (int i = 0; i < options.Length; i++)
             {
                 int idx = i;
-                Button btn = UIFactory.CreateButton(row.transform, $"Q{i}", labels[i],
-                    new Vector2(90f, 44f), () => SelectQuality(idx, buttons), Constants.CardPurple);
+                Button btn = UIFactory.CreateButton(row.transform, $"{label}{i}", options[i],
+                    new Vector2(90f, 44f), () =>
+                    {
+                        setIndex(idx);
+                        RefreshChoiceButtons(buttons, getIndex());
+                    }, Constants.CardPurple);
+
                 RectTransform brt = btn.GetComponent<RectTransform>();
                 brt.anchorMin = new Vector2(0f, 0.5f);
                 brt.anchorMax = new Vector2(0f, 0.5f);
                 brt.pivot = new Vector2(0f, 0.5f);
                 brt.anchoredPosition = new Vector2(170f + i * 98f, 0f);
+
+                // La police 26 des boutons standard déborde sur 90 px de large.
+                TextMeshProUGUI btnLabel = btn.GetComponentInChildren<TextMeshProUGUI>();
+                if (btnLabel != null) btnLabel.fontSize = 18f;
+
+                // Marqueur de sélection dédié : le feedback hover/press des
+                // boutons réécrit Image.color au PointerExit (déclenché par
+                // chaque tap tactile) — la sélection doit vivre ailleurs.
+                GameObject sel = new("Sel", typeof(RectTransform), typeof(Image));
+                sel.transform.SetParent(btn.transform, false);
+                RectTransform selRt = sel.GetComponent<RectTransform>();
+                selRt.anchorMin = new Vector2(0.5f, 0f);
+                selRt.anchorMax = new Vector2(0.5f, 0f);
+                selRt.pivot = new Vector2(0.5f, 0f);
+                selRt.sizeDelta = new Vector2(52f, 4f);
+                selRt.anchoredPosition = new Vector2(0f, 4f);
+                Image selImg = sel.GetComponent<Image>();
+                selImg.color = Color.Lerp(Constants.CardPurple, Color.white, 0.35f);
+                selImg.raycastTarget = false;
+
                 buttons[i] = btn;
             }
 
-            RefreshQualityButtons(buttons);
+            RefreshChoiceButtons(buttons, getIndex());
         }
 
-        private void SelectQuality(int index, Button[] buttons)
+        private static void RefreshChoiceButtons(Button[] buttons, int active)
         {
-            GameSettings.QualityIndex = index;
-            RefreshQualityButtons(buttons);
-        }
-
-        private void RefreshQualityButtons(Button[] buttons)
-        {
-            int active = GameSettings.QualityIndex;
             for (int i = 0; i < buttons.Length; i++)
             {
-                Image? bg = buttons[i].GetComponent<Image>();
-                if (bg == null) continue;
-                bg.color = (i == active)
-                    ? Color.Lerp(Constants.PanelHighlight, Constants.CardPurple, 0.45f)
-                    : Constants.PanelHighlight;
+                bool isActive = i == active;
+
+                Transform? sel = buttons[i].transform.Find("Sel");
+                if (sel != null) sel.gameObject.SetActive(isActive);
+
+                TextMeshProUGUI lbl = buttons[i].GetComponentInChildren<TextMeshProUGUI>();
+                if (lbl != null)
+                {
+                    Color c = Constants.TextPrimary;
+                    c.a = isActive ? 1f : 0.55f;
+                    lbl.color = c;
+                }
             }
         }
 

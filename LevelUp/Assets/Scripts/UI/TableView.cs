@@ -304,6 +304,52 @@ namespace LevelUp.UI
       return false;
     }
 
+    /// <summary>
+    /// Trouve le meld le plus proche du point écran, dans un rayon donné
+    /// (distance au bord du rect, 0 si à l'intérieur). Utilisé par le snap
+    /// magnétique du drag : surligner + attirer la carte vers la zone valide.
+    /// </summary>
+    public bool TryGetNearestMeld(Vector2 screenPosition, float maxDistance,
+        out int ownerIndex, out int meldIndex, out Vector2 meldScreenCenter)
+    {
+      ownerIndex = -1;
+      meldIndex = -1;
+      meldScreenCenter = default;
+
+      float best = maxDistance;
+      bool found = false;
+
+      foreach (KeyValuePair<int, List<MeldGroupView>> kvp in _playerMeldGroups)
+      {
+        for (int i = 0; i < kvp.Value.Count; i++)
+        {
+          RectTransform rt = (RectTransform)kvp.Value[i].transform;
+          if (!RectTransformUtility.ScreenPointToLocalPointInRectangle(
+                  rt, screenPosition, null, out Vector2 local))
+            continue;
+
+          // Distance au rect (0 si le point est dedans) — plus juste qu'une
+          // distance au centre, les melds pouvant être très larges.
+          Rect r = rt.rect;
+          float dx = Mathf.Max(0f, Mathf.Max(r.xMin - local.x, local.x - r.xMax));
+          float dy = Mathf.Max(0f, Mathf.Max(r.yMin - local.y, local.y - r.yMax));
+          float dist = Mathf.Sqrt(dx * dx + dy * dy);
+
+          if (dist <= best)
+          {
+            best = dist;
+            found = true;
+            ownerIndex = kvp.Key;
+            meldIndex = i;
+            meldScreenCenter = RectTransformUtility.WorldToScreenPoint(
+                null, rt.TransformPoint(r.center));
+          }
+        }
+      }
+
+      return found;
+    }
+
     private static bool IsInsidePaddedRect(RectTransform rt, Vector2 screenPos, float padding)
     {
       if (rt == null) return false;
@@ -332,6 +378,25 @@ namespace LevelUp.UI
       {
         foreach (var g in kvp.Value) g.SetHover(false);
       }
+    }
+
+    /// <summary>
+    /// Reconstruit toute la table depuis le modèle, sans animation
+    /// (reprise d'une partie en ligne après reconnexion / resync).
+    /// </summary>
+    public void SyncFromModel(IReadOnlyList<PlayerModel> players)
+    {
+      ClearTable();
+      foreach (PlayerModel player in players)
+      {
+        if (player.LaidMelds.Count == 0) continue;
+        _playerMeldGroups[player.Index] = new List<MeldGroupView>();
+        foreach (Meld meld in player.LaidMelds)
+        {
+          CreateMeldGroup(player.Index, new List<CardModel>(meld.Cards));
+        }
+      }
+      LayoutTable();
     }
 
     public void ClearTable()

@@ -124,4 +124,25 @@ namespace LevelUp.Core
         public int PlayerIndex;
         public bool IsThinking;
     }
+
+    /// <summary>
+    /// Événement déclenché quand le joueur tente une action invalide
+    /// (drop raté, pioche refusée, combinaison invalide). Permet aux systèmes
+    /// de feedback (audio, haptique…) de réagir sans couplage avec l'input.
+    /// </summary>
+    public struct InvalidActionEvent
+    {
+    }
+
+    /// <summary>
+    /// Événement déclenché quand la pioche est définitivement épuisée (drawPile vide
+    /// ET aucune défausse recyclable). Le round se termine, le joueur avec la main
+    /// la plus courte est désigné gagnant. L'UI peut afficher un message dédié
+    /// ("Pioche épuisée — manche au plus court"). Suivi immédiatement de
+    /// <see cref="RoundEndedEvent"/>.
+    /// </summary>
+    public struct DeckExhaustedEvent
+    {
+        public int WinnerIndex;
+    }
 }
