@@ -39,9 +39,16 @@ namespace LevelUp.UI
             EventBus.Unsubscribe<PlayerSkippedEvent>(HandlePlayerSkipped);
         }
 
+        /// <summary>
+        /// Maquette : fond sobre, pas de particules ambiantes ni de textes
+        /// flottants (le toast de statut du HUD porte déjà ces messages).
+        /// </summary>
+        private const bool AmbientParticles = false;
+        private const bool FloatingTexts = false;
+
         private void Start()
         {
-            StartCoroutine(RunAmbientParticles());
+            if (AmbientParticles) StartCoroutine(RunAmbientParticles());
         }
 
         private void HandleLevelLaidDown(LevelLaidDownEvent evt)
@@ -52,7 +59,7 @@ namespace LevelUp.UI
             Color color = Constants.CardGreen;
 
             _animController.SpawnParticleBurst(center, color, 16);
-            _animController.AnimateScreenFlash(new Color(0.3f, 1f, 0.5f, 0.15f), 0.3f);
+            _animController.AnimateScreenFlash(new Color(0.3f, 1f, 0.5f, 0.06f), 0.3f);
 
             ShowFloatingText($"LEVEL {evt.Level}!", center + Vector2.up * 50f, color);
         }
@@ -63,7 +70,7 @@ namespace LevelUp.UI
 
             Vector2 center = Vector2.zero;
             _animController.SpawnParticleBurst(center, Constants.CardYellow, 20);
-            _animController.AnimateScreenFlash(new Color(1f, 0.85f, 0.3f, 0.2f), 0.4f);
+            _animController.AnimateScreenFlash(new Color(1f, 0.85f, 0.3f, 0.08f), 0.4f);
 
             ShowFloatingText("ROUND WIN!", center, Constants.CardYellow);
         }
@@ -80,7 +87,7 @@ namespace LevelUp.UI
 
             Vector2 center = Vector2.zero;
             _animController.SpawnParticleBurst(center, Constants.CardGreen, 24);
-            _animController.AnimateScreenFlash(new Color(0.3f, 1f, 0.5f, 0.2f), 0.4f);
+            _animController.AnimateScreenFlash(new Color(0.3f, 1f, 0.5f, 0.08f), 0.4f);
 
             ShowFloatingText("+1 LEVEL!", center + Vector2.up * 30f, Constants.CardGreen, 48f);
         }
@@ -135,7 +142,7 @@ namespace LevelUp.UI
         private void HandlePlayerSkipped(PlayerSkippedEvent evt)
         {
             if (_animController == null) return;
-            _animController.AnimateScreenFlash(new Color(1f, 0.3f, 0.3f, 0.15f), 0.25f);
+            _animController.AnimateScreenFlash(new Color(1f, 0.3f, 0.3f, 0.06f), 0.25f);
         }
 
         private IEnumerator RunGameOverSequence()
@@ -156,7 +163,7 @@ namespace LevelUp.UI
                 yield return new WaitForSeconds(0.15f);
             }
 
-            _animController!.AnimateScreenFlash(new Color(1f, 1f, 1f, 0.25f), 0.5f);
+            _animController!.AnimateScreenFlash(new Color(1f, 1f, 1f, 0.10f), 0.5f);
             ShowFloatingText("VICTORY!", center, Constants.TextAccent, 72f);
         }
 
@@ -227,7 +234,7 @@ namespace LevelUp.UI
 
         private void ShowFloatingText(string text, Vector2 position, Color color, float fontSize = 36f)
         {
-            if (_canvas == null) return;
+            if (!FloatingTexts || _canvas == null) return;
             StartCoroutine(RunFloatingText(text, position, color, fontSize));
         }
 

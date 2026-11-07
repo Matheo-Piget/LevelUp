@@ -57,7 +57,7 @@ namespace LevelUp.Tests
         {
             Assert.AreEqual("2 suites de 3", ContractCatalog.DescribeLevel(1));
             Assert.AreEqual("1 brelan + 1 paire", ContractCatalog.DescribeLevel(2));
-            Assert.AreEqual("1 flush de 5 + 1 suite de 3", ContractCatalog.DescribeLevel(4));
+            Assert.AreEqual("1 couleur de 5 + 1 suite de 3", ContractCatalog.DescribeLevel(4));
             Assert.AreEqual("2 brelans", ContractCatalog.DescribeLevel(7));
         }
 

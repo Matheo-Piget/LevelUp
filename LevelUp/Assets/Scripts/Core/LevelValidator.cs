@@ -179,16 +179,124 @@ namespace LevelUp.Core
             return results;
         }
 
+        // ─────────────────────────────────────────────────────────────────
+        //  Recherche des combinaisons candidates
+        //
+        //  Les règles ne changent pas (le GameCommandExecutor revalide chaque
+        //  combinaison posée) : cette recherche doit seulement être COMPLÈTE.
+        //  Avant, un seul candidat était tenté par valeur/couleur (« les N
+        //  premières cartes »), et un groupe plus grand que nécessaire (quatre 7
+        //  pour un brelan, six rouges pour une couleur de 5) était ignoré : la
+        //  pose échouait alors qu'une répartition valide existait, et le joueur
+        //  ne pouvait pas choisir quelle carte allait dans quelle combinaison.
+        // ─────────────────────────────────────────────────────────────────
+
+        /// <summary>Garde-fou : nombre max de candidats générés par exigence.</summary>
+        private const int MaxCandidatesPerRequirement = 512;
+
+        /// <summary>Garde-fou : nombre max de nœuds explorés par recherche de poses.</summary>
+        private const int MaxSearchNodes = 20000;
+
         /// <summary>
-        /// Trouve toutes les suites possibles de longueur donnée.
-        /// Pour chaque point de départ, tente de combler les trous avec des wilds.
-        /// On accepte de démarrer au-dessus de la valeur minimale du jeu : tous les
-        /// runs construits doivent rester dans les bornes définies par GameConfig
-        /// (ou Constants.DefaultCardMin/Max si pas de config).
+        /// Toutes les façons DISTINCTES de poser le contrat du niveau avec ces
+        /// cartes (au plus <paramref name="maxOptions"/>). Deux poses qui ne
+        /// diffèrent que par des cartes identiques (même valeur, même couleur)
+        /// comptent pour une. Ordre : celles qui utilisent le moins de jokers
+        /// d'abord (les jokers restent en main).
+        /// </summary>
+        public static List<List<Meld>> FindLayDownOptions(IReadOnlyList<CardModel> cards, int level,
+            GameConfig? config, int maxOptions = 6)
+        {
+            List<List<Meld>> options = new();
+            HashSet<string> seen = new();
+            List<List<LevelRequirement>> requirementSets = GetRequirements(level, config);
+
+            foreach (List<LevelRequirement> requirements in requirementSets)
+            {
+                int budget = MaxSearchNodes;
+                CollectLayDowns(new List<CardModel>(cards), requirements, 0, new List<Meld>(),
+                    options, seen, maxOptions, ref budget);
+                if (options.Count >= maxOptions) break;
+            }
+
+            options.Sort((a, b) => CountWilds(a).CompareTo(CountWilds(b)));
+            return options;
+        }
+
+        private static void CollectLayDowns(List<CardModel> available, List<LevelRequirement> requirements,
+            int reqIndex, List<Meld> current, List<List<Meld>> options, HashSet<string> seen,
+            int maxOptions, ref int budget)
+        {
+            if (options.Count >= maxOptions || budget-- <= 0) return;
+
+            if (reqIndex >= requirements.Count)
+            {
+                string signature = Signature(current);
+                if (seen.Add(signature)) options.Add(new List<Meld>(current));
+                return;
+            }
+
+            LevelRequirement req = requirements[reqIndex];
+            foreach (List<CardModel> candidate in FindCandidates(available, req))
+            {
+                List<CardModel> remaining = new(available);
+                foreach (CardModel card in candidate) remaining.Remove(card);
+
+                current.Add(new Meld(req.Type, candidate, -1));
+                CollectLayDowns(remaining, requirements, reqIndex + 1, current, options, seen,
+                    maxOptions, ref budget);
+                current.RemoveAt(current.Count - 1);
+
+                if (options.Count >= maxOptions || budget <= 0) return;
+            }
+        }
+
+        /// <summary>
+        /// Empreinte d'une pose, indépendante de l'ordre des combinaisons et des
+        /// cartes, et de l'identité des cartes identiques (valeur + couleur).
+        /// </summary>
+        private static string Signature(List<Meld> melds)
+        {
+            List<string> parts = new(melds.Count);
+            foreach (Meld meld in melds)
+            {
+                List<string> tokens = new(meld.Cards.Count);
+                foreach (CardModel c in meld.Cards)
+                {
+                    tokens.Add(c.Type == CardType.Normal
+                        ? $"{c.Value}.{(int)c.Color}"
+                        : $"T{(int)c.Type}");
+                }
+                tokens.Sort(string.CompareOrdinal);
+                parts.Add($"{(int)meld.Type}:{string.Join(",", tokens)}");
+            }
+            parts.Sort(string.CompareOrdinal);
+            return string.Join("|", parts);
+        }
+
+        private static int CountWilds(List<Meld> melds)
+        {
+            int n = 0;
+            foreach (Meld meld in melds)
+            {
+                foreach (CardModel c in meld.Cards)
+                {
+                    if (c.IsWild) n++;
+                }
+            }
+            return n;
+        }
+
+        /// <summary>
+        /// Trouve toutes les suites possibles de longueur donnée. Pour chaque
+        /// valeur de la suite, chaque carte disponible de cette valeur (une par
+        /// couleur) est essayée, puis un joker : la couleur des cartes de la
+        /// suite peut ainsi être laissée à une autre combinaison (une couleur).
+        /// Bornes inchangées : du min des cartes (moins les jokers) au max (plus
+        /// les jokers), la validité finale restant celle de CardExtensions.
         /// </summary>
         private static void FindRuns(List<CardModel> cards, int length, List<List<CardModel>> results)
         {
-            // Buckets par valeur pour accès O(1) — évite le FirstOrDefault dans la boucle.
             Dictionary<int, List<CardModel>> normalsByValue = new();
             List<CardModel> wilds = new();
             int minValue = int.MaxValue;
@@ -203,7 +311,13 @@ namespace LevelUp.Core
                         list = new List<CardModel>();
                         normalsByValue[c.Value] = list;
                     }
-                    list.Add(c);
+                    // Une carte par couleur : deux cartes identiques sont interchangeables.
+                    bool sameColor = false;
+                    foreach (CardModel other in list)
+                    {
+                        if (other.Color == c.Color) { sameColor = true; break; }
+                    }
+                    if (!sameColor) list.Add(c);
                     if (c.Value < minValue) minValue = c.Value;
                     if (c.Value > maxValue) maxValue = c.Value;
                 }
@@ -215,56 +329,42 @@ namespace LevelUp.Core
 
             if (normalsByValue.Count == 0 && wilds.Count < length) return;
 
-            // Bornes du run : du min des cartes possibles, jusqu'à un peu au-delà du max
-            // pour permettre les runs qui se prolongent uniquement avec des wilds en fin.
             int rangeMin = normalsByValue.Count > 0 ? minValue - wilds.Count : 1;
             int rangeMax = normalsByValue.Count > 0 ? maxValue + wilds.Count : length;
             if (rangeMin < 1) rangeMin = 1;
 
-            // Pour chaque point de départ, construire un run candidat.
+            List<CardModel> run = new(length);
             for (int startVal = rangeMin; startVal <= rangeMax - length + 1; startVal++)
             {
-                List<CardModel> run = new(length);
-                int wildsUsed = 0;
-                bool valid = true;
+                BuildRun(startVal, 0, 0);
+                if (results.Count >= MaxCandidatesPerRequirement) return;
+            }
 
-                // Compteurs de cartes normales déjà utilisées par valeur (pour éviter
-                // de réutiliser deux fois la même CardModel quand plusieurs cartes
-                // partagent une valeur — possible avec un deck "Level 8" custom).
-                Dictionary<int, int> usedByValue = new();
-
-                for (int v = startVal; v < startVal + length; v++)
+            void BuildRun(int startVal, int pos, int wildsUsed)
+            {
+                if (results.Count >= MaxCandidatesPerRequirement) return;
+                if (pos == length)
                 {
-                    bool placed = false;
-                    if (normalsByValue.TryGetValue(v, out List<CardModel>? candidates))
-                    {
-                        usedByValue.TryGetValue(v, out int alreadyUsed);
-                        if (alreadyUsed < candidates.Count)
-                        {
-                            run.Add(candidates[alreadyUsed]);
-                            usedByValue[v] = alreadyUsed + 1;
-                            placed = true;
-                        }
-                    }
+                    if (!ContainsSequence(results, run)) results.Add(new List<CardModel>(run));
+                    return;
+                }
 
-                    if (!placed)
+                int value = startVal + pos;
+                if (normalsByValue.TryGetValue(value, out List<CardModel>? options))
+                {
+                    foreach (CardModel card in options)
                     {
-                        if (wildsUsed < wilds.Count)
-                        {
-                            run.Add(wilds[wildsUsed]);
-                            wildsUsed++;
-                        }
-                        else
-                        {
-                            valid = false;
-                            break;
-                        }
+                        run.Add(card);
+                        BuildRun(startVal, pos + 1, wildsUsed);
+                        run.RemoveAt(run.Count - 1);
                     }
                 }
 
-                if (valid && run.Count == length && !ContainsSequence(results, run))
+                if (wildsUsed < wilds.Count)
                 {
-                    results.Add(run);
+                    run.Add(wilds[wildsUsed]);
+                    BuildRun(startVal, pos + 1, wildsUsed + 1);
+                    run.RemoveAt(run.Count - 1);
                 }
             }
         }
@@ -290,14 +390,12 @@ namespace LevelUp.Core
         }
 
         /// <summary>
-        /// Trouve tous les sets (même valeur) possibles de taille donnée.
-        /// Réécrit sans LINQ pour réduire les allocations en hot path.
+        /// Trouve tous les sets (même valeur) possibles de taille donnée : toutes
+        /// les façons de prendre les cartes d'une valeur (+ jokers si besoin).
         /// </summary>
         private static void FindSets(List<CardModel> cards, int size, List<List<CardModel>> results)
         {
-            // Group manuellement pour éviter LINQ.GroupBy (alloc IGrouping).
-            Dictionary<int, List<CardModel>> groups = new();
-            int wildCount = 0;
+            SortedDictionary<int, List<CardModel>> groups = new();
             List<CardModel> wilds = new();
 
             foreach (CardModel c in cards)
@@ -314,32 +412,23 @@ namespace LevelUp.Core
                 else if (c.IsWild)
                 {
                     wilds.Add(c);
-                    wildCount++;
                 }
             }
 
             foreach (KeyValuePair<int, List<CardModel>> group in groups)
             {
-                int normalsAvailable = group.Value.Count;
-                int wildsNeeded = size - normalsAvailable;
-                if (wildsNeeded < 0 || wildsNeeded > wildCount) continue;
-
-                List<CardModel> set = new(size);
-                int normalsToTake = normalsAvailable < size ? normalsAvailable : size;
-                for (int i = 0; i < normalsToTake; i++) set.Add(group.Value[i]);
-                for (int w = 0; w < wildsNeeded; w++) set.Add(wilds[w]);
-
-                if (set.Count == size) results.Add(set);
+                AddGroupCombinations(group.Value, wilds, size, results);
+                if (results.Count >= MaxCandidatesPerRequirement) return;
             }
         }
 
         /// <summary>
-        /// Trouve tous les flushes (même couleur) possibles de taille donnée.
+        /// Trouve tous les flushes (même couleur) possibles de taille donnée :
+        /// toutes les façons de prendre les cartes d'une couleur (+ jokers si besoin).
         /// </summary>
         private static void FindFlushes(List<CardModel> cards, int size, List<List<CardModel>> results)
         {
-            Dictionary<CardColor, List<CardModel>> groups = new();
-            int wildCount = 0;
+            SortedDictionary<CardColor, List<CardModel>> groups = new();
             List<CardModel> wilds = new();
 
             foreach (CardModel c in cards)
@@ -356,22 +445,70 @@ namespace LevelUp.Core
                 else if (c.IsWild)
                 {
                     wilds.Add(c);
-                    wildCount++;
                 }
             }
 
             foreach (KeyValuePair<CardColor, List<CardModel>> group in groups)
             {
-                int normalsAvailable = group.Value.Count;
-                int wildsNeeded = size - normalsAvailable;
-                if (wildsNeeded < 0 || wildsNeeded > wildCount) continue;
+                AddGroupCombinations(group.Value, wilds, size, results);
+                if (results.Count >= MaxCandidatesPerRequirement) return;
+            }
+        }
 
-                List<CardModel> flush = new(size);
-                int normalsToTake = normalsAvailable < size ? normalsAvailable : size;
-                for (int i = 0; i < normalsToTake; i++) flush.Add(group.Value[i]);
-                for (int w = 0; w < wildsNeeded; w++) flush.Add(wilds[w]);
+        /// <summary>
+        /// Combinaisons « j cartes du groupe + (taille − j) jokers », du plus de
+        /// cartes normales au moins (les jokers restent en main de préférence).
+        /// Au moins une carte normale, comme avant : un groupe n'existe que
+        /// s'il contient une carte de la valeur / couleur.
+        /// </summary>
+        private static void AddGroupCombinations(List<CardModel> group, List<CardModel> wilds, int size,
+            List<List<CardModel>> results)
+        {
+            int maxNormals = group.Count < size ? group.Count : size;
+            int minNormals = size - wilds.Count;
+            if (minNormals < 1) minNormals = 1;
 
-                if (flush.Count == size) results.Add(flush);
+            for (int normals = maxNormals; normals >= minNormals; normals--)
+            {
+                int wildCount = size - normals;
+                foreach (List<CardModel> picked in Combinations(group, normals))
+                {
+                    foreach (List<CardModel> pickedWilds in Combinations(wilds, wildCount))
+                    {
+                        if (results.Count >= MaxCandidatesPerRequirement) return;
+                        List<CardModel> meld = new(size);
+                        meld.AddRange(picked);
+                        meld.AddRange(pickedWilds);
+                        results.Add(meld);
+                    }
+                }
+            }
+        }
+
+        /// <summary>Toutes les combinaisons de k éléments (ordre lexicographique des index).</summary>
+        private static IEnumerable<List<CardModel>> Combinations(List<CardModel> source, int k)
+        {
+            if (k < 0 || k > source.Count) yield break;
+            if (k == 0)
+            {
+                yield return new List<CardModel>();
+                yield break;
+            }
+
+            int[] idx = new int[k];
+            for (int i = 0; i < k; i++) idx[i] = i;
+
+            while (true)
+            {
+                List<CardModel> combo = new(k);
+                for (int i = 0; i < k; i++) combo.Add(source[idx[i]]);
+                yield return combo;
+
+                int pos = k - 1;
+                while (pos >= 0 && idx[pos] == source.Count - k + pos) pos--;
+                if (pos < 0) yield break;
+                idx[pos]++;
+                for (int i = pos + 1; i < k; i++) idx[i] = idx[i - 1] + 1;
             }
         }
     }

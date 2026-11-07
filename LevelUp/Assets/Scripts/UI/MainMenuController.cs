@@ -20,6 +20,7 @@ namespace LevelUp.UI
         private CanvasGroup? _rootCanvasGroup;
         private TextMeshProUGUI? _titleText;
         private RectTransform? _buttonColumn;
+        private RectTransform? _leftColumn;
         private OptionsPanel? _optionsPanel;
         private float _time;
         private readonly List<RectTransform> _floatingCards = new();
@@ -77,198 +78,170 @@ namespace LevelUp.UI
             // Footer crédits
             CreateFooter(_root);
 
-            // Pop-in animation
-            if (_titleText != null)
-            {
-                RectTransform titleRt = _titleText.rectTransform;
-                titleRt.localScale = Vector3.zero;
-                UITween.ScaleTo(rootObj, titleRt, Vector3.one, 0.55f);
-            }
-
-            if (_buttonColumn != null)
-            {
-                UITween.SlideIn(rootObj, _buttonColumn, new Vector2(0f, -80f), 0.5f);
-            }
+            // Apparition douce (fondu) — les éléments sont dans des layout groups,
+            // on n'anime donc pas leur position.
+            _rootCanvasGroup.alpha = 0f;
+            UITween.FadeTo(rootObj, _rootCanvasGroup, 1f, 0.35f);
 
             IsVisible = true;
         }
 
         private void CreateBackgroundVeil(RectTransform parent)
         {
-            // Fond opaque : on ne doit pas voir la scène de jeu derrière le menu.
+            // Fond opaque (la partie derrière reste cachée) + lumière douce à
+            // droite : radial-gradient(ellipse at 70% 50%, #151C26 → #0F1419 → #0A0E12).
             GameObject veil = new("Veil", typeof(RectTransform), typeof(Image));
             veil.transform.SetParent(parent, false);
-            RectTransform rt = veil.GetComponent<RectTransform>();
-            rt.anchorMin = Vector2.zero;
-            rt.anchorMax = Vector2.one;
-            rt.sizeDelta = Vector2.zero;
-
+            UISkin.Stretch((RectTransform)veil.transform);
             Image img = veil.GetComponent<Image>();
-            img.color = Constants.BackgroundDark;
+            img.color = UISkin.Ground;
             img.raycastTarget = true; // bloque les clics sur le jeu dessous
 
-            // Vignette radiale pour donner de la profondeur sans laisser filtrer la scène
-            GameObject vignette = new("Vignette", typeof(RectTransform), typeof(Image));
-            vignette.transform.SetParent(veil.transform, false);
-            RectTransform vRt = vignette.GetComponent<RectTransform>();
-            vRt.anchorMin = Vector2.zero;
-            vRt.anchorMax = Vector2.one;
-            vRt.sizeDelta = Vector2.zero;
-            Image vImg = vignette.GetComponent<Image>();
-            vImg.sprite = UIFactory.SoftShadowSprite;
-            vImg.color = new Color(0f, 0f, 0f, 0.55f);
-            vImg.raycastTarget = false;
+            GameObject glow = new("Light", typeof(RectTransform), typeof(Image));
+            glow.transform.SetParent(veil.transform, false);
+            RectTransform lrt = (RectTransform)glow.transform;
+            lrt.anchorMin = new Vector2(0.25f, -0.25f);
+            lrt.anchorMax = new Vector2(1.15f, 1.25f);
+            lrt.offsetMin = Vector2.zero;
+            lrt.offsetMax = Vector2.zero;
+            Image limg = glow.GetComponent<Image>();
+            limg.sprite = UISkin.Radial;
+            limg.color = UISkin.Hex(0x151C26);
+            limg.raycastTarget = false;
         }
 
         private void CreateTitle(RectTransform parent)
         {
-            // Glow derrière le titre
-            GameObject glow = new("TitleGlow", typeof(RectTransform), typeof(Image));
-            glow.transform.SetParent(parent, false);
-            RectTransform grt = glow.GetComponent<RectTransform>();
-            grt.anchorMin = new Vector2(0.5f, 1f);
-            grt.anchorMax = new Vector2(0.5f, 1f);
-            grt.pivot = new Vector2(0.5f, 1f);
-            grt.sizeDelta = new Vector2(900f, 360f);
-            grt.anchoredPosition = new Vector2(0f, -120f);
-            Image gimg = glow.GetComponent<Image>();
-            gimg.sprite = UIFactory.SoftShadowSprite;
-            gimg.color = new Color(Constants.CardPurple.r, Constants.CardPurple.g, Constants.CardPurple.b, 0.35f);
-            gimg.raycastTarget = false;
+            // Colonne gauche (x = 160) : titre, sous-titre, navigation.
+            GameObject col = new("LeftColumn", typeof(RectTransform));
+            col.transform.SetParent(parent, false);
+            RectTransform crt = (RectTransform)col.transform;
+            crt.anchorMin = new Vector2(0f, 0f);
+            crt.anchorMax = new Vector2(0f, 1f);
+            crt.pivot = new Vector2(0f, 0.5f);
+            crt.offsetMin = new Vector2(160f, 0f);
+            crt.offsetMax = new Vector2(160f + 560f, 0f);
+            UISkin.VCol(col, 14f, null, TextAnchor.MiddleLeft);
+            _leftColumn = crt;
 
-            // Titre principal
-            _titleText = UIFactory.CreateText(parent, "Title", "LEVEL UP", 120f,
-                Color.white, TextAlignmentOptions.Center, FontStyles.Bold);
-            RectTransform trt = _titleText.rectTransform;
-            trt.anchorMin = new Vector2(0.5f, 1f);
-            trt.anchorMax = new Vector2(0.5f, 1f);
-            trt.pivot = new Vector2(0.5f, 1f);
-            trt.sizeDelta = new Vector2(900f, 160f);
-            trt.anchoredPosition = new Vector2(0f, -160f);
-            _titleText.enableVertexGradient = true;
-            _titleText.colorGradient = new VertexGradient(
-                Color.Lerp(Constants.CardYellow, Color.white, 0.25f),
-                Color.Lerp(Constants.CardOrange, Color.white, 0.15f),
-                Color.Lerp(Constants.CardPurple, Color.white, 0.15f),
-                Color.Lerp(Constants.CardBlue, Color.white, 0.25f));
-            _titleText.outlineWidth = 0.25f;
-            _titleText.outlineColor = new Color32(0, 0, 0, 180);
-            _titleText.characterSpacing = 12f;
+            _titleText = UISkin.Text(col.transform, "Title", "LEVEL <color=#D8B66E>UP</color>", 112f,
+                UISkin.TextColor, TextWeight.Display);
+            _titleText.characterSpacing = -4f;
+            UISkin.Size(_titleText.gameObject, 560f, 112f);
 
-            // Sous-titre
-            TextMeshProUGUI subtitle = UIFactory.CreateText(parent, "Subtitle", "LE JEU DE CARTES MONTE-NIVEAU",
-                20f, Constants.TextSecondary, TextAlignmentOptions.Center, FontStyles.Bold);
-            RectTransform srt = subtitle.rectTransform;
-            srt.anchorMin = new Vector2(0.5f, 1f);
-            srt.anchorMax = new Vector2(0.5f, 1f);
-            srt.pivot = new Vector2(0.5f, 1f);
-            srt.sizeDelta = new Vector2(900f, 30f);
-            srt.anchoredPosition = new Vector2(0f, -310f);
-            subtitle.characterSpacing = 20f;
+            TextMeshProUGUI subtitle = UISkin.Text(col.transform, "Subtitle", "LE JEU DE CARTES MONTE-NIVEAU",
+                16f, UISkin.TextMuted, TextWeight.SemiBold);
+            subtitle.characterSpacing = 24f;
+            UISkin.Size(subtitle.gameObject, 560f, 24f);
+
+            GameObject spacer = new("Spacer", typeof(RectTransform));
+            spacer.transform.SetParent(col.transform, false);
+            UISkin.Size(spacer, 10f, 42f);
         }
 
         private void CreateButtonColumn(RectTransform parent)
         {
-            GameObject col = new("ButtonColumn", typeof(RectTransform));
-            col.transform.SetParent(parent, false);
-            _buttonColumn = col.GetComponent<RectTransform>();
-            _buttonColumn.anchorMin = new Vector2(0.5f, 0.5f);
-            _buttonColumn.anchorMax = new Vector2(0.5f, 0.5f);
-            _buttonColumn.sizeDelta = new Vector2(320f, 400f);
-            _buttonColumn.anchoredPosition = new Vector2(0f, -80f);
+            Transform host = _leftColumn != null ? _leftColumn : parent;
+            GameObject nav = new("ButtonColumn", typeof(RectTransform));
+            nav.transform.SetParent(host, false);
+            _buttonColumn = (RectTransform)nav.transform;
+            UISkin.VCol(nav, 14f, null, TextAnchor.UpperLeft);
+            VerticalLayoutGroup vlg = nav.GetComponent<VerticalLayoutGroup>();
+            vlg.childControlWidth = false;
+            vlg.childControlHeight = false;
+            UISkin.Size(nav, 400f, 72f + 60f * 3f + 14f * 3f);
 
-            VerticalLayoutGroup layout = col.AddComponent<VerticalLayoutGroup>();
-            layout.spacing = 18f;
-            layout.childAlignment = TextAnchor.MiddleCenter;
-            layout.childControlWidth = false;
-            layout.childControlHeight = false;
-            layout.childForceExpandWidth = false;
-            layout.childForceExpandHeight = false;
+            Button play = UIFactory.CreateButton(nav.transform, "BtnPlay", "JOUER",
+                new Vector2(400f, 72f), HandlePlayClicked, primary: true);
+            // Libellé à gauche + icône lecture à droite (maquette)
+            LeftAlign(play);
+            Image playIcon = UISkin.IconImage(play.transform, "PlayIcon", UIIcon.Play, 24f, UISkin.OnAccent);
+            UISkin.Place(playIcon.rectTransform, new Vector2(1f, 0.5f), new Vector2(1f, 0.5f),
+                new Vector2(-28f, 0f), new Vector2(24f, 24f));
 
-            UIFactory.CreateButton(col.transform, "BtnPlay", "JOUER",
-                new Vector2(300f, 74f), HandlePlayClicked, Constants.CardGreen);
+            LeftAlign(UIFactory.CreateButton(nav.transform, "BtnOnline", "EN LIGNE",
+                new Vector2(400f, 60f), () => OnOnlineClicked?.Invoke()));
+            LeftAlign(UIFactory.CreateButton(nav.transform, "BtnOptions", "OPTIONS",
+                new Vector2(400f, 60f), HandleOptionsClicked));
+            LeftAlign(UIFactory.CreateButton(nav.transform, "BtnQuit", "QUITTER",
+                new Vector2(400f, 60f), HandleQuitClicked, subtle: true));
+        }
 
-            UIFactory.CreateButton(col.transform, "BtnOnline", "EN LIGNE",
-                new Vector2(300f, 74f), () => OnOnlineClicked?.Invoke(), Constants.CardBlue);
-
-            UIFactory.CreateButton(col.transform, "BtnOptions", "OPTIONS",
-                new Vector2(300f, 74f), HandleOptionsClicked, Constants.CardPurple);
-
-            UIFactory.CreateButton(col.transform, "BtnQuit", "QUITTER",
-                new Vector2(300f, 74f), HandleQuitClicked, Constants.CardRed);
+        private static void LeftAlign(Button b)
+        {
+            TextMeshProUGUI? l = b.GetComponentInChildren<TextMeshProUGUI>();
+            if (l == null) return;
+            l.alignment = TextAlignmentOptions.MidlineLeft;
+            l.rectTransform.offsetMin = new Vector2(28f, 0f);
         }
 
         private void CreateFooter(RectTransform parent)
         {
-            TextMeshProUGUI footer = UIFactory.CreateText(parent, "Footer", "v0.1 — PROJET PERSO",
-                14f, Constants.TextSecondary, TextAlignmentOptions.Center, FontStyles.Normal);
-            RectTransform rt = footer.rectTransform;
-            rt.anchorMin = new Vector2(0.5f, 0f);
-            rt.anchorMax = new Vector2(0.5f, 0f);
-            rt.pivot = new Vector2(0.5f, 0f);
-            rt.sizeDelta = new Vector2(400f, 20f);
-            rt.anchoredPosition = new Vector2(0f, 20f);
-            footer.characterSpacing = 6f;
+            // Pas de footer dans la maquette.
+            _ = parent;
         }
 
         /// <summary>
-        /// Crée 6 cartes décoratives qui dérivent lentement en arrière-plan.
-        /// Donne du mouvement au menu sans distraire.
+        /// Cartes de la maquette (vraies faces : couleur, valeur, symbole) qui
+        /// dérivent lentement à droite — fond vivant sans distraire.
         /// </summary>
         private void CreateFloatingCards(RectTransform parent)
         {
-            Color[] colors =
+            // x, y (coin haut-gauche, repère 1920×1080), rotation, valeur, couleur, opacité
+            (float x, float y, float r, int v, CardColor c, float a)[] cards =
             {
-                Constants.CardBlue, Constants.CardRed, Constants.CardGreen,
-                Constants.CardPurple, Constants.CardOrange, Constants.CardYellow
-            };
-            Vector2[] positions =
-            {
-                new(-550f, 150f), new(520f, -200f), new(-420f, -280f),
-                new(480f, 240f), new(-620f, -80f), new(580f, 60f)
+                (1000f, 180f, -14f, 4, CardColor.Blue, 0.9f),
+                (1160f, 140f, -5f, 5, CardColor.Red, 1f),
+                (1320f, 150f, 6f, 6, CardColor.Green, 1f),
+                (1480f, 200f, 15f, 7, CardColor.Yellow, 0.9f),
+                (1080f, 560f, 9f, 12, CardColor.Purple, 0.55f),
+                (1400f, 620f, -11f, 12, CardColor.Orange, 0.55f),
+                (1660f, 480f, 22f, 18, CardColor.Blue, 0.35f)
             };
 
-            for (int i = 0; i < 6; i++)
+            foreach ((float x, float y, float r, int v, CardColor c, float a) in cards)
             {
-                GameObject card = new($"FloatCard_{i}", typeof(RectTransform), typeof(Image));
-                card.transform.SetParent(parent, false);
-
-                RectTransform rt = card.GetComponent<RectTransform>();
+                // Conteneur (déplacé/tourné par Update) : ombre puis face.
+                GameObject holder = new($"FloatCard_{v}_{c}", typeof(RectTransform), typeof(CanvasGroup));
+                holder.transform.SetParent(parent, false);
+                RectTransform rt = (RectTransform)holder.transform;
                 rt.anchorMin = new Vector2(0.5f, 0.5f);
                 rt.anchorMax = new Vector2(0.5f, 0.5f);
-                rt.sizeDelta = new Vector2(90f, 135f);
-                rt.anchoredPosition = positions[i];
-                rt.localRotation = Quaternion.Euler(0, 0, UnityEngine.Random.Range(-25f, 25f));
+                rt.sizeDelta = new Vector2(150f, 214f);
+                Vector2 pos = new(x + 75f - 960f, 540f - (y + 107f));
+                rt.anchoredPosition = pos;
+                rt.localRotation = Quaternion.Euler(0f, 0f, -r);
+                CanvasGroup cg = holder.GetComponent<CanvasGroup>();
+                cg.alpha = a;
+                cg.blocksRaycasts = false;
 
-                Image img = card.GetComponent<Image>();
-                img.sprite = UIFactory.RoundedSprite;
-                img.type = Image.Type.Sliced;
-                Color tinted = Color.Lerp(Constants.CardFaceColor, colors[i], 0.35f);
-                tinted.a = 0.55f;
-                img.color = tinted;
-                img.raycastTarget = false;
+                Image shadow = UISkin.Rect(rt, "Shadow", new Color(0f, 0f, 0f, 0.35f), 22f);
+                UISkin.Stretch(shadow.rectTransform, -6f);
+                shadow.rectTransform.anchoredPosition = new Vector2(0f, -22f);
 
-                // Halo coloré doux autour de la carte (remplace le contour dur)
-                GameObject halo = new("Halo", typeof(RectTransform), typeof(Image));
-                halo.transform.SetParent(card.transform, false);
-                halo.transform.SetAsFirstSibling();
-                RectTransform rRt = halo.GetComponent<RectTransform>();
-                rRt.anchorMin = Vector2.zero;
-                rRt.anchorMax = Vector2.one;
-                rRt.sizeDelta = new Vector2(40f, 40f);
-                Image rImg = halo.GetComponent<Image>();
-                rImg.sprite = UIFactory.SoftShadowSprite;
-                rImg.color = new Color(colors[i].r, colors[i].g, colors[i].b, 0.35f);
-                rImg.raycastTarget = false;
+                Image face = UISkin.Rect(rt, "Face", Constants.GetColor(c), 18f);
+                UISkin.Stretch(face.rectTransform);
+
+                Color ink = UISkin.InkFor(c);
+                Image wm = UISkin.SuitImage(face.transform, "Watermark", c, 120f, UISkin.WithAlpha(ink, 0.16f));
+                UISkin.Place(wm.rectTransform, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), Vector2.zero,
+                    new Vector2(120f, 120f));
+                TextMeshProUGUI corner = UISkin.Text(face.transform, "Corner", v.ToString(), 24f, ink,
+                    TextWeight.Display, TextAlignmentOptions.TopLeft);
+                UISkin.Place(corner.rectTransform, new Vector2(0f, 1f), new Vector2(0f, 1f), new Vector2(14f, -10f),
+                    new Vector2(60f, 30f));
+                TextMeshProUGUI value = UISkin.Text(face.transform, "Value", v.ToString(), 76f, ink,
+                    TextWeight.Display, TextAlignmentOptions.Center);
+                value.characterSpacing = -3f;
+                UISkin.Stretch(value.rectTransform);
+                UISkin.Outline(face.rectTransform, 18f, 2f, new Color(1f, 1f, 1f, 0.2f));
 
                 _floatingCards.Add(rt);
-                _cardOrigins.Add(positions[i]);
-                _cardAmplitudes.Add(new Vector2(
-                    UnityEngine.Random.Range(20f, 60f),
-                    UnityEngine.Random.Range(20f, 50f)));
+                _cardOrigins.Add(pos);
+                _cardAmplitudes.Add(new Vector2(UnityEngine.Random.Range(8f, 18f), UnityEngine.Random.Range(10f, 22f)));
                 _cardPhases.Add(UnityEngine.Random.Range(0f, Mathf.PI * 2f));
-                _cardSpeeds.Add(UnityEngine.Random.Range(0.2f, 0.45f));
-                _cardSpinSpeeds.Add(UnityEngine.Random.Range(-8f, 8f));
+                _cardSpeeds.Add(UnityEngine.Random.Range(0.25f, 0.45f));
+                _cardSpinSpeeds.Add(-r);
             }
         }
 
@@ -287,15 +260,9 @@ namespace LevelUp.UI
                 float dy = Mathf.Cos(phase * 0.85f) * _cardAmplitudes[i].y;
                 _floatingCards[i].anchoredPosition = _cardOrigins[i] + new Vector2(dx, dy);
 
-                float baseAngle = _cardSpinSpeeds[i] * Mathf.Sin(_time * 0.3f + _cardPhases[i]);
-                _floatingCards[i].localRotation = Quaternion.Euler(0, 0, baseAngle);
-            }
-
-            // Titre qui pulse
-            if (_titleText != null)
-            {
-                float pulse = 1f + Mathf.Sin(_time * 1.8f) * 0.025f;
-                _titleText.rectTransform.localScale = new Vector3(pulse, pulse, 1f);
+                // Inclinaison de la maquette + léger balancement (±2.5°)
+                float angle = _cardSpinSpeeds[i] + 2.5f * Mathf.Sin(_time * 0.3f + _cardPhases[i]);
+                _floatingCards[i].localRotation = Quaternion.Euler(0, 0, angle);
             }
         }
 

@@ -108,7 +108,7 @@ namespace LevelUp.Core
 
         /// <summary>
         /// Texte court d'un contrat, exigences identiques regroupées :
-        /// "2 suites de 3", "1 brelan + 1 paire", "1 flush de 5 + 1 suite de 3".
+        /// "2 suites de 3", "1 brelan + 1 paire", "1 couleur de 5 + 1 suite de 3".
         /// </summary>
         public static string Describe(IReadOnlyList<LevelValidator.LevelRequirement> reqs)
         {
@@ -131,14 +131,14 @@ namespace LevelUp.Core
             return sb.ToString();
         }
 
-        /// <summary>Nom d'une exigence seule : "suite de 4", "brelan", "flush de 5".</summary>
+        /// <summary>Nom d'une exigence seule : "suite de 4", "brelan", "couleur de 5".</summary>
         public static string Name(LevelValidator.LevelRequirement req, bool plural = false)
         {
             string s = plural ? "s" : "";
             return req.Type switch
             {
                 MeldType.Run => $"suite{s} de {req.CardCount}",
-                MeldType.Flush => $"flush de {req.CardCount}",
+                MeldType.Flush => $"couleur{s} de {req.CardCount}",
                 MeldType.Set => req.CardCount switch
                 {
                     2 => $"paire{s}",

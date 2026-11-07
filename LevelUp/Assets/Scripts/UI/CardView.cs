@@ -7,8 +7,14 @@ using LevelUp.Utils;
 namespace LevelUp.UI
 {
     /// <summary>
-    /// Affichage visuel d'une carte style Balatro : fond sombre, accents néon,
-    /// glow sur hover/sélection. Position et scale gérés par HandView.
+    /// Carte au style de la maquette "Système de cartes" :
+    ///   - face pleine de sa couleur, encre blanche ou sombre (contraste ≥ 4.5:1)
+    ///   - valeur centrale en serif (DM Serif Display), coins valeur + symbole (haut-gauche, bas-droite inversé)
+    ///   - grand symbole en filigrane (second canal d'info, daltonisme)
+    ///   - cartes action : surface neutre, bandeau 6 couleurs, pastille accent + libellé
+    ///   - dos "Accent" : points, double liseré, monogramme LU
+    /// États : survol (liseré clair + glow), sélection (anneau accent 3px + coche).
+    /// Position/scale/rotation pilotés par HandView.
     /// </summary>
     [RequireComponent(typeof(RectTransform))]
     public class CardView : MonoBehaviour
@@ -31,33 +37,46 @@ namespace LevelUp.UI
         [Header("Interaction")]
         [SerializeField] private CanvasGroup? _canvasGroup;
 
+        private const float Radius = 14f;
+
         private CardModel _cardModel;
         private bool _modelAssigned;
         private RectTransform? _rectTransform;
         private bool _isFaceUp = true;
         private bool _isSelected;
         private bool _isHovered;
-        private Image? _glowOverlay;
-        private Image? _outerGlow;
-        private Image? _gradientOverlay;
-        private TextMeshProUGUI? _suitIcon;
+        private bool _built;
+
+        // Éléments construits en code
+        private Image? _face;
+        private Image? _edge;
+        private Image? _selectRing;
+        private Image? _checkBadge;
+        private Image? _hintRing;
+        private Image? _hintBadge;
+        private bool _isHinted;
+        private Image? _watermark;
+        private Image? _cornerSuitTL;
+        private Image? _cornerSuitBR;
+        private GameObject? _actionGroup;
+        private Image? _actionBadgeIcon;
+        private TextMeshProUGUI? _actionGlyph;
+        private TextMeshProUGUI? _actionLabel;
+        private Image? _glow;
+
         private float _glowAlpha;
         private float _targetGlowAlpha;
-        private static Sprite? _radialSprite;
+        private Color _glowColor = Color.white;
+        private Color _ink = Color.white;
 
-        /// <summary>Le modèle de carte associé.</summary>
+        private static readonly Color EdgeRest = new(1f, 1f, 1f, 0.22f);
+        private static readonly Color EdgeHover = new(1f, 1f, 1f, 0.40f);
+
         public CardModel CardModel => _cardModel;
-
-        /// <summary>Indique si la carte est face visible.</summary>
         public bool IsFaceUp => _isFaceUp;
-
-        /// <summary>Indique si la carte est sélectionnée.</summary>
         public bool IsSelected => _isSelected;
-
-        /// <summary>Indique si la carte est survolée.</summary>
         public bool IsHovered => _isHovered;
 
-        /// <summary>RectTransform de la carte.</summary>
         public RectTransform RectTransform
         {
             get
@@ -70,504 +89,399 @@ namespace LevelUp.UI
         private void Awake()
         {
             _rectTransform = GetComponent<RectTransform>();
-            CreateGlowOverlay();
-            CreateGradientOverlay();
-            CreateSuitIcon();
+            Build();
         }
 
-        private void OnEnable()
-        {
-            GameSettings.SettingsChanged += OnSettingsChanged;
-        }
-
-        private void OnDisable()
-        {
-            GameSettings.SettingsChanged -= OnSettingsChanged;
-        }
+        private void OnEnable() => GameSettings.SettingsChanged += OnSettingsChanged;
+        private void OnDisable() => GameSettings.SettingsChanged -= OnSettingsChanged;
 
         private void OnSettingsChanged()
         {
-            if (_modelAssigned) UpdateSuitIcon();
+            if (_modelAssigned) UpdateVisuals();
         }
 
         private void Update()
         {
-            // Early-out : quand le glow a convergé, ne pas réécrire Image.color
-            // chaque frame (chaque écriture re-tessellate le graphic → dirty Canvas).
+            // Converge puis s'arrête : pas de réécriture de couleur à chaque frame.
             if (_glowAlpha == _targetGlowAlpha) return;
-
-            // Amortissement exponentiel : même vitesse perçue à 30 et 144 fps.
-            _glowAlpha = Mathf.Lerp(_glowAlpha, _targetGlowAlpha,
-                1f - Mathf.Exp(-15f * Time.deltaTime));
-            if (Mathf.Abs(_glowAlpha - _targetGlowAlpha) < 0.003f)
-            {
-                _glowAlpha = _targetGlowAlpha;
-            }
-
-            if (_glowOverlay != null)
-            {
-                Color c = _glowOverlay.color;
-                c.a = _glowAlpha;
-                _glowOverlay.color = c;
-            }
-
-            if (_outerGlow != null)
-            {
-                Color c = _outerGlow.color;
-                c.a = _glowAlpha * 0.5f;
-                _outerGlow.color = c;
-            }
+            _glowAlpha = Mathf.Lerp(_glowAlpha, _targetGlowAlpha, 1f - Mathf.Exp(-15f * Time.deltaTime));
+            if (Mathf.Abs(_glowAlpha - _targetGlowAlpha) < 0.003f) _glowAlpha = _targetGlowAlpha;
+            if (_glow != null) _glow.color = UISkin.WithAlpha(_glowColor, _glowAlpha * 0.55f);
         }
 
-        /// <summary>
-        /// Crée 2 couches de glow derrière la carte pour un vrai effet néon doux.
-        /// </summary>
-        private void CreateGlowOverlay()
+        // ═══════════════════════════════════════════════════════════
+        //  CONSTRUCTION
+        // ═══════════════════════════════════════════════════════════
+
+        private void Build()
         {
-            if (_border == null) return;
+            if (_built) return;
+            _built = true;
+            UISkin.EnsureFonts();
 
-            EnsureRadialSprite();
+            RectTransform root = RectTransform;
 
-            // Glow extérieur large et doux
-            GameObject outerObj = new("OuterGlow", typeof(RectTransform), typeof(Image));
-            outerObj.transform.SetParent(transform, false);
-            outerObj.transform.SetAsFirstSibling();
+            // Glow derrière la carte (halo doux, invisible au repos → mesh cullé)
+            GameObject glowObj = new("Glow", typeof(RectTransform), typeof(Image));
+            glowObj.transform.SetParent(root, false);
+            glowObj.transform.SetAsFirstSibling();
+            RectTransform grt = (RectTransform)glowObj.transform;
+            UISkin.Stretch(grt, -34f);
+            _glow = glowObj.GetComponent<Image>();
+            _glow.sprite = UISkin.Radial;
+            _glow.color = new Color(1f, 1f, 1f, 0f);
+            _glow.raycastTarget = false;
+            _glow.canvasRenderer.cullTransparentMesh = true;
 
-            RectTransform outerRt = outerObj.GetComponent<RectTransform>();
-            outerRt.anchorMin = Vector2.zero;
-            outerRt.anchorMax = Vector2.one;
-            outerRt.sizeDelta = new Vector2(80f, 80f);
-            outerRt.anchoredPosition = Vector2.zero;
+            // Ombre portée (0 10px 20px rgba(0,0,0,.4))
+            if (_shadowImage != null)
+            {
+                UISkin.SetRounded(_shadowImage, Radius + 4f);
+                RectTransform srt = _shadowImage.rectTransform;
+                UISkin.Stretch(srt, -4f);
+                srt.anchoredPosition = new Vector2(0f, -8f);
+                _shadowImage.color = new Color(0f, 0f, 0f, 0.38f);
+                _shadowImage.raycastTarget = false;
+            }
 
-            _outerGlow = outerObj.GetComponent<Image>();
-            _outerGlow.sprite = _radialSprite;
-            _outerGlow.color = new Color(1f, 1f, 1f, 0f);
-            _outerGlow.raycastTarget = false;
-            _outerGlow.type = Image.Type.Simple;
-            // À alpha 0 (état de repos), le mesh est cullé : zéro draw call.
-            _outerGlow.canvasRenderer.cullTransparentMesh = true;
+            // Racine : zone de hit transparente (le visuel est porté par la face)
+            Image? rootImg = GetComponent<Image>();
+            if (rootImg != null)
+            {
+                UISkin.SetRounded(rootImg, Radius);
+                rootImg.color = new Color(0f, 0f, 0f, 0f);
+            }
 
-            // Glow proche, plus net
-            GameObject glowObj = new("GlowOverlay", typeof(RectTransform), typeof(Image));
-            glowObj.transform.SetParent(transform, false);
-            glowObj.transform.SetSiblingIndex(1);
+            // Dos
+            if (_cardBack != null)
+            {
+                UISkin.BuildCardBack((RectTransform)_cardBack.transform, Radius);
+            }
 
-            RectTransform rt = glowObj.GetComponent<RectTransform>();
-            rt.anchorMin = Vector2.zero;
-            rt.anchorMax = Vector2.one;
-            rt.sizeDelta = new Vector2(28f, 28f);
-            rt.anchoredPosition = Vector2.zero;
-
-            _glowOverlay = glowObj.GetComponent<Image>();
-            _glowOverlay.sprite = _radialSprite;
-            _glowOverlay.color = new Color(1f, 1f, 1f, 0f);
-            _glowOverlay.raycastTarget = false;
-            _glowOverlay.type = Image.Type.Simple;
-            _glowOverlay.canvasRenderer.cullTransparentMesh = true;
-        }
-
-        /// <summary>
-        /// Crée un symbole unicode (♥ ♦ ♣ ♠ ★ ●) centré sur la face, visible uniquement
-        /// en mode daltonisme. Permet d'identifier la couleur sans se fier à la teinte.
-        /// </summary>
-        private void CreateSuitIcon()
-        {
             if (_cardFront == null) return;
+            RectTransform front = (RectTransform)_cardFront.transform;
 
-            GameObject iconObj = new("SuitIcon", typeof(RectTransform));
-            iconObj.transform.SetParent(_cardFront.transform, false);
-            iconObj.transform.SetAsLastSibling();
+            // Les décors du prefab d'origine ne font plus partie de la DA.
+            if (_border != null) _border.enabled = false;
+            if (_colorBand != null) _colorBand.enabled = false;
+            Transform? indicator = front.Find("ColorIndicator");
+            if (indicator != null) indicator.gameObject.SetActive(false);
 
-            _suitIcon = iconObj.AddComponent<TextMeshProUGUI>();
-            _suitIcon.alignment = TextAlignmentOptions.Center;
-            _suitIcon.fontSize = 36f;
-            _suitIcon.fontStyle = FontStyles.Bold;
-            _suitIcon.raycastTarget = false;
-            _suitIcon.color = new Color(1f, 1f, 1f, 0f);
+            // Face
+            if (_background != null && _background.transform.IsChildOf(front))
+            {
+                _face = _background;
+            }
+            else
+            {
+                if (_background != null && _background.gameObject != gameObject) _background.enabled = false;
+                _face = UISkin.Rect(front, "Face", Color.white, Radius);
+                UISkin.Stretch(_face.rectTransform);
+            }
+            UISkin.SetRounded(_face, Radius);
+            _face.transform.SetAsFirstSibling();
 
-            RectTransform rt = _suitIcon.rectTransform;
-            rt.anchorMin = new Vector2(0.5f, 0f);
-            rt.anchorMax = new Vector2(0.5f, 0f);
-            rt.pivot = new Vector2(0.5f, 0f);
-            rt.sizeDelta = new Vector2(60f, 40f);
-            rt.anchoredPosition = new Vector2(0f, 18f);
+            // Conteneur du contenu de face (filigrane, groupe action). Pas de masque :
+            // tout est dessiné à l'intérieur de la carte, et un RectMask2D ne
+            // suivrait pas l'inclinaison des cartes dans l'éventail.
+            GameObject clip = new("Content", typeof(RectTransform));
+            clip.transform.SetParent(front, false);
+            clip.transform.SetSiblingIndex(_face.transform.GetSiblingIndex() + 1);
+            UISkin.Stretch((RectTransform)clip.transform);
+
+            _watermark = UISkin.SuitImage(clip.transform, "Watermark", CardColor.Red, 96f, Color.white);
+            UISkin.Place(_watermark.rectTransform, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f),
+                Vector2.zero, new Vector2(96f, 96f));
+
+            BuildActionGroup(clip.transform);
+
+            // Valeur centrale
+            if (_valueText != null)
+            {
+                _valueText.transform.SetAsLastSibling();
+                UISkin.Stretch(_valueText.rectTransform);
+                _valueText.rectTransform.anchoredPosition = Vector2.zero;
+                UISkin.ApplyFont(_valueText, TextWeight.Display);
+                _valueText.alignment = TextAlignmentOptions.Center;
+                _valueText.enableWordWrapping = false;
+                _valueText.characterSpacing = -3f;
+                _valueText.raycastTarget = false;
+            }
+
+            // Coins : valeur + symbole
+            _cornerSuitTL = BuildCorner(front, _cornerValueTopLeft, topLeft: true);
+            _cornerSuitBR = BuildCorner(front, _cornerValueBottomRight, topLeft: false);
+
+            // Liseré + anneau de sélection + coche
+            _edge = UISkin.Outline(front, Radius, 1.5f, EdgeRest, "Edge");
+            _edge.transform.SetAsLastSibling();
+
+            _selectRing = UISkin.Outline(root, Radius + 3f, 3f, UISkin.SelectRing, "SelectRing");
+            UISkin.Stretch(_selectRing.rectTransform, -3f);
+            _selectRing.enabled = false;
+
+            _checkBadge = UISkin.Rect(root, "CheckBadge", UISkin.Accent, 11f);
+            UISkin.Place(_checkBadge.rectTransform, new Vector2(1f, 1f), new Vector2(1f, 1f),
+                new Vector2(-8f, -8f), new Vector2(22f, 22f));
+            Image check = UISkin.IconImage(_checkBadge.transform, "Check", UIIcon.Check, 14f, UISkin.OnAccent);
+            UISkin.Place(check.rectTransform, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), Vector2.zero,
+                new Vector2(14f, 14f));
+            _checkBadge.gameObject.SetActive(false);
+
+            // Indice "jouable" (phase Compléter) : liseré champagne + pastille "+".
+            _hintRing = UISkin.Outline(root, Radius + 2f, 2f, UISkin.WithAlpha(UISkin.Accent, 0.9f), "HintRing");
+            UISkin.Stretch(_hintRing.rectTransform, -2f);
+            _hintRing.enabled = false;
+
+            _hintBadge = UISkin.Rect(root, "HintBadge", UISkin.Accent, 11f);
+            UISkin.Place(_hintBadge.rectTransform, new Vector2(0.5f, 1f), new Vector2(0.5f, 0.5f),
+                new Vector2(0f, 2f), new Vector2(22f, 22f));
+            TextMeshProUGUI plus = UISkin.Text(_hintBadge.transform, "Plus", "+", 18f, UISkin.OnAccent,
+                TextWeight.Bold, TextAlignmentOptions.Center);
+            UISkin.Stretch(plus.rectTransform);
+            plus.rectTransform.anchoredPosition = new Vector2(0f, 1f);
+            _hintBadge.gameObject.SetActive(false);
         }
 
         /// <summary>
-        /// Met à jour l'icône de daltonisme selon le paramètre global et la couleur.
+        /// Indique que la carte peut compléter une combinaison posée (aide de
+        /// lecture en phase "Compléter" — ne change rien aux règles).
         /// </summary>
-        private void UpdateSuitIcon()
+        public void SetHint(bool hinted)
         {
-            if (_suitIcon == null) return;
-            if (!_isFaceUp)
-            {
-                _suitIcon.text = string.Empty;
-                return;
-            }
-
-            if (!GameSettings.ColorblindMode || _cardModel.IsAction)
-            {
-                _suitIcon.text = string.Empty;
-                return;
-            }
-
-            _suitIcon.text = GetSuitSymbol(_cardModel.Color);
-            Color c = Constants.GetColor(_cardModel.Color);
-            _suitIcon.color = Color.Lerp(c, Color.white, 0.4f);
-            _suitIcon.outlineWidth = 0.2f;
-            _suitIcon.outlineColor = new Color32(0, 0, 0, 200);
+            if (_isHinted == hinted) return;
+            _isHinted = hinted;
+            ApplyStateVisuals();
         }
 
-        private static string GetSuitSymbol(CardColor color)
+        private static Image? BuildCorner(RectTransform front, TextMeshProUGUI? text, bool topLeft)
         {
-            return color switch
-            {
-                CardColor.Red    => "\u2665", // ♥
-                CardColor.Blue   => "\u25C6", // ◆
-                CardColor.Green  => "\u2663", // ♣
-                CardColor.Yellow => "\u2605", // ★
-                CardColor.Purple => "\u2660", // ♠
-                CardColor.Orange => "\u25B2", // ▲
-                _                => string.Empty
-            };
+            if (text == null) return null;
+
+            GameObject corner = new(topLeft ? "CornerTL" : "CornerBR", typeof(RectTransform));
+            corner.transform.SetParent(front, false);
+            RectTransform crt = (RectTransform)corner.transform;
+            Vector2 a = topLeft ? new Vector2(0f, 1f) : new Vector2(1f, 0f);
+            UISkin.Place(crt, a, new Vector2(0.5f, 0.5f),
+                topLeft ? new Vector2(22f, -26f) : new Vector2(-22f, 26f), new Vector2(36f, 44f));
+            if (!topLeft) crt.localRotation = Quaternion.Euler(0f, 0f, 180f);
+
+            text.transform.SetParent(corner.transform, false);
+            UISkin.Place(text.rectTransform, new Vector2(0.5f, 1f), new Vector2(0.5f, 1f), Vector2.zero,
+                new Vector2(36f, 22f));
+            text.rectTransform.localRotation = Quaternion.identity;
+            UISkin.ApplyFont(text, TextWeight.Display);
+            text.alignment = TextAlignmentOptions.Center;
+            text.enableWordWrapping = false;
+            text.fontSize = 20f;
+            text.raycastTarget = false;
+
+            Image suit = UISkin.SuitImage(corner.transform, "Suit", CardColor.Red, 15f, Color.white);
+            UISkin.Place(suit.rectTransform, new Vector2(0.5f, 1f), new Vector2(0.5f, 1f),
+                new Vector2(0f, -24f), new Vector2(15f, 15f));
+            return suit;
         }
 
-        /// <summary>
-        /// Ajoute un overlay de gradient subtil sur la face de la carte (haut clair, bas sombre).
-        /// Donne du volume sans shader.
-        /// </summary>
-        private void CreateGradientOverlay()
+        private void BuildActionGroup(Transform parent)
         {
-            if (_cardFront == null) return;
+            _actionGroup = new GameObject("Action", typeof(RectTransform));
+            _actionGroup.transform.SetParent(parent, false);
+            UISkin.Stretch((RectTransform)_actionGroup.transform);
 
-            GameObject gradObj = new("GradientOverlay", typeof(RectTransform), typeof(Image));
-            gradObj.transform.SetParent(_cardFront.transform, false);
-            gradObj.transform.SetAsLastSibling();
+            // Bandeau 6 couleurs en haut, coins hauts arrondis (sprite pré-dessiné).
+            GameObject band = new("Band", typeof(RectTransform), typeof(Image));
+            band.transform.SetParent(_actionGroup.transform, false);
+            RectTransform brt = (RectTransform)band.transform;
+            brt.anchorMin = new Vector2(0f, 1f);
+            brt.anchorMax = new Vector2(1f, 1f);
+            brt.pivot = new Vector2(0.5f, 1f);
+            brt.sizeDelta = new Vector2(0f, 6f);
+            brt.anchoredPosition = Vector2.zero;
+            Image bandImg = band.GetComponent<Image>();
+            bandImg.sprite = UISkin.ActionBand;
+            bandImg.type = Image.Type.Simple;
+            bandImg.raycastTarget = false;
 
-            RectTransform rt = gradObj.GetComponent<RectTransform>();
-            rt.anchorMin = Vector2.zero;
-            rt.anchorMax = Vector2.one;
-            rt.sizeDelta = Vector2.zero;
-            rt.anchoredPosition = Vector2.zero;
+            // Pastille centrale 60×60
+            Image badge = UISkin.Rect(_actionGroup.transform, "Badge", UISkin.WithAlpha(UISkin.Accent, 0.16f), 16f);
+            UISkin.Place(badge.rectTransform, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f),
+                new Vector2(0f, 12f), new Vector2(60f, 60f));
+            UISkin.Outline(badge.rectTransform, 16f, 1f, UISkin.WithAlpha(UISkin.AccentLight, 0.45f));
 
-            _gradientOverlay = gradObj.GetComponent<Image>();
-            _gradientOverlay.sprite = CreateVerticalGradient();
-            _gradientOverlay.color = new Color(1f, 1f, 1f, 0.18f);
-            _gradientOverlay.raycastTarget = false;
-            _gradientOverlay.type = Image.Type.Simple;
+            _actionBadgeIcon = UISkin.IconImage(badge.transform, "Icon", UIIcon.Skip, 32f, UISkin.AccentPale);
+            UISkin.Place(_actionBadgeIcon.rectTransform, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f),
+                Vector2.zero, new Vector2(32f, 32f));
+
+            _actionGlyph = UISkin.Text(badge.transform, "Glyph", "", 24f, UISkin.AccentPale,
+                TextWeight.Display, TextAlignmentOptions.Center);
+            UISkin.Stretch(_actionGlyph.rectTransform);
+
+            _actionLabel = UISkin.Text(_actionGroup.transform, "Label", "", 14f, UISkin.TextColor,
+                TextWeight.SemiBold, TextAlignmentOptions.Center);
+            UISkin.Place(_actionLabel.rectTransform, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f),
+                new Vector2(0f, -38f), new Vector2(110f, 20f));
         }
 
-        private static void EnsureRadialSprite()
-        {
-            if (_radialSprite != null) return;
+        // ═══════════════════════════════════════════════════════════
+        //  MISE À JOUR
+        // ═══════════════════════════════════════════════════════════
 
-            const int size = 64;
-            Texture2D tex = new(size, size, TextureFormat.RGBA32, false)
-            {
-                filterMode = FilterMode.Bilinear,
-                wrapMode = TextureWrapMode.Clamp
-            };
-
-            float center = (size - 1) * 0.5f;
-            float maxDist = center;
-
-            Color[] pixels = new Color[size * size];
-            for (int y = 0; y < size; y++)
-            {
-                for (int x = 0; x < size; x++)
-                {
-                    float dx = (x - center) / maxDist;
-                    float dy = (y - center) / maxDist;
-                    float d = Mathf.Sqrt(dx * dx + dy * dy);
-                    float a = Mathf.Clamp01(1f - d);
-                    a = a * a;
-                    pixels[y * size + x] = new Color(1f, 1f, 1f, a);
-                }
-            }
-            tex.SetPixels(pixels);
-            tex.Apply();
-
-            _radialSprite = Sprite.Create(tex, new Rect(0, 0, size, size), new Vector2(0.5f, 0.5f));
-        }
-
-        /// <summary>
-        /// Sprite blanc avec alpha qui croît du haut vers le bas — utilisé en overlay
-        /// pour assombrir le bas de la carte (dégradé Tailwind 500 → 600). Le tint final
-        /// est appliqué via Image.color (couleur sombre cible).
-        /// </summary>
-        private static Sprite CreateVerticalGradient()
-        {
-            const int width = 4;
-            const int height = 32;
-            Texture2D tex = new(width, height, TextureFormat.RGBA32, false)
-            {
-                filterMode = FilterMode.Bilinear,
-                wrapMode = TextureWrapMode.Clamp
-            };
-
-            Color[] pixels = new Color[width * height];
-            for (int y = 0; y < height; y++)
-            {
-                // y=0 → bas du sprite UI ; on veut alpha max ici (assombrissement bas).
-                float t = 1f - (float)y / (height - 1);
-                // Courbe douce, alpha 0 en haut, 1 en bas
-                float a = Mathf.Pow(t, 1.4f);
-                for (int x = 0; x < width; x++)
-                {
-                    pixels[y * width + x] = new Color(1f, 1f, 1f, a);
-                }
-            }
-            tex.SetPixels(pixels);
-            tex.Apply();
-
-            return Sprite.Create(tex, new Rect(0, 0, width, height), new Vector2(0.5f, 0.5f));
-        }
-
-        /// <summary>
-        /// Configure l'affichage de la carte à partir du modèle.
-        /// </summary>
+        /// <summary>Configure l'affichage de la carte à partir du modèle.</summary>
         public void Setup(CardModel card, bool faceUp = true)
         {
+            Build();
             _cardModel = card;
             _modelAssigned = true;
             _isFaceUp = faceUp;
             _isSelected = false;
             _isHovered = false;
+            _isHinted = false;
             _targetGlowAlpha = 0f;
             _glowAlpha = 0f;
+            if (_glow != null) _glow.color = new Color(1f, 1f, 1f, 0f);
             UpdateVisuals();
+            ApplyStateVisuals();
         }
 
-        /// <summary>
-        /// Style mockup : face saturée Tailwind 500, dégradé vertical vers Tailwind 600
-        /// en bas, texte en version très sombre de la couleur (Tailwind 950).
-        /// </summary>
         private void UpdateVisuals()
         {
             if (_cardFront != null) _cardFront.SetActive(_isFaceUp);
             if (_cardBack != null) _cardBack.SetActive(!_isFaceUp);
+            if (!_isFaceUp) return;
 
-            if (!_isFaceUp)
+            bool action = _cardModel.IsAction;
+            Color faceColor = action ? UISkin.CardFace : Constants.GetColor(_cardModel.Color);
+            _ink = action ? UISkin.AccentPale : UISkin.InkFor(_cardModel.Color);
+            _glowColor = action ? UISkin.AccentLight : faceColor;
+
+            if (_face != null) _face.color = faceColor;
+
+            if (_actionGroup != null) _actionGroup.SetActive(action);
+            if (_watermark != null)
             {
-                if (_glowOverlay != null) _glowOverlay.color = new Color(1f, 1f, 1f, 0f);
-                return;
+                _watermark.gameObject.SetActive(!action);
+                if (!action)
+                {
+                    _watermark.sprite = UISkin.Suit(_cardModel.Color);
+                    // Mode daltonisme : filigrane renforcé.
+                    float a = GameSettings.ColorblindMode ? 0.30f : 0.16f;
+                    _watermark.color = UISkin.WithAlpha(_ink, a);
+                }
             }
 
-            Color cardColor = _cardModel.IsAction
-                ? GetActionCardColor()
-                : Constants.GetColor(_cardModel.Color);
-
-            // Couleur dark (Tailwind 600) pour le bas du dégradé. Pour les actions on
-            // dérive de cardColor en l'assombrissant ~70%.
-            Color cardColorDark = _cardModel.IsAction
-                ? new Color(cardColor.r * 0.7f, cardColor.g * 0.7f, cardColor.b * 0.7f, 1f)
-                : Constants.GetDarkColor(_cardModel.Color);
-
-            // Face saturée Tailwind 500
-            if (_background != null) _background.color = cardColor;
-
-            // Bordure très discrète — un blanc translucide pour la finition
-            if (_border != null) _border.color = new Color(1f, 1f, 1f, 0.12f);
-
-            // Pas de bande accent dans le nouveau style — désactivé plutôt que
-            // peint à alpha 0 (un graphic transparent génère quand même son mesh).
-            if (_colorBand != null) _colorBand.enabled = false;
-
-            if (_shadowImage != null) _shadowImage.color = new Color(0f, 0f, 0f, 0.45f);
-
-            // Le gradient overlay devient un dégradé vertical vers cardColorDark
-            // (top transparent → bas cardColorDark à ~85% d'opacité).
-            if (_gradientOverlay != null)
-            {
-                _gradientOverlay.color = new Color(
-                    cardColorDark.r, cardColorDark.g, cardColorDark.b, 0.85f);
-            }
-
-            if (_glowOverlay != null)
-            {
-                Color glowColor = cardColor;
-                glowColor.a = 0f;
-                _glowOverlay.color = glowColor;
-            }
-            if (_outerGlow != null)
-            {
-                Color outerColor = cardColor;
-                outerColor.a = 0f;
-                _outerGlow.color = outerColor;
-            }
-
-            string displayText = GetDisplayText();
-            // Texte très sombre (Tailwind 950 ≈ cardColor × 0.15) pour contraste sur la couleur saturée.
-            Color darkText = new(cardColor.r * 0.18f, cardColor.g * 0.18f, cardColor.b * 0.18f, 1f);
+            string value = action ? string.Empty : _cardModel.Value.ToString();
 
             if (_valueText != null)
             {
-                _valueText.text = displayText;
-                _valueText.color = darkText;
-                _valueText.fontSize = _cardModel.IsAction ? 30f : 60f;
-                _valueText.fontStyle = FontStyles.Bold;
-                _valueText.outlineWidth = 0f;
+                _valueText.gameObject.SetActive(!action);
+                _valueText.text = value;
+                _valueText.color = _ink;
+                _valueText.fontSize = _cardModel.Value >= 10 ? 56f : 62f;
             }
 
-            // Coins : même teinte dark, pleine opacité et taille lisible sur
-            // mobile (12pt à 60 % était illisible sur un écran 6 pouces).
-            Color cornerText = new(darkText.r, darkText.g, darkText.b, 0.95f);
-            float cornerSize = _cardModel.IsAction ? 16f : 24f;
+            SetCorner(_cornerValueTopLeft, _cornerSuitTL, value, action);
+            SetCorner(_cornerValueBottomRight, _cornerSuitBR, value, action);
 
-            if (_cornerValueTopLeft != null)
-            {
-                _cornerValueTopLeft.text = displayText;
-                _cornerValueTopLeft.color = cornerText;
-                _cornerValueTopLeft.fontStyle = FontStyles.Bold;
-                _cornerValueTopLeft.fontSize = cornerSize;
-                EnlargeCornerRect(_cornerValueTopLeft.rectTransform);
-            }
-
-            if (_cornerValueBottomRight != null)
-            {
-                _cornerValueBottomRight.text = displayText;
-                _cornerValueBottomRight.color = cornerText;
-                _cornerValueBottomRight.fontStyle = FontStyles.Bold;
-                _cornerValueBottomRight.fontSize = cornerSize;
-                EnlargeCornerRect(_cornerValueBottomRight.rectTransform);
-            }
-
-            UpdateSuitIcon();
+            if (action) SetupAction();
         }
 
-        /// <summary>
-        /// Agrandit le rect d'un coin (30×25 dans le prefab, trop petit pour la
-        /// police 24) sans toucher au prefab : l'ancre du coin est conservée,
-        /// seule la boîte grandit vers l'intérieur de la carte.
-        /// </summary>
-        private static void EnlargeCornerRect(RectTransform rt)
+        private void SetCorner(TextMeshProUGUI? text, Image? suit, string value, bool action)
         {
-            if (rt.sizeDelta.x >= 46f) return; // déjà agrandi
-            rt.sizeDelta = new Vector2(46f, 34f);
-            // Décale le centre pour garder le texte collé au coin (la position
-            // du prefab visait une boîte 30×25).
-            Vector2 pos = rt.anchoredPosition;
-            float dx = (46f - 30f) / 2f;
-            float dy = (34f - 25f) / 2f;
-            rt.anchoredPosition = new Vector2(
-                pos.x + (pos.x >= 0f ? dx : -dx),
-                pos.y + (pos.y >= 0f ? dy : -dy));
+            if (text != null)
+            {
+                Transform holder = text.transform.parent;
+                holder.gameObject.SetActive(!action);
+                text.text = value;
+                text.color = _ink;
+            }
+            if (suit != null && !action)
+            {
+                suit.sprite = UISkin.Suit(_cardModel.Color);
+                suit.color = _ink;
+            }
         }
 
-        private string GetDisplayText()
+        private void SetupAction()
         {
-            return _cardModel.Type switch
+            if (_actionLabel == null || _actionGlyph == null || _actionBadgeIcon == null) return;
+
+            bool skip = _cardModel.Type == CardType.Skip;
+            _actionBadgeIcon.gameObject.SetActive(skip);
+            _actionGlyph.gameObject.SetActive(!skip);
+
+            _actionGlyph.text = _cardModel.Type switch
             {
-                CardType.Normal    => _cardModel.Value.ToString(),
-                CardType.Skip      => "SKIP",
-                CardType.Draw2     => "+2",
-                CardType.Wild      => "W",
+                CardType.Draw2 => "+2",
+                CardType.Wild => "W",
                 CardType.WildDraw2 => "W+2",
-                _                  => "?"
+                _ => ""
+            };
+            _actionGlyph.fontSize = _cardModel.Type == CardType.WildDraw2 ? 19f : 24f;
+
+            _actionLabel.text = _cardModel.Type switch
+            {
+                CardType.Skip => "Skip",
+                CardType.Draw2 => "Draw +2",
+                CardType.Wild => "Wild",
+                CardType.WildDraw2 => "Wild +2",
+                _ => ""
             };
         }
 
-        private Color GetActionCardColor() => Constants.GetActionColor(_cardModel.Type);
+        /// <summary>Applique liseré / anneau / coche / glow selon survol et sélection.</summary>
+        private void ApplyStateVisuals()
+        {
+            if (_selectRing != null) _selectRing.enabled = _isSelected && _isFaceUp;
+            if (_checkBadge != null) _checkBadge.gameObject.SetActive(_isSelected && _isFaceUp);
+            bool hint = _isHinted && _isFaceUp && !_isSelected;
+            if (_hintRing != null) _hintRing.enabled = hint;
+            if (_hintBadge != null) _hintBadge.gameObject.SetActive(hint);
 
-        /// <summary>
-        /// Retourne la carte face visible ou face cachée.
-        /// </summary>
+            if (_edge != null)
+            {
+                Color rest = _cardModel.IsAction ? UISkin.WithAlpha(UISkin.AccentLight, 0.45f) : EdgeRest;
+                _edge.color = _isHovered || _isSelected ? EdgeHover : rest;
+            }
+
+            if (_isSelected)
+            {
+                _glowColor = UISkin.Accent;
+                _targetGlowAlpha = 1f;
+            }
+            else
+            {
+                _glowColor = _cardModel.IsAction ? UISkin.AccentLight : Constants.GetColor(_cardModel.Color);
+                _targetGlowAlpha = _isHovered ? 0.7f : 0f;
+            }
+        }
+
         public void SetFaceUp(bool faceUp)
         {
             _isFaceUp = faceUp;
             UpdateVisuals();
+            ApplyStateVisuals();
         }
 
-        /// <summary>
-        /// Marque la carte comme sélectionnée — glow intense + bordure lumineuse.
-        /// </summary>
+        /// <summary>Sélection : anneau accent 3px + coche + halo accent.</summary>
         public void SetSelected(bool selected)
         {
             _isSelected = selected;
-
-            Color cardColor = _cardModel.IsAction
-                ? GetActionCardColor()
-                : Constants.GetColor(_cardModel.Color);
-
-            if (selected)
-            {
-                // Bordure très lumineuse (blend vers blanc)
-                if (_border != null)
-                {
-                    _border.color = Color.Lerp(cardColor, Color.white, 0.5f);
-                }
-
-                // Glow intense
-                _targetGlowAlpha = 0.85f;
-            }
-            else
-            {
-                if (_border != null)
-                {
-                    _border.color = cardColor;
-                }
-                _targetGlowAlpha = _isHovered ? 0.5f : 0f;
-            }
-
-            ApplyGlowColor(cardColor);
+            ApplyStateVisuals();
         }
 
-        /// <summary>
-        /// Marque la carte comme survolée — glow léger.
-        /// </summary>
+        /// <summary>Survol : liseré plus clair + halo de la couleur de la carte.</summary>
         public void SetHovered(bool hovered)
         {
             if (_isHovered == hovered) return;
             _isHovered = hovered;
-
-            Color cardColor = _cardModel.IsAction
-                ? GetActionCardColor()
-                : Constants.GetColor(_cardModel.Color);
-
-            if (!_isSelected)
-            {
-                _targetGlowAlpha = hovered ? 0.5f : 0f;
-
-                if (_border != null)
-                {
-                    _border.color = hovered
-                        ? Color.Lerp(cardColor, Color.white, 0.25f)
-                        : cardColor;
-                }
-            }
-
-            ApplyGlowColor(cardColor);
+            ApplyStateVisuals();
         }
 
-        /// <summary>
-        /// Synchronise la teinte de l'effet glow avec la couleur courante de la carte.
-        /// L'alpha est mis à jour en continu via Update.
-        /// </summary>
-        private void ApplyGlowColor(Color cardColor)
-        {
-            if (_glowOverlay != null)
-            {
-                Color c = _glowOverlay.color;
-                _glowOverlay.color = new Color(cardColor.r, cardColor.g, cardColor.b, c.a);
-            }
-            if (_outerGlow != null)
-            {
-                Color c = _outerGlow.color;
-                _outerGlow.color = new Color(cardColor.r, cardColor.g, cardColor.b, c.a);
-            }
-        }
-
-        /// <summary>
-        /// Définit l'opacité de la carte.
-        /// </summary>
         public void SetAlpha(float alpha)
         {
             if (_canvasGroup != null) _canvasGroup.alpha = alpha;
         }
 
-        /// <summary>
-        /// Active/désactive l'interactivité de la carte.
-        /// </summary>
         public void SetInteractable(bool interactable)
         {
             if (_canvasGroup != null)

@@ -7,276 +7,309 @@ using LevelUp.Utils;
 namespace LevelUp.UI
 {
     /// <summary>
-    /// Panel d'options : volume musique/SFX, qualité graphique, daltonisme.
-    /// Lie ses sliders/toggles à <see cref="GameSettings"/> qui persiste les valeurs.
+    /// Options (maquette "Options") : panneau 720px, volumes musique/SFX,
+    /// contrôles segmentés (qualité, joueurs, bots, contrats), interrupteur
+    /// daltonisme, bouton FERMER. Lié à <see cref="GameSettings"/> (persistant).
     /// </summary>
     public class OptionsPanel : MonoBehaviour
     {
+        private const float PanelWidth = 720f;
+        private const float ContentWidth = PanelWidth - 88f;
+
         private RectTransform? _panel;
         private CanvasGroup? _panelCanvasGroup;
+        private GameObject? _veil;
         private bool _isVisible;
 
-        /// <summary>
-        /// Construit le panel sous le parent donné. Masqué par défaut, Show() pour afficher.
-        /// </summary>
         public void Setup(RectTransform parent)
         {
             if (parent == null) return;
             GameSettings.Initialize();
+            UISkin.EnsureFonts();
 
-            // Veil sombre qui capture les clics en arrière
-            GameObject veil = new("OptionsVeil", typeof(RectTransform), typeof(Image), typeof(Button));
-            veil.transform.SetParent(parent, false);
-            RectTransform vrt = veil.GetComponent<RectTransform>();
-            vrt.anchorMin = Vector2.zero;
-            vrt.anchorMax = Vector2.one;
-            vrt.sizeDelta = Vector2.zero;
-            Image vImg = veil.GetComponent<Image>();
-            vImg.color = new Color(0f, 0f, 0f, 0.65f);
-            Button vBtn = veil.GetComponent<Button>();
+            // Voile : tap à l'extérieur = fermer
+            _veil = new GameObject("OptionsVeil", typeof(RectTransform), typeof(Image), typeof(Button));
+            _veil.transform.SetParent(parent, false);
+            UISkin.Stretch((RectTransform)_veil.transform);
+            _veil.GetComponent<Image>().color = new Color(0.04f, 0.055f, 0.07f, 0.86f);
+            Button vBtn = _veil.GetComponent<Button>();
             vBtn.transition = Selectable.Transition.None;
             vBtn.onClick.AddListener(Hide);
 
-            // Panel central — hauteur augmentée pour laisser de la place au bouton FERMER
-            // sans qu'il chevauche les sliders/toggles au-dessus.
-            GameObject panelObj = UIFactory.CreatePanel(veil.transform, "OptionsPanel",
-                Constants.PanelBackground, new Vector2(580f, 880f),
-                withBorder: true, borderColor: Constants.CardPurple);
-            _panel = panelObj.GetComponent<RectTransform>();
-            _panel.anchorMin = new Vector2(0.5f, 0.5f);
-            _panel.anchorMax = new Vector2(0.5f, 0.5f);
-            _panel.anchoredPosition = Vector2.zero;
-            _panelCanvasGroup = panelObj.AddComponent<CanvasGroup>();
-            // Bloque tous les clics qui ne touchent pas les contrôles (pour ne pas
-            // que le veil derrière ferme le panel quand on clique entre deux éléments).
-            Image panelBlocker = panelObj.GetComponent<Image>();
-            if (panelBlocker != null) panelBlocker.raycastTarget = true;
+            Image panel = UISkin.Rect(_veil.transform, "OptionsPanel", UISkin.Surface, 28f, raycast: true);
+            _panel = panel.rectTransform;
+            UISkin.Place(_panel, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), Vector2.zero,
+                new Vector2(PanelWidth, 0f));
+            UISkin.Outline(_panel, 28f, 1f, new Color(1f, 1f, 1f, 0.08f))
+                .gameObject.AddComponent<LayoutElement>().ignoreLayout = true;
+            UISkin.VCol(panel.gameObject, 28f, new RectOffset(44, 44, 40, 40), TextAnchor.UpperLeft);
+            ContentSizeFitter fit = panel.gameObject.AddComponent<ContentSizeFitter>();
+            fit.verticalFit = ContentSizeFitter.FitMode.PreferredSize;
+            _panelCanvasGroup = panel.gameObject.AddComponent<CanvasGroup>();
 
-            UIFactory.AddDropShadow(_panel, 10f, 0.5f);
+            // En-tête : OPTIONS + fermer
+            GameObject header = Row(panel.transform, "Header", 48f);
+            TextMeshProUGUI title = UISkin.Text(header.transform, "Title", "OPTIONS", 34f, UISkin.TextColor,
+                TextWeight.Display);
+            title.characterSpacing = 2f;
+            UISkin.Size(title.gameObject, ContentWidth - 48f - 16f);
+            GameScreenLayout.IconButton(header.transform, "BtnX", UIIcon.Close, 20f, "Fermer", Hide);
 
-            // Titre
-            TextMeshProUGUI title = UIFactory.CreateText(_panel, "Title", "OPTIONS", 38f,
-                Color.white, TextAlignmentOptions.Center, FontStyles.Bold);
-            RectTransform trt = title.rectTransform;
-            trt.anchorMin = new Vector2(0.5f, 1f);
-            trt.anchorMax = new Vector2(0.5f, 1f);
-            trt.pivot = new Vector2(0.5f, 1f);
-            trt.sizeDelta = new Vector2(500f, 60f);
-            trt.anchoredPosition = new Vector2(0f, -30f);
-            title.characterSpacing = 14f;
-            title.enableVertexGradient = true;
-            title.colorGradient = new VertexGradient(
-                Color.Lerp(Constants.CardPurple, Color.white, 0.3f),
-                Color.Lerp(Constants.CardPurple, Color.white, 0.3f),
-                Color.Lerp(Constants.CardBlue, Color.white, 0.2f),
-                Color.Lerp(Constants.CardBlue, Color.white, 0.2f));
+            // Volumes
+            GameObject volumes = Column(panel.transform, "Volumes", 18f);
+            SliderRow(volumes.transform, "Musique", GameSettings.MusicVolume, v => GameSettings.MusicVolume = v);
+            SliderRow(volumes.transform, "Effets SFX", GameSettings.SfxVolume, v => GameSettings.SfxVolume = v);
 
-            // Séparateur
-            GameObject sep = new("Separator", typeof(RectTransform), typeof(Image));
-            sep.transform.SetParent(_panel, false);
-            RectTransform srt = sep.GetComponent<RectTransform>();
-            srt.anchorMin = new Vector2(0.5f, 1f);
-            srt.anchorMax = new Vector2(0.5f, 1f);
-            srt.pivot = new Vector2(0.5f, 1f);
-            srt.sizeDelta = new Vector2(460f, 2f);
-            srt.anchoredPosition = new Vector2(0f, -95f);
-            Image sImg = sep.GetComponent<Image>();
-            sImg.color = new Color(Constants.CardPurple.r, Constants.CardPurple.g, Constants.CardPurple.b, 0.5f);
-            sImg.raycastTarget = false;
+            // Choix segmentés
+            ChoiceRow(panel.transform, "Qualité", new[] { "BAS", "MOYEN", "ELEVE" },
+                () => GameSettings.QualityIndex, v => GameSettings.QualityIndex = v);
+            ChoiceRow(panel.transform, "Joueurs", new[] { "2", "3", "4" },
+                () => GameSettings.PlayerCount - 2, v => GameSettings.PlayerCount = v + 2);
+            ChoiceRow(panel.transform, "Bots", new[] { "FACILE", "NORMAL", "EXPERT" },
+                () => GameSettings.Difficulty, v => GameSettings.Difficulty = v);
+            ChoiceRow(panel.transform, "Contrats", new[] { "FIXES", "VARIÉS" },
+                () => GameSettings.RandomContracts ? 1 : 0, v => GameSettings.RandomContracts = v == 1);
 
-            // Contenu en VerticalLayout
-            GameObject content = new("Content", typeof(RectTransform));
-            content.transform.SetParent(_panel, false);
-            RectTransform crt = content.GetComponent<RectTransform>();
-            crt.anchorMin = new Vector2(0.5f, 1f);
-            crt.anchorMax = new Vector2(0.5f, 1f);
-            crt.pivot = new Vector2(0.5f, 1f);
-            crt.sizeDelta = new Vector2(500f, 560f);
-            crt.anchoredPosition = new Vector2(0f, -120f);
+            ColorblindCard(panel.transform);
 
-            VerticalLayoutGroup vlg = content.AddComponent<VerticalLayoutGroup>();
-            vlg.spacing = 16f;
-            vlg.childAlignment = TextAnchor.UpperCenter;
-            vlg.childControlWidth = false;
-            vlg.childControlHeight = false;
+            TextMeshProUGUI note = UISkin.Text(panel.transform, "MatchNote",
+                "Joueurs, bots et contrats : appliqués à la prochaine partie", 13f, UISkin.TextMuted);
+            UISkin.Size(note.gameObject, ContentWidth, 18f);
 
-            // Sliders volume
-            UIFactory.CreateLabeledSlider(content.transform, "MusicVol", "Musique",
-                0f, 1f, GameSettings.MusicVolume, 500f,
-                v => GameSettings.MusicVolume = v, Constants.CardBlue);
+            Button close = UIFactory.CreateButton(panel.transform, "BtnClose", "FERMER",
+                new Vector2(ContentWidth, 56f), Hide, primary: true);
+            UISkin.Size(close.gameObject, ContentWidth, 56f);
+            TextMeshProUGUI? closeLabel = close.GetComponentInChildren<TextMeshProUGUI>();
+            if (closeLabel != null) closeLabel.fontSize = 18f;
 
-            UIFactory.CreateLabeledSlider(content.transform, "SfxVol", "Effets SFX",
-                0f, 1f, GameSettings.SfxVolume, 500f,
-                v => GameSettings.SfxVolume = v, Constants.CardGreen);
-
-            // Qualité : 3 boutons radio
-            CreateChoiceRow(content.transform, "Qualité",
-                new[] { "BAS", "MOYEN", "ELEVE" },
-                () => GameSettings.QualityIndex,
-                v => GameSettings.QualityIndex = v);
-
-            // Réglages de partie (appliqués à la prochaine partie)
-            CreateChoiceRow(content.transform, "Joueurs",
-                new[] { "2", "3", "4" },
-                () => GameSettings.PlayerCount - 2,
-                v => GameSettings.PlayerCount = v + 2);
-
-            CreateChoiceRow(content.transform, "Bots",
-                new[] { "FACILE", "NORMAL", "EXPERT" },
-                () => GameSettings.Difficulty,
-                v => GameSettings.Difficulty = v);
-
-            // Contrats : fixes (classiques) ou tirés parmi des variantes équivalentes
-            CreateChoiceRow(content.transform, "Contrats",
-                new[] { "FIXES", "VARIÉS" },
-                () => GameSettings.RandomContracts ? 1 : 0,
-                v => GameSettings.RandomContracts = v == 1);
-
-            // Toggle daltonisme
-            UIFactory.CreateLabeledToggle(content.transform, "Colorblind",
-                "Mode daltonisme (icônes)", GameSettings.ColorblindMode, 500f,
-                v => GameSettings.ColorblindMode = v, Constants.CardOrange);
-
-            // Note : joueurs/bots pris en compte au lancement de la partie suivante
-            TextMeshProUGUI note = UIFactory.CreateText(content.transform, "MatchNote",
-                "Joueurs, bots et contrats : appliqués à la prochaine partie", 15f,
-                new Color(1f, 1f, 1f, 0.45f), TextAlignmentOptions.Center, FontStyles.Italic);
-            note.rectTransform.sizeDelta = new Vector2(460f, 24f);
-
-            // Bouton fermer ancré en bas du panel — SetAsLastSibling() pour être
-            // sûr d'être au-dessus du contenu et de recevoir les clics.
-            Button closeBtn = UIFactory.CreateButton(_panel, "BtnClose", "FERMER",
-                new Vector2(240f, 60f), Hide, Constants.CardRed);
-            RectTransform closeRt = closeBtn.GetComponent<RectTransform>();
-            closeRt.anchorMin = new Vector2(0.5f, 0f);
-            closeRt.anchorMax = new Vector2(0.5f, 0f);
-            closeRt.pivot = new Vector2(0.5f, 0f);
-            closeRt.anchoredPosition = new Vector2(0f, 30f);
-            closeBtn.transform.SetAsLastSibling();
-
-            // Masqué par défaut
-            _panel.localScale = Vector3.zero;
             _panelCanvasGroup.alpha = 0f;
-            veil.SetActive(false);
+            _veil.SetActive(false);
         }
 
-        /// <summary>
-        /// Ligne "label + N boutons radio" liée à un réglage entier (0..N-1).
-        /// Le bouton actif est teinté, les autres restent neutres.
-        /// </summary>
-        private static void CreateChoiceRow(Transform parent, string label,
-            string[] options, Func<int> getIndex, Action<int> setIndex)
+        // ─── Briques ────────────────────────────────────────────────────
+
+        private static GameObject Row(Transform parent, string name, float height)
         {
-            GameObject row = new($"{label}Row", typeof(RectTransform));
+            GameObject row = new(name, typeof(RectTransform));
             row.transform.SetParent(parent, false);
-            RectTransform rrt = row.GetComponent<RectTransform>();
-            rrt.sizeDelta = new Vector2(460f, 60f);
+            UISkin.HRow(row, 16f, null, TextAnchor.MiddleLeft);
+            UISkin.Size(row, ContentWidth, height);
+            return row;
+        }
 
-            TextMeshProUGUI lbl = UIFactory.CreateText(row.transform, "Label", label, 20f,
-                Constants.TextPrimary, TextAlignmentOptions.Left, FontStyles.Bold);
-            RectTransform lrt = lbl.rectTransform;
-            lrt.anchorMin = new Vector2(0f, 0.5f);
-            lrt.anchorMax = new Vector2(0f, 0.5f);
-            lrt.pivot = new Vector2(0f, 0.5f);
-            lrt.sizeDelta = new Vector2(160f, 40f);
-            lrt.anchoredPosition = new Vector2(4f, 0f);
+        private static GameObject Column(Transform parent, string name, float spacing)
+        {
+            GameObject col = new(name, typeof(RectTransform));
+            col.transform.SetParent(parent, false);
+            UISkin.VCol(col, spacing, null, TextAnchor.UpperLeft);
+            UISkin.Size(col, ContentWidth);
+            return col;
+        }
 
-            Button[] buttons = new Button[options.Length];
+        private static TextMeshProUGUI RowLabel(Transform row, string text)
+        {
+            TextMeshProUGUI lbl = UISkin.Text(row, "Label", text, 16f, UISkin.TextColor, TextWeight.SemiBold);
+            UISkin.Size(lbl.gameObject, 160f);
+            return lbl;
+        }
+
+        /// <summary>Label | piste 8px accent + poignée ronde | valeur %.</summary>
+        private static void SliderRow(Transform parent, string label, float value, Action<float> onChanged)
+        {
+            GameObject row = Row(parent, label + "Row", 44f);
+            RowLabel(row.transform, label);
+
+            GameObject sliderObj = new("Slider", typeof(RectTransform));
+            sliderObj.transform.SetParent(row.transform, false);
+            UISkin.Size(sliderObj, ContentWidth - 160f - 52f - 32f, 44f);
+
+            Image track = UISkin.Rect(sliderObj.transform, "Track", UISkin.SurfaceRaised, 4f);
+            RectTransform trt = track.rectTransform;
+            trt.anchorMin = new Vector2(0f, 0.5f);
+            trt.anchorMax = new Vector2(1f, 0.5f);
+            trt.sizeDelta = new Vector2(0f, 8f);
+
+            GameObject fillArea = new("FillArea", typeof(RectTransform));
+            fillArea.transform.SetParent(sliderObj.transform, false);
+            RectTransform fart = (RectTransform)fillArea.transform;
+            fart.anchorMin = new Vector2(0f, 0.5f);
+            fart.anchorMax = new Vector2(1f, 0.5f);
+            fart.sizeDelta = new Vector2(0f, 8f);
+            Image fill = UISkin.Rect(fillArea.transform, "Fill", UISkin.Accent, 4f);
+            UISkin.Stretch(fill.rectTransform);
+
+            // Zone de la poignée : bande de 24px centrée (le Slider étire la
+            // poignée sur la hauteur de cette zone → rond de 24×24).
+            GameObject handleArea = new("HandleArea", typeof(RectTransform));
+            handleArea.transform.SetParent(sliderObj.transform, false);
+            RectTransform hart = (RectTransform)handleArea.transform;
+            hart.anchorMin = new Vector2(0f, 0.5f);
+            hart.anchorMax = new Vector2(1f, 0.5f);
+            hart.pivot = new Vector2(0.5f, 0.5f);
+            hart.sizeDelta = new Vector2(-24f, 24f);
+            hart.anchoredPosition = Vector2.zero;
+            Image handle = UISkin.Rect(handleArea.transform, "Handle", Color.white, 12f, raycast: true);
+            handle.rectTransform.sizeDelta = new Vector2(24f, 0f);
+
+            // Zone de toucher pleine hauteur (44px) pour le tactile
+            Image hit = sliderObj.AddComponent<Image>();
+            hit.color = new Color(0f, 0f, 0f, 0f);
+
+            Slider slider = sliderObj.AddComponent<Slider>();
+            slider.fillRect = fill.rectTransform;
+            slider.handleRect = handle.rectTransform;
+            slider.targetGraphic = handle;
+            slider.direction = Slider.Direction.LeftToRight;
+            slider.minValue = 0f;
+            slider.maxValue = 1f;
+            slider.value = value;
+
+            TextMeshProUGUI valueText = UISkin.Text(row.transform, "Value", Pct(value), 15f, UISkin.TextMuted,
+                TextWeight.SemiBold, TextAlignmentOptions.MidlineRight);
+            UISkin.Size(valueText.gameObject, 52f);
+
+            slider.onValueChanged.AddListener(v =>
+            {
+                valueText.text = Pct(v);
+                onChanged(v);
+            });
+        }
+
+        private static string Pct(float v) => Mathf.RoundToInt(v * 100f) + "%";
+
+        /// <summary>Label | contrôle segmenté (fond #0F1419, actif champagne plein).</summary>
+        private static void ChoiceRow(Transform parent, string label, string[] options,
+            Func<int> getIndex, Action<int> setIndex)
+        {
+            GameObject row = Row(parent, label + "Row", 52f);
+            RowLabel(row.transform, label);
+
+            Image seg = UISkin.Rect(row.transform, "Segmented", UISkin.Base, 14f);
+            UISkin.Size(seg.gameObject, ContentWidth - 160f - 16f, 52f);
+            UISkin.HRow(seg.gameObject, 4f, new RectOffset(4, 4, 4, 4), TextAnchor.MiddleCenter);
+            HorizontalLayoutGroup h = seg.GetComponent<HorizontalLayoutGroup>();
+            h.childForceExpandWidth = true;
+            h.childForceExpandHeight = true;
+            UISkin.Outline(seg.rectTransform, 14f, 1f, UISkin.Line).gameObject.AddComponent<LayoutElement>()
+                .ignoreLayout = true;
+
+            Image[] bgs = new Image[options.Length];
+            TextMeshProUGUI[] labels = new TextMeshProUGUI[options.Length];
+
+            void Refresh()
+            {
+                int active = getIndex();
+                for (int i = 0; i < bgs.Length; i++)
+                {
+                    bool on = i == active;
+                    bgs[i].color = on ? UISkin.Accent : new Color(0f, 0f, 0f, 0f);
+                    labels[i].color = on ? UISkin.OnAccent : UISkin.TextMuted;
+                }
+            }
+
             for (int i = 0; i < options.Length; i++)
             {
                 int idx = i;
-                Button btn = UIFactory.CreateButton(row.transform, $"{label}{i}", options[i],
-                    new Vector2(90f, 44f), () =>
-                    {
-                        setIndex(idx);
-                        RefreshChoiceButtons(buttons, getIndex());
-                    }, Constants.CardPurple);
-
-                RectTransform brt = btn.GetComponent<RectTransform>();
-                brt.anchorMin = new Vector2(0f, 0.5f);
-                brt.anchorMax = new Vector2(0f, 0.5f);
-                brt.pivot = new Vector2(0f, 0.5f);
-                brt.anchoredPosition = new Vector2(170f + i * 98f, 0f);
-
-                // La police 26 des boutons standard déborde sur 90 px de large.
-                TextMeshProUGUI btnLabel = btn.GetComponentInChildren<TextMeshProUGUI>();
-                if (btnLabel != null) btnLabel.fontSize = 18f;
-
-                // Marqueur de sélection dédié : le feedback hover/press des
-                // boutons réécrit Image.color au PointerExit (déclenché par
-                // chaque tap tactile) — la sélection doit vivre ailleurs.
-                GameObject sel = new("Sel", typeof(RectTransform), typeof(Image));
-                sel.transform.SetParent(btn.transform, false);
-                RectTransform selRt = sel.GetComponent<RectTransform>();
-                selRt.anchorMin = new Vector2(0.5f, 0f);
-                selRt.anchorMax = new Vector2(0.5f, 0f);
-                selRt.pivot = new Vector2(0.5f, 0f);
-                selRt.sizeDelta = new Vector2(52f, 4f);
-                selRt.anchoredPosition = new Vector2(0f, 4f);
-                Image selImg = sel.GetComponent<Image>();
-                selImg.color = Color.Lerp(Constants.CardPurple, Color.white, 0.35f);
-                selImg.raycastTarget = false;
-
-                buttons[i] = btn;
-            }
-
-            RefreshChoiceButtons(buttons, getIndex());
-        }
-
-        private static void RefreshChoiceButtons(Button[] buttons, int active)
-        {
-            for (int i = 0; i < buttons.Length; i++)
-            {
-                bool isActive = i == active;
-
-                Transform? sel = buttons[i].transform.Find("Sel");
-                if (sel != null) sel.gameObject.SetActive(isActive);
-
-                TextMeshProUGUI lbl = buttons[i].GetComponentInChildren<TextMeshProUGUI>();
-                if (lbl != null)
+                Image b = UISkin.Rect(seg.transform, $"Opt{i}", new Color(0f, 0f, 0f, 0f), 10f, raycast: true);
+                UISkin.Size(b.gameObject, -1f, 44f, 1f);
+                TextMeshProUGUI t = UISkin.Text(b.transform, "Label", options[i], 14f, UISkin.TextMuted,
+                    TextWeight.Bold, TextAlignmentOptions.Center);
+                t.characterSpacing = 6f;
+                UISkin.Stretch(t.rectTransform);
+                Button btn = b.gameObject.AddComponent<Button>();
+                btn.transition = Selectable.Transition.None;
+                btn.onClick.AddListener(() =>
                 {
-                    Color c = Constants.TextPrimary;
-                    c.a = isActive ? 1f : 0.55f;
-                    lbl.color = c;
-                }
+                    setIndex(idx);
+                    Refresh();
+                });
+                bgs[i] = b;
+                labels[i] = t;
             }
+            Refresh();
         }
 
-        /// <summary>
-        /// Affiche le panel avec une animation de pop-in.
-        /// </summary>
+        /// <summary>Carte "Mode daltonisme (icônes)" + interrupteur 60×34.</summary>
+        private static void ColorblindCard(Transform parent)
+        {
+            Image card = UISkin.Rect(parent, "Colorblind", UISkin.Base, 16f);
+            UISkin.Size(card.gameObject, ContentWidth, 76f);
+            UISkin.HRow(card.gameObject, 16f, new RectOffset(18, 18, 14, 14), TextAnchor.MiddleLeft);
+            UISkin.Outline(card.rectTransform, 16f, 1f, UISkin.Line).gameObject.AddComponent<LayoutElement>()
+                .ignoreLayout = true;
+
+            GameObject texts = new("Texts", typeof(RectTransform));
+            texts.transform.SetParent(card.transform, false);
+            UISkin.VCol(texts, 4f, null, TextAnchor.MiddleLeft);
+            UISkin.Size(texts, ContentWidth - 36f - 60f - 16f);
+            UISkin.Text(texts.transform, "Title", "Mode daltonisme (icônes)", 16f, UISkin.TextColor, TextWeight.SemiBold);
+
+            GameObject legend = new("Legend", typeof(RectTransform));
+            legend.transform.SetParent(texts.transform, false);
+            UISkin.HRow(legend, 6f, null, TextAnchor.MiddleLeft);
+            UISkin.Text(legend.transform, "Lbl", "Symbole", 13f, UISkin.TextMuted);
+            CardColor[] order =
+            {
+                CardColor.Red, CardColor.Orange, CardColor.Yellow, CardColor.Green, CardColor.Blue, CardColor.Purple
+            };
+            foreach (CardColor c in order)
+            {
+                Image s = UISkin.SuitImage(legend.transform, c.ToString(), c, 13f, UISkin.TextMuted);
+                UISkin.Size(s.gameObject, 13f, 13f);
+            }
+            UISkin.Text(legend.transform, "Lbl2", "sur chaque carte", 13f, UISkin.TextMuted);
+
+            // Interrupteur
+            Image track = UISkin.Rect(card.transform, "Switch", UISkin.SurfaceRaised, 17f, raycast: true);
+            UISkin.Size(track.gameObject, 60f, 34f);
+            Image knob = UISkin.Rect(track.transform, "Knob", Color.white, 13f);
+            UISkin.Place(knob.rectTransform, new Vector2(0f, 0.5f), new Vector2(0f, 0.5f), new Vector2(4f, 0f),
+                new Vector2(26f, 26f));
+
+            void Apply(bool on, bool animate)
+            {
+                track.color = on ? UISkin.Accent : UISkin.SurfaceRaised;
+                Vector2 target = new(on ? 30f : 4f, 0f);
+                if (animate) UITween.MoveTo(track.gameObject, knob.rectTransform, target, 0.15f);
+                else knob.rectTransform.anchoredPosition = target;
+            }
+
+            Button btn = track.gameObject.AddComponent<Button>();
+            btn.transition = Selectable.Transition.None;
+            btn.onClick.AddListener(() =>
+            {
+                GameSettings.ColorblindMode = !GameSettings.ColorblindMode;
+                Apply(GameSettings.ColorblindMode, true);
+            });
+            Apply(GameSettings.ColorblindMode, false);
+        }
+
+        // ─── Affichage ──────────────────────────────────────────────────
+
         public void Show()
         {
-            if (_panel == null || _panelCanvasGroup == null) return;
+            if (_panel == null || _panelCanvasGroup == null || _veil == null) return;
             if (_isVisible) return;
-
             _isVisible = true;
 
-            // Activer le veil parent
-            Transform? veil = _panel.parent;
-            if (veil != null) veil.gameObject.SetActive(true);
-
-            _panel.localScale = Vector3.zero;
+            _veil.SetActive(true);
+            _veil.transform.SetAsLastSibling();
+            _panel.localScale = Vector3.one * 0.94f;
             _panelCanvasGroup.alpha = 0f;
-            UITween.ScaleTo(_panel.gameObject, _panel, Vector3.one, 0.35f);
-            UITween.FadeTo(_panel.gameObject, _panelCanvasGroup, 1f, 0.25f);
+            UITween.ScaleTo(_panel.gameObject, _panel, Vector3.one, 0.22f);
+            UITween.FadeTo(_panel.gameObject, _panelCanvasGroup, 1f, 0.18f);
         }
 
-        /// <summary>
-        /// Masque le panel avec une animation.
-        /// </summary>
         public void Hide()
         {
-            if (_panel == null || _panelCanvasGroup == null) return;
+            if (_panel == null || _panelCanvasGroup == null || _veil == null) return;
             if (!_isVisible) return;
-
             _isVisible = false;
 
-            UITween.ScaleTo(_panel.gameObject, _panel, Vector3.zero, 0.22f);
-            UITween.FadeTo(_panel.gameObject, _panelCanvasGroup, 0f, 0.2f, () =>
+            UITween.ScaleTo(_panel.gameObject, _panel, Vector3.one * 0.96f, 0.16f);
+            UITween.FadeTo(_panel.gameObject, _panelCanvasGroup, 0f, 0.16f, () =>
             {
-                Transform? veil = _panel.parent;
-                if (veil != null) veil.gameObject.SetActive(false);
+                if (_veil != null) _veil.SetActive(false);
             });
         }
     }

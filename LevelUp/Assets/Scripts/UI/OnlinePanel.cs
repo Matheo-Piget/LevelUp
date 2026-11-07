@@ -189,7 +189,7 @@ namespace LevelUp.UI
             copyBtn.onClick.AddListener(() =>
             {
                 GUIUtility.systemCopyBuffer = joinCode;
-                SetStatus("<color=#4DFF91>Code copié !</color>");
+                SetStatus("<color=#5FB98A>Code copié !</color>");
             });
 
             TextMeshProUGUI codeText = UIFactory.CreateText(codeBox.transform, "Code",

@@ -48,6 +48,7 @@ namespace LevelUp.Core
         private bool _systemsInitialized;
         private bool _syncingViews;
         private ConnectionOverlay? _connectionOverlay;
+        private GameScreenLayout? _screenLayout;
 
         private void Start()
         {
@@ -121,6 +122,7 @@ namespace LevelUp.Core
                 _pauseMenu = gameObject.AddComponent<PauseMenuController>();
                 _pauseMenu.OnMainMenuRequested += HandleReturnToMainMenu;
                 _pauseMenu.Setup(_mainCanvas);
+                _screenLayout?.BindPauseMenu(_pauseMenu);
             }
 
             if (_gameOverCelebration == null)
@@ -129,6 +131,12 @@ namespace LevelUp.Core
                 _gameOverCelebration.OnReplayClicked += HandleReplay;
                 _gameOverCelebration.OnMainMenuClicked += HandleReturnToMainMenu;
                 _gameOverCelebration.Setup(_mainCanvas);
+                if (_gameManager != null)
+                {
+                    List<string> names = new();
+                    foreach (PlayerModel p in _gameManager.Players) names.Add(p.Name);
+                    _gameOverCelebration.PlayerNames = names;
+                }
             }
         }
 
@@ -245,6 +253,8 @@ namespace LevelUp.Core
             _levelProgressView?.Initialize(_gameManager.Players.Count, names);
             _levelProgressView?.BindPlayers(_gameManager.Players);
             _hudView?.SetPlayerNames(names);
+            _tableView?.SetPlayerNames(names, GameSession.LocalPlayerIndex);
+            if (_gameOverCelebration != null) _gameOverCelebration.PlayerNames = names;
             _discardPileView?.Initialize(
                 _gameManager.Players.Count, names, _gameManager.DeckManager);
         }
@@ -261,12 +271,21 @@ namespace LevelUp.Core
 
             if (_mainCanvas != null)
             {
+                // Polices de la DA (Inter / Space Grotesk) avant toute création d'UI.
+                UISkin.EnsureFonts();
+
                 // L'UI gameplay posée en scène passe sous un conteneur calé sur
                 // la safe area (punch-hole du S25, barre de gestes). Le fond et
                 // les menus créés ensuite restent full bleed sur tout l'écran.
-                SafeAreaFitter.Wrap(_mainCanvas);
+                RectTransform safeRoot = SafeAreaFitter.Wrap(_mainCanvas);
 
-                // Fond animé avec blobs colorés qui dérivent
+                // Mise en page de la maquette : top bar, joueurs, tapis, étapes,
+                // contrat, tri — autour des vues posées en scène.
+                _screenLayout = gameObject.AddComponent<GameScreenLayout>();
+                _screenLayout.Build(_mainCanvas, safeRoot, _gameManager);
+                _screenLayout.BindInput(_inputController);
+
+                // Fond uni
                 AnimatedBackground animBg = gameObject.AddComponent<AnimatedBackground>();
                 animBg.Setup(_mainCanvas);
             }

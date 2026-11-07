@@ -26,6 +26,9 @@ namespace LevelUp.UI
         /// <summary>Déclenché quand le joueur clique sur Menu principal.</summary>
         public event Action? OnMainMenuClicked;
 
+        /// <summary>Noms des joueurs (pour afficher "Bot 2 remporte la partie").</summary>
+        public System.Collections.Generic.List<string>? PlayerNames { get; set; }
+
         /// <summary>
         /// Prépare l'overlay sous le canvas. Écoute GameOverEvent pour s'afficher.
         /// </summary>
@@ -89,88 +92,61 @@ namespace LevelUp.UI
             // Reconstruire à chaque fois pour permettre replay
             ClearChildren(_root);
 
-            // Veil sombre
+            // Voile sombre
             GameObject veil = new("Veil", typeof(RectTransform), typeof(Image));
             veil.transform.SetParent(_root, false);
-            RectTransform vrt = veil.GetComponent<RectTransform>();
-            vrt.anchorMin = Vector2.zero;
-            vrt.anchorMax = Vector2.one;
-            vrt.sizeDelta = Vector2.zero;
-            Image vImg = veil.GetComponent<Image>();
-            vImg.color = new Color(0f, 0f, 0f, 0.75f);
+            UISkin.Stretch((RectTransform)veil.transform);
+            veil.GetComponent<Image>().color = new Color(0.04f, 0.055f, 0.07f, 0.86f);
 
-            // Panel
-            GameObject panelObj = UIFactory.CreatePanel(_root, "GOPanel",
-                Constants.PanelBackground, new Vector2(640f, 440f),
-                withBorder: true, borderColor: Constants.CardYellow);
-            _panel = panelObj.GetComponent<RectTransform>();
-            _panel.anchorMin = new Vector2(0.5f, 0.5f);
-            _panel.anchorMax = new Vector2(0.5f, 0.5f);
-            _panel.anchoredPosition = Vector2.zero;
-            UIFactory.AddDropShadow(_panel, 12f, 0.55f);
+            // Panneau (maquette : #161B22 radius 28 + liseré)
+            Image panel = UISkin.Rect(_root, "GOPanel", UISkin.Surface, 28f, raycast: true);
+            _panel = panel.rectTransform;
+            UISkin.Place(_panel, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), Vector2.zero,
+                new Vector2(640f, 460f));
+            UISkin.Outline(_panel, 28f, 1f, new Color(1f, 1f, 1f, 0.08f));
 
-            // Trophée (étoile)
-            TextMeshProUGUI trophy = UIFactory.CreateText(_panel, "Trophy", "★", 110f,
-                Constants.CardYellow, TextAlignmentOptions.Center, FontStyles.Bold);
-            RectTransform troRt = trophy.rectTransform;
-            troRt.anchorMin = new Vector2(0.5f, 1f);
-            troRt.anchorMax = new Vector2(0.5f, 1f);
-            troRt.pivot = new Vector2(0.5f, 1f);
-            troRt.sizeDelta = new Vector2(160f, 140f);
-            troRt.anchoredPosition = new Vector2(0f, -20f);
-            trophy.outlineWidth = 0.3f;
-            trophy.outlineColor = new Color32(120, 80, 0, 255);
+            // Étoile (symbole jaune de la DA) dans une pastille
+            Image badge = UISkin.Rect(_panel, "TrophyBadge", UISkin.WithAlpha(Constants.CardYellow, 0.12f), 28f);
+            RectTransform troRt = badge.rectTransform;
+            UISkin.Place(troRt, new Vector2(0.5f, 1f), new Vector2(0.5f, 0.5f), new Vector2(0f, -88f),
+                new Vector2(104f, 104f));
+            UISkin.Outline(troRt, 28f, 1.5f, UISkin.WithAlpha(Constants.CardYellow, 0.45f));
+            Image star = UISkin.SuitImage(badge.transform, "Star", CardColor.Yellow, 60f, Constants.CardYellow);
+            UISkin.Place(star.rectTransform, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), Vector2.zero,
+                new Vector2(60f, 60f));
 
-            // Titre "VICTOIRE"
-            TextMeshProUGUI victory = UIFactory.CreateText(_panel, "Victory", "VICTOIRE !", 54f,
-                Color.white, TextAlignmentOptions.Center, FontStyles.Bold);
-            RectTransform virt = victory.rectTransform;
-            virt.anchorMin = new Vector2(0.5f, 1f);
-            virt.anchorMax = new Vector2(0.5f, 1f);
-            virt.pivot = new Vector2(0.5f, 1f);
-            virt.sizeDelta = new Vector2(580f, 80f);
-            virt.anchoredPosition = new Vector2(0f, -160f);
-            victory.characterSpacing = 16f;
-            victory.enableVertexGradient = true;
-            victory.colorGradient = new VertexGradient(
-                Color.Lerp(Constants.CardYellow, Color.white, 0.4f),
-                Color.Lerp(Constants.CardOrange, Color.white, 0.2f),
-                Color.Lerp(Constants.CardPurple, Color.white, 0.15f),
-                Color.Lerp(Constants.CardBlue, Color.white, 0.25f));
+            // Titre
+            TextMeshProUGUI victory = UISkin.Text(_panel, "Victory", "VICTOIRE !", 54f, UISkin.TextColor,
+                TextWeight.Display, TextAlignmentOptions.Center);
+            UISkin.Place(victory.rectTransform, new Vector2(0.5f, 1f), new Vector2(0.5f, 1f),
+                new Vector2(0f, -160f), new Vector2(580f, 70f));
+            victory.characterSpacing = 2f;
 
-            // Nom du gagnant
-            TextMeshProUGUI winnerLabel = UIFactory.CreateText(_panel, "Winner",
-                $"PLAYER {winnerIndex + 1} REMPORTE LA PARTIE", 22f,
-                Constants.TextPrimary, TextAlignmentOptions.Center, FontStyles.Bold);
-            RectTransform wrt = winnerLabel.rectTransform;
-            wrt.anchorMin = new Vector2(0.5f, 1f);
-            wrt.anchorMax = new Vector2(0.5f, 1f);
-            wrt.pivot = new Vector2(0.5f, 1f);
-            wrt.sizeDelta = new Vector2(600f, 30f);
-            wrt.anchoredPosition = new Vector2(0f, -240f);
-            winnerLabel.characterSpacing = 10f;
+            // Gagnant
+            string winnerName = PlayerNames != null && winnerIndex >= 0 && winnerIndex < PlayerNames.Count
+                ? PlayerNames[winnerIndex]
+                : $"Joueur {winnerIndex + 1}";
+            TextMeshProUGUI winnerLabel = UISkin.Text(_panel, "Winner",
+                $"{winnerName} remporte la partie", 18f, UISkin.TextMuted, TextWeight.SemiBold,
+                TextAlignmentOptions.Center);
+            UISkin.Place(winnerLabel.rectTransform, new Vector2(0.5f, 1f), new Vector2(0.5f, 1f),
+                new Vector2(0f, -236f), new Vector2(600f, 26f));
 
-            // Boutons
+            // Boutons : une action principale (REJOUER) + MENU
             GameObject row = new("Buttons", typeof(RectTransform));
             row.transform.SetParent(_panel, false);
-            RectTransform rrt = row.GetComponent<RectTransform>();
-            rrt.anchorMin = new Vector2(0.5f, 0f);
-            rrt.anchorMax = new Vector2(0.5f, 0f);
-            rrt.pivot = new Vector2(0.5f, 0f);
-            rrt.sizeDelta = new Vector2(560f, 80f);
-            rrt.anchoredPosition = new Vector2(0f, 30f);
-
+            UISkin.Place((RectTransform)row.transform, new Vector2(0.5f, 0f), new Vector2(0.5f, 0f),
+                new Vector2(0f, 44f), new Vector2(552f, 64f));
             HorizontalLayoutGroup hlg = row.AddComponent<HorizontalLayoutGroup>();
-            hlg.spacing = 20f;
+            hlg.spacing = 16f;
             hlg.childAlignment = TextAnchor.MiddleCenter;
             hlg.childControlWidth = false;
             hlg.childControlHeight = false;
 
             UIFactory.CreateButton(row.transform, "BtnReplay", "REJOUER",
-                new Vector2(260f, 72f), HandleReplay, Constants.CardGreen);
-
+                new Vector2(268f, 64f), HandleReplay, primary: true);
             UIFactory.CreateButton(row.transform, "BtnMenu", "MENU",
-                new Vector2(260f, 72f), HandleMainMenu, Constants.CardRed);
+                new Vector2(268f, 64f), HandleMainMenu);
 
             // Animations d'entrée
             _panel.localScale = Vector3.zero;

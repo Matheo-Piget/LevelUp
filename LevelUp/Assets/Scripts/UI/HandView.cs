@@ -72,6 +72,10 @@ namespace LevelUp.UI
         // toute désynchronisation entre la main du modèle et la vue.
         private List<CardModel>? _pendingHand;
 
+        // Boutons de tri posés en scène (mis en cache : le layout les déplace).
+        private Button? _sortValueButton;
+        private Button? _sortColorButton;
+
         private void Awake()
         {
             // Canvas imbriqué : la main bouge chaque frame (lerp, breathing, hover).
@@ -82,31 +86,70 @@ namespace LevelUp.UI
                 _handContainer.gameObject.AddComponent<Canvas>();
             }
 
-            // Les boutons de tri sont posés en scène avec le style uGUI blanc
-            // par défaut — on les aligne sur la DA sombre du jeu, et on les
-            // agrandit pour le tactile.
-            RestyleSortButton("SortButton");
-            RestyleSortButton("SortButtonColour");
+            _sortValueButton = RestyleSortButton("SortButton", "Valeur", UIIcon.SortValue);
+            _sortColorButton = RestyleSortButton("SortButtonColour", "Couleur", null);
+        }
+
+        /// <summary>Espacement et largeur max de l'éventail (posés par le layout d'écran).</summary>
+        public void SetLayout(float cardSpacing, float maxWidth)
+        {
+            _cardSpacing = cardSpacing;
+            _maxHandWidth = maxWidth;
+            RecalculateTargets();
         }
 
         /// <summary>
-        /// Applique le style sombre du jeu à un bouton de tri posé en scène :
-        /// fond Surface arrondi, texte clair, hauteur tactile confortable.
+        /// Déplace les deux boutons de tri dans le contrôle segmenté de la
+        /// maquette ("TRIER LA MAIN" en bas à droite).
         /// </summary>
-        private void RestyleSortButton(string childName)
+        public void MoveSortButtonsInto(RectTransform segmented)
+        {
+            if (_sortValueButton != null) _sortValueButton.transform.SetParent(segmented, false);
+            if (_sortColorButton != null) _sortColorButton.transform.SetParent(segmented, false);
+            SetActiveSort(true, highlight: false);
+        }
+
+        /// <summary>
+        /// Met en évidence le dernier tri appliqué (champagne plein) : le joueur voit
+        /// d'un coup d'œil dans quel ordre est sa main.
+        /// </summary>
+        public void SetActiveSort(bool byValue) => SetActiveSort(byValue, highlight: true);
+
+        private void SetActiveSort(bool byValue, bool highlight)
+        {
+            ApplySortButtonState(_sortValueButton, highlight && byValue);
+            ApplySortButtonState(_sortColorButton, highlight && !byValue);
+        }
+
+        private static void ApplySortButtonState(Button? btn, bool active)
+        {
+            if (btn == null) return;
+            Image? img = btn.GetComponent<Image>();
+            if (img != null) img.color = active ? UISkin.Accent : new Color(0f, 0f, 0f, 0f);
+            TextMeshProUGUI? label = btn.GetComponentInChildren<TextMeshProUGUI>();
+            if (label != null) label.color = active ? UISkin.OnAccent : UISkin.TextColor;
+            Transform? icon = btn.transform.Find("Icon");
+            if (icon != null && icon.TryGetComponent(out Image iconImg) && iconImg.sprite != null
+                && iconImg.sprite.name.StartsWith("Icon_"))
+            {
+                iconImg.color = active ? UISkin.OnAccent : UISkin.TextColor;
+            }
+        }
+
+        /// <summary>
+        /// Bouton de tri de la maquette : 48px de haut, radius 12, icône + libellé.
+        /// "Valeur" : icône de tri ; "Couleur" : 4 pastilles de couleur.
+        /// </summary>
+        private Button? RestyleSortButton(string childName, string text, UIIcon? icon)
         {
             Transform? t = transform.Find(childName);
-            if (t == null) return;
-
-            RectTransform rt = (RectTransform)t;
-            rt.sizeDelta = new Vector2(Mathf.Max(rt.sizeDelta.x, 210f), 48f);
+            if (t == null) return null;
 
             Image? img = t.GetComponent<Image>();
             if (img != null)
             {
-                img.sprite = UIFactory.RoundedSprite;
-                img.type = Image.Type.Sliced;
-                img.color = Constants.SurfaceC;
+                UISkin.SetRounded(img, 12f);
+                img.color = new Color(0f, 0f, 0f, 0f);
             }
 
             Button? btn = t.GetComponent<Button>();
@@ -114,20 +157,50 @@ namespace LevelUp.UI
             {
                 ColorBlock colors = btn.colors;
                 colors.normalColor = Color.white;
-                colors.highlightedColor = new Color(1.12f, 1.12f, 1.2f, 1f);
+                colors.highlightedColor = new Color(1.15f, 1.15f, 1.25f, 1f);
                 colors.pressedColor = new Color(0.8f, 0.8f, 0.85f, 1f);
                 colors.selectedColor = Color.white;
                 btn.colors = colors;
             }
 
+            UISkin.HRow(t.gameObject, 8f, new RectOffset(18, 18, 0, 0), TextAnchor.MiddleCenter);
+            UISkin.Size(t.gameObject, -1f, 48f);
+
+            if (icon.HasValue)
+            {
+                Image ic = UISkin.IconImage(t, "Icon", icon.Value, 18f, UISkin.TextColor);
+                UISkin.Size(ic.gameObject, 18f, 18f);
+                ic.transform.SetAsFirstSibling();
+            }
+            else
+            {
+                // Pastilles rouge/bleu/vert/jaune en carré 2×2
+                GameObject dots = new("Icon", typeof(RectTransform));
+                dots.transform.SetParent(t, false);
+                dots.transform.SetAsFirstSibling();
+                UISkin.Size(dots, 18f, 18f);
+                CardColor[] cs = { CardColor.Red, CardColor.Blue, CardColor.Green, CardColor.Yellow };
+                for (int i = 0; i < 4; i++)
+                {
+                    Image d = UISkin.Rect(dots.transform, $"D{i}", Constants.GetColor(cs[i]), 3.5f);
+                    UISkin.Place(d.rectTransform, new Vector2(0f, 1f), new Vector2(0f, 1f),
+                        new Vector2((i % 2) * 10f + 0.5f, -(i / 2) * 10f - 0.5f), new Vector2(7f, 7f));
+                }
+            }
+
             TextMeshProUGUI? label = t.GetComponentInChildren<TextMeshProUGUI>();
             if (label != null)
             {
-                label.color = Constants.TextPrimary;
-                label.fontSize = 20f;
-                label.fontStyle = FontStyles.Bold;
+                label.text = text;
+                UISkin.ApplyFont(label, TextWeight.SemiBold);
+                label.color = UISkin.TextColor;
+                label.fontSize = 15f;
+                label.enableWordWrapping = false;
+                label.alignment = TextAlignmentOptions.MidlineLeft;
             }
+            return btn;
         }
+
 
         private void OnEnable()
         {
@@ -851,6 +924,38 @@ namespace LevelUp.UI
             DeselectAllInternal();
             RecalculateTargets();
             OnSelectionChanged?.Invoke();
+        }
+
+        /// <summary>
+        /// Remplace la sélection par ces cartes (aide "Préparer la pose").
+        /// Les cartes absentes de la main sont ignorées.
+        /// </summary>
+        public void SelectCards(IReadOnlyList<CardModel> cards)
+        {
+            DeselectAllInternal();
+            foreach (CardModel model in cards)
+            {
+                foreach (CardView cv in _cardViews)
+                {
+                    if (cv.CardModel == model && !cv.IsSelected)
+                    {
+                        cv.SetSelected(true);
+                        _selectedCards.Add(cv);
+                        break;
+                    }
+                }
+            }
+            RecalculateTargets();
+            OnSelectionChanged?.Invoke();
+        }
+
+        /// <summary>Allume/éteint l'indice "jouable" sur chaque carte de la main.</summary>
+        public void SetPlayableHints(System.Func<CardModel, bool>? isPlayable)
+        {
+            foreach (CardView cv in _cardViews)
+            {
+                cv.SetHint(isPlayable != null && isPlayable(cv.CardModel));
+            }
         }
 
         private void DeselectAllInternal()

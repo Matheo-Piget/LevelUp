@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using UnityEngine;
+using UnityEngine.EventSystems;
 using UnityEngine.InputSystem;
 using UnityEngine.UI;
 using TMPro;
@@ -71,6 +72,17 @@ namespace LevelUp.UI
 
         private RectTransform? _handRect;
 
+        // Geste commencé sur un bouton / un élément d'interface : ignoré
+        // jusqu'au relâchement (sinon "Pause" en phase Poser = clic table).
+        private bool _gestureBlocked;
+        private static readonly List<RaycastResult> RaycastBuffer = new();
+
+        // "Choisis ta pose" (plusieurs répartitions valides du contrat)
+        private LayDownChooser? _chooser;
+
+        // Indices "carte jouable" (phase Compléter) à recalculer
+        private bool _hintsDirty = true;
+
         /// <summary>
         /// Vrai pendant les animations de cartes (pioche, pose, défausse).
         /// On ne bloque QUE les actions qui mutent le jeu — hover, sélection
@@ -92,7 +104,17 @@ namespace LevelUp.UI
             }
 
             RestyleDeckPanel();
+
+            // Indices "jouable" : recalculés quand la phase, la main ou la table changent.
+            EventBus.Subscribe<TurnPhaseChangedEvent>(MarkHintsDirty);
+            EventBus.Subscribe<TurnStartedEvent>(MarkHintsDirty);
+            EventBus.Subscribe<HandChangedEvent>(MarkHintsDirty);
+            EventBus.Subscribe<CardAddedToMeldEvent>(MarkHintsDirty);
+            EventBus.Subscribe<LevelLaidDownEvent>(MarkHintsDirty);
+            EventBus.Subscribe<RoundStartedEvent>(MarkHintsDirty);
         }
+
+        private void MarkHintsDirty<T>(T _) => _hintsDirty = true;
 
         /// <summary>
         /// Habille le panneau de pioche posé en scène (rect brut) en dos de
@@ -104,61 +126,36 @@ namespace LevelUp.UI
         {
             if (_deckHitArea == null) return;
 
+            // Pioche = pile de dos "Indigo" (maquette) : deux cartes décalées
+            // derrière pour l'épaisseur, la carte du dessus porte le dos complet.
+            for (int i = 2; i >= 1; i--)
+            {
+                Image layer = UISkin.Rect(_deckHitArea, $"DeckStack_{i}",
+                    i == 2 ? UISkin.Hex(0x10151B) : UISkin.Hex(0x131920), 14f);
+                RectTransform lrt = layer.rectTransform;
+                UISkin.Stretch(lrt);
+                lrt.anchoredPosition = new Vector2(4f * i, -4f * i);
+                layer.transform.SetAsFirstSibling();
+                UISkin.Outline(lrt, 14f, 1f, new Color(1f, 1f, 1f, 0.08f));
+            }
+
+            GameObject top = new("DeckTop", typeof(RectTransform), typeof(Image));
+            top.transform.SetParent(_deckHitArea, false);
+            UISkin.Stretch((RectTransform)top.transform);
+            top.GetComponent<Image>().raycastTarget = false;
+            UISkin.BuildCardBack((RectTransform)top.transform, 14f);
+
+            // Le panneau de scène reste la zone de clic, sans visuel propre.
             Image? img = _deckHitArea.GetComponent<Image>();
             if (img != null)
             {
-                img.sprite = UIFactory.RoundedSprite;
-                img.type = Image.Type.Sliced;
-                img.color = Constants.CardBack;
+                UISkin.SetRounded(img, 14f);
+                img.color = new Color(0f, 0f, 0f, 0f);
             }
 
-            // Liseré discret pour détacher la pioche du fond sombre
-            GameObject borderObj = new("DeckBorder", typeof(RectTransform), typeof(Image));
-            borderObj.transform.SetParent(_deckHitArea, false);
-            RectTransform brt = borderObj.GetComponent<RectTransform>();
-            brt.anchorMin = Vector2.zero;
-            brt.anchorMax = Vector2.one;
-            brt.sizeDelta = new Vector2(4f, 4f);
-            Image borderImg = borderObj.GetComponent<Image>();
-            borderImg.sprite = UIFactory.RoundedSprite;
-            borderImg.type = Image.Type.Sliced;
-            borderImg.fillCenter = false;
-            borderImg.color = Constants.PanelBorder;
-            borderImg.raycastTarget = false;
-
-            // Épaisseur de pile : deux couches décalées derrière
-            for (int i = 1; i <= 2; i++)
-            {
-                GameObject stack = new($"DeckStack_{i}", typeof(RectTransform), typeof(Image));
-                stack.transform.SetParent(_deckHitArea, false);
-                stack.transform.SetAsFirstSibling();
-                RectTransform srt = stack.GetComponent<RectTransform>();
-                srt.anchorMin = Vector2.zero;
-                srt.anchorMax = Vector2.one;
-                srt.sizeDelta = Vector2.zero;
-                srt.anchoredPosition = new Vector2(-3f * i, 3f * i);
-                Image simg = stack.GetComponent<Image>();
-                simg.sprite = UIFactory.RoundedSprite;
-                simg.type = Image.Type.Sliced;
-                float darken = 1f - 0.25f * i;
-                simg.color = new Color(
-                    Constants.CardBack.r * darken,
-                    Constants.CardBack.g * darken,
-                    Constants.CardBack.b * darken, 1f);
-                simg.raycastTarget = false;
-            }
-
-            // Label "PIOCHE" : petit, espacé, sous une icône de dos de carte
+            // Le libellé "Pioche · N" est porté par le layout sous la pile.
             TextMeshProUGUI? label = _deckHitArea.GetComponentInChildren<TextMeshProUGUI>();
-            if (label != null)
-            {
-                label.text = "PIOCHE";
-                label.fontSize = 16f;
-                label.fontStyle = FontStyles.Bold;
-                label.color = Constants.TextSecondary;
-                label.characterSpacing = 10f;
-                label.alignment = TextAlignmentOptions.Center;
-            }
+            if (label != null && label.transform.parent == _deckHitArea) label.gameObject.SetActive(false);
         }
 
         private void OnDestroy()
@@ -167,6 +164,12 @@ namespace LevelUp.UI
             {
                 _handView.OnCardsReordered -= OnCardsReordered;
             }
+            EventBus.Unsubscribe<TurnPhaseChangedEvent>(MarkHintsDirty);
+            EventBus.Unsubscribe<TurnStartedEvent>(MarkHintsDirty);
+            EventBus.Unsubscribe<HandChangedEvent>(MarkHintsDirty);
+            EventBus.Unsubscribe<CardAddedToMeldEvent>(MarkHintsDirty);
+            EventBus.Unsubscribe<LevelLaidDownEvent>(MarkHintsDirty);
+            EventBus.Unsubscribe<RoundStartedEvent>(MarkHintsDirty);
         }
 
         /// <summary>
@@ -202,7 +205,70 @@ namespace LevelUp.UI
             PlayerModel currentPlayer = _gameManager.TurnManager.CurrentPlayer;
             if (!GameSession.IsLocalHuman(currentPlayer)) return;
 
+            // Choix de pose ouvert : le panneau capte tout.
+            if (LayDownChooser.IsOpen) return;
+
             HandleInput();
+        }
+
+        private void LateUpdate()
+        {
+            if (_hintsDirty) RefreshPlayableHints();
+        }
+
+        /// <summary>
+        /// Phase "Compléter" du joueur local : signale les cartes de la main qui
+        /// peuvent compléter une combinaison posée (même test que la commande
+        /// AddToMeld : Meld.CanAddCard). Hors de cette phase, aucun indice.
+        /// </summary>
+        private void RefreshPlayableHints()
+        {
+            if (_handView == null || _handView.IsAnimatingDeal) return;
+            _hintsDirty = false;
+
+            TurnManager? tm = _gameManager?.TurnManager;
+            bool active = tm != null
+                          && tm.CurrentPhase == TurnPhase.AddToMelds
+                          && GameSession.IsLocalHuman(tm.CurrentPlayer);
+            if (!active || _gameManager == null)
+            {
+                _handView.SetPlayableHints(null);
+                return;
+            }
+
+            IReadOnlyList<PlayerModel> players = _gameManager.Players;
+            _handView.SetPlayableHints(card =>
+            {
+                foreach (PlayerModel p in players)
+                {
+                    foreach (Meld meld in p.LaidMelds)
+                    {
+                        if (meld.CanAddCard(card)) return true;
+                    }
+                }
+                return false;
+            });
+        }
+
+        /// <summary>
+        /// Vrai si le point touche un bouton (Selectable) ou un élément marqué
+        /// <see cref="UIInputBlocker"/> : ce n'est alors pas un geste de jeu.
+        /// </summary>
+        private static bool IsPointerOverBlockingUI(Vector2 screenPos)
+        {
+            EventSystem? es = EventSystem.current;
+            if (es == null) return false;
+
+            PointerEventData data = new(es) { position = screenPos };
+            RaycastBuffer.Clear();
+            es.RaycastAll(data, RaycastBuffer);
+            foreach (RaycastResult hit in RaycastBuffer)
+            {
+                if (hit.gameObject == null) continue;
+                if (hit.gameObject.GetComponentInParent<Selectable>() != null) return true;
+                if (hit.gameObject.GetComponentInParent<UIInputBlocker>() != null) return true;
+            }
+            return false;
         }
 
         private void HandleInput()
@@ -236,7 +302,17 @@ namespace LevelUp.UI
                 return;
             }
 
-            if (pressed) OnPointerDown(position);
+            if (pressed)
+            {
+                // Un appui sur un bouton (pause, réglages, tri, menus…) ne doit
+                // jamais déclencher d'action de jeu derrière lui.
+                _gestureBlocked = IsPointerOverBlockingUI(position);
+                if (!_gestureBlocked) OnPointerDown(position);
+            }
+            else if (_gestureBlocked)
+            {
+                if (released) _gestureBlocked = false;
+            }
             else if (held && _isDragging) OnPointerDrag(position);
             else if (released) OnPointerUp(position);
         }
@@ -754,28 +830,34 @@ namespace LevelUp.UI
                 : player.Hand;
             bool isAutoMode = selected.Count == 0;
 
-            if (LevelValidator.IsLevelComplete(source, player.CurrentLevel,
-                    _gameManager.Config, out List<Meld> melds))
+            // Toutes les répartitions valides (5 = 4 affichées + "il en existe d'autres").
+            List<List<Meld>> options = LevelValidator.FindLayDownOptions(source, player.CurrentLevel,
+                _gameManager.Config, 5);
+
+            if (options.Count == 1)
             {
-                List<Meld> playerMelds = new();
-                foreach (Meld m in melds)
+                // Une seule façon de poser : pose directe, zéro friction.
+                LayDownWith(options[0]);
+            }
+            else if (options.Count > 1)
+            {
+                // Plusieurs répartitions (ex. 7 rouge dans le brelan OU dans la
+                // couleur) : c'est au joueur de choisir.
+                LayDownChooser? chooser = GetChooser();
+                if (chooser == null)
                 {
-                    playerMelds.Add(new Meld(m.Type, m.Cards, player.Index));
+                    LayDownWith(options[0]);
+                    return;
                 }
-
-                _handView.DeselectAll();
-
-                CommandResult result = _gameManager.ExecuteCommand(
-                    new LayDownLevelCommand(CurrentPlayerIndex, playerMelds));
-
-                if (result.Success)
+                int turnPlayer = CurrentPlayerIndex;
+                chooser.Show(options, options.Count > 4, melds =>
                 {
-                    _hudView?.ShowStatus($"NIVEAU {player.CurrentLevel} !");
-                }
-                else
-                {
-                    _hudView?.ShowStatus(result.Message);
-                }
+                    // Le tour a pu changer pendant le choix (en ligne) : on revérifie.
+                    if (_gameManager?.TurnManager == null) return;
+                    if (_gameManager.TurnManager.CurrentPhase != TurnPhase.LayDown) return;
+                    if (CurrentPlayerIndex != turnPlayer || !IsLocalTurn) return;
+                    LayDownWith(melds);
+                });
             }
             else
             {
@@ -792,6 +874,71 @@ namespace LevelUp.UI
                 }
                 if (!isAutoMode) EventBus.Publish(new InvalidActionEvent());
             }
+        }
+
+        /// <summary>Pose le contrat avec la répartition donnée (commande validée par le Core).</summary>
+        private void LayDownWith(List<Meld> melds)
+        {
+            if (_gameManager?.TurnManager == null || _handView == null) return;
+            if (ActionsLocked) return;
+
+            PlayerModel player = _gameManager.TurnManager.CurrentPlayer;
+            List<Meld> playerMelds = new();
+            foreach (Meld m in melds)
+            {
+                playerMelds.Add(new Meld(m.Type, new List<CardModel>(m.Cards), player.Index));
+            }
+
+            _handView.DeselectAll();
+
+            CommandResult result = _gameManager.ExecuteCommand(
+                new LayDownLevelCommand(CurrentPlayerIndex, playerMelds));
+
+            _hudView?.ShowStatus(result.Success ? $"Niveau {player.CurrentLevel} posé !" : result.Message);
+        }
+
+        private LayDownChooser? GetChooser()
+        {
+            if (_chooser != null) return _chooser;
+            Canvas? canvas = _handView != null ? _handView.GetComponentInParent<Canvas>() : null;
+            if (canvas == null) return null;
+            canvas = canvas.rootCanvas;
+            _chooser = gameObject.AddComponent<LayDownChooser>();
+            _chooser.Setup(canvas);
+            return _chooser;
+        }
+
+        /// <summary>
+        /// "Préparer la pose" : sélectionne dans la main une combinaison qui
+        /// remplit le contrat (le joueur n'a plus qu'à toucher la table, ou à
+        /// ajuster sa sélection). Ne joue rien à sa place.
+        /// </summary>
+        public bool SelectSuggestedLayDown()
+        {
+            if (_gameManager?.TurnManager == null || _handView == null) return false;
+            if (!IsLocalTurn || _gameManager.TurnManager.CurrentPhase != TurnPhase.LayDown) return false;
+
+            PlayerModel player = _gameManager.TurnManager.CurrentPlayer;
+            if (player.HasLaidDownThisRound) return false;
+
+            List<List<Meld>> options = LevelValidator.FindLayDownOptions(player.Hand, player.CurrentLevel,
+                _gameManager.Config, 1);
+            if (options.Count == 0) return false;
+
+            List<CardModel> cards = new();
+            foreach (Meld meld in options[0]) cards.AddRange(meld.Cards);
+            _handView.SelectCards(cards);
+            return true;
+        }
+
+        /// <summary>Vrai si le joueur local peut poser son contrat avec sa main actuelle.</summary>
+        public bool CanLocalPlayerLayDown()
+        {
+            if (_gameManager?.TurnManager == null) return false;
+            if (!IsLocalTurn || _gameManager.TurnManager.CurrentPhase != TurnPhase.LayDown) return false;
+            PlayerModel player = _gameManager.TurnManager.CurrentPlayer;
+            if (player.HasLaidDownThisRound) return false;
+            return LevelValidator.IsLevelComplete(player.Hand, player.CurrentLevel, _gameManager.Config, out _);
         }
 
         private void ExecuteAddToMeld(CardModel card, int ownerIdx, int meldIdx, CardView cardView)
@@ -903,27 +1050,28 @@ namespace LevelUp.UI
         /// <summary>Tri de la main par valeur croissante (actions en fin).</summary>
         public void OnSortByValueButton()
         {
-            SortCurrentPlayerHand(PlayerModel.CompareByValue);
+            if (SortCurrentPlayerHand(PlayerModel.CompareByValue)) _handView?.SetActiveSort(byValue: true);
         }
 
         /// <summary>Tri de la main par couleur (tiebreak par valeur).</summary>
         public void OnSortByColorButton()
         {
-            SortCurrentPlayerHand(PlayerModel.CompareByColor);
+            if (SortCurrentPlayerHand(PlayerModel.CompareByColor)) _handView?.SetActiveSort(byValue: false);
         }
 
-        private void SortCurrentPlayerHand(System.Comparison<CardModel> comparator)
+        private bool SortCurrentPlayerHand(System.Comparison<CardModel> comparator)
         {
-            if (_gameManager?.TurnManager == null || _handView == null) return;
-            if (_isDragging) return; // ne pas perturber un geste en cours
+            if (_gameManager?.TurnManager == null || _handView == null) return false;
+            if (_isDragging) return false; // ne pas perturber un geste en cours
 
             // Trie la main du joueur LOCAL (celle que la HandView affiche) —
             // cosmétique, donc autorisé même pendant le tour d'un autre joueur.
             PlayerModel? player = GameSession.GetLocalPlayer(_gameManager);
-            if (player == null) return;
+            if (player == null) return false;
 
             player.SortHand(comparator);
             _handView.ApplySortedOrder(player.Hand);
+            return true;
         }
     }
 }

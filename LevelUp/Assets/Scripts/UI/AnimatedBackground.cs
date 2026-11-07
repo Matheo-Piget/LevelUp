@@ -50,7 +50,7 @@ namespace LevelUp.UI
             rt.sizeDelta = Vector2.zero;
 
             Image img = baseObj.GetComponent<Image>();
-            img.color = Constants.BackgroundDark;
+            img.color = UISkin.Ground; // maquette : #0A0E12
             img.raycastTarget = false;
         }
 

@@ -68,4 +68,4 @@ LevelUp/ExportedObj/
 *.ignore
 *.plastic
 
-*.meta
+# Les .meta DOIVENT etre versionnes : ils portent les GUID qui relient scene, prefabs et scripts.

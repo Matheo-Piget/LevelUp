@@ -17,7 +17,7 @@ namespace LevelUp.UI
   ///   - sous la pile : nom du joueur + compteur "· N" en typo discrète
   ///   - pile vide : pas de fond plein, juste un contour pointillé très léger
   ///
-  /// Le joueur actif est signalé par un halo indigo très doux derrière la pile
+  /// Le joueur actif est signalé par un halo accent très doux derrière la pile
   /// + son nom passe en blanc — cohérent avec la sidebar.
   /// </summary>
   public class DiscardPileView : MonoBehaviour
@@ -26,6 +26,16 @@ namespace LevelUp.UI
     [SerializeField] private GameObject? _cardPrefab;
     [SerializeField] private AnimationController? _animController;
     [SerializeField] private float _pileSpacing = 150f;
+
+    // Carte du dessus d'une pile : 120×180 × 0.9 (maquette : piles ≈ cartes en main).
+    private const float PileCardScale = 0.9f;
+
+    /// <summary>Écart horizontal entre les piles (posé par le layout de l'écran).</summary>
+    public float PileSpacing
+    {
+      get => _pileSpacing;
+      set => _pileSpacing = value;
+    }
 
     private readonly List<PileSlot> _pileSlots = new();
     private int _playerCount;
@@ -93,7 +103,7 @@ namespace LevelUp.UI
 
       cardView.Setup(newTop.Value, true);
       cardView.SetInteractable(true);
-      cardView.RectTransform.localScale = Vector3.one * 0.65f;
+      cardView.RectTransform.localScale = Vector3.one * PileCardScale;
       cardView.RectTransform.anchoredPosition = Vector2.zero;
       slot.TopCardView = cardView;
     }
@@ -136,56 +146,26 @@ namespace LevelUp.UI
 
       RectTransform slotRt = slotObj.GetComponent<RectTransform>();
       slotRt.anchoredPosition = new Vector2(xPos, 0);
-      slotRt.sizeDelta = new Vector2(140f, 210f); // un peu plus haut pour loger le label en dessous
-
-      Color accentColor = playerIndex < PlayerAccentColors.Length
-          ? PlayerAccentColors[playerIndex]
-          : Constants.TextPrimary;
-
-      // ─── Halo "joueur actif" (derrière tout, invisible par défaut) ────
-      // Très doux, pas un cadre. Sert juste à signaler "c'est ici qu'on défausse".
-      GameObject activeGlow = new("ActiveGlow", typeof(RectTransform), typeof(Image));
-      activeGlow.transform.SetParent(slotObj.transform, false);
-      RectTransform glowRt = activeGlow.GetComponent<RectTransform>();
-      glowRt.sizeDelta = new Vector2(150f, 195f);
-      glowRt.anchoredPosition = new Vector2(0f, 12f); // centré sur la zone carte, pas le label
-      Image glowImg = activeGlow.GetComponent<Image>();
-      glowImg.sprite = UIFactory.SoftShadowSprite;
-      glowImg.color = new Color(0f, 0f, 0f, 0f);
-      glowImg.raycastTarget = false;
+      slotRt.sizeDelta = new Vector2(132f, 200f);
 
       // ─── Zone "carte" (hit-test pour le drop, et ancrage de la carte) ─
-      // C'est la zone visuelle de la pile : 120×165, centrée vers le haut du slot.
+      // Taille d'une carte de pile (108×162), label 14px en dessous.
       GameObject cardZone = new("CardZone", typeof(RectTransform), typeof(Image));
       cardZone.transform.SetParent(slotObj.transform, false);
 
       RectTransform zoneRt = cardZone.GetComponent<RectTransform>();
-      zoneRt.sizeDelta = new Vector2(120f, 165f);
-      zoneRt.anchoredPosition = new Vector2(0f, 12f); // décalé vers le haut (label en dessous)
+      zoneRt.sizeDelta = new Vector2(108f, 162f);
+      zoneRt.anchoredPosition = new Vector2(0f, 16f);
 
-      // Fond de pile vide : contour pointillé fin, pas de remplissage.
-      // Dès qu'une carte arrive on cache ce fond.
+      // Pile vide : emplacement en creux (aplat très léger), caché sous une carte.
       Image zoneImg = cardZone.GetComponent<Image>();
-      zoneImg.sprite = GetDashedBorderSprite();
-      zoneImg.type = Image.Type.Sliced;
-      zoneImg.color = new Color(1f, 1f, 1f, 0.10f);
+      UISkin.SetRounded(zoneImg, 13f);
+      zoneImg.color = new Color(1f, 1f, 1f, 0.03f);
       zoneImg.raycastTarget = true;
 
-      // ─── Liseré coloré 3px en haut de la zone carte ───────────────────
-      // C'est l'identité visuelle du joueur — fine, latérale, pas envahissante.
-      GameObject accentBar = new("AccentBar", typeof(RectTransform), typeof(Image));
-      accentBar.transform.SetParent(cardZone.transform, false);
-      RectTransform barRt = accentBar.GetComponent<RectTransform>();
-      barRt.anchorMin = new Vector2(0f, 1f);
-      barRt.anchorMax = new Vector2(1f, 1f);
-      barRt.pivot = new Vector2(0.5f, 1f);
-      barRt.sizeDelta = new Vector2(-24f, 3f); // 12px de marge de chaque côté
-      barRt.anchoredPosition = new Vector2(0f, -8f);
-      Image barImg = accentBar.GetComponent<Image>();
-      barImg.sprite = UIFactory.RoundedSprite;
-      barImg.type = Image.Type.Sliced;
-      barImg.color = accentColor;
-      barImg.raycastTarget = false;
+      // ─── Anneau "joueur actif" : c'est ici que sa défausse arrivera ───
+      Image glowImg = UISkin.Outline(zoneRt, 15f, 2f, new Color(0f, 0f, 0f, 0f), "ActiveRing");
+      UISkin.Stretch(glowImg.rectTransform, -5f);
 
       // ─── Ancrage des cartes (au centre de la zone carte) ──────────────
       GameObject cardAnchor = new("CardAnchor", typeof(RectTransform));
@@ -196,22 +176,13 @@ namespace LevelUp.UI
       anchorRt.sizeDelta = Vector2.zero;
       anchorRt.anchoredPosition = Vector2.zero;
 
-      // ─── Label sous la pile : "Nom · 0" en typo discrète ─────────────
-      GameObject labelObj = new("Label", typeof(RectTransform), typeof(TextMeshProUGUI));
-      labelObj.transform.SetParent(slotObj.transform, false);
-
-      RectTransform labelRt = labelObj.GetComponent<RectTransform>();
-      labelRt.sizeDelta = new Vector2(140f, 18f);
-      labelRt.anchoredPosition = new Vector2(0f, -90f);
-
-      TextMeshProUGUI labelText = labelObj.GetComponent<TextMeshProUGUI>();
-      labelText.fontSize = 11f;
-      labelText.color = Constants.TextMuted;
-      labelText.alignment = TextAlignmentOptions.Center;
-      labelText.fontStyle = FontStyles.Normal;
-      labelText.characterSpacing = 2f;
+      // ─── Label sous la pile : "Bot 1 · 3" (13px semibold) ────────────
+      TextMeshProUGUI labelText = UISkin.Text(slotObj.transform, "Label", "", 13f, UISkin.TextMuted,
+          TextWeight.SemiBold, TextAlignmentOptions.Center);
+      RectTransform labelRt = labelText.rectTransform;
+      labelRt.sizeDelta = new Vector2(150f, 18f);
+      labelRt.anchoredPosition = new Vector2(0f, -86f);
       labelText.richText = true;
-      labelText.raycastTarget = false;
 
       PileSlot slot = new()
       {
@@ -238,19 +209,10 @@ namespace LevelUp.UI
     /// </summary>
     private void UpdateCountLabel(PileSlot slot)
     {
-      string nameColor = slot.PlayerIndex == _activePlayerIndex ? "#F9FAFB" : "#9CA3AF";
-      if (slot.CardCount > 0)
-      {
-        slot.LabelText.text =
-            $"<color={nameColor}>{slot.PlayerName.ToUpper()}</color>" +
-            $"<color=#4B5563>  ·  </color>" +
-            $"<color=#9CA3AF>{slot.CardCount}</color>";
-      }
-      else
-      {
-        slot.LabelText.text =
-            $"<color={nameColor}>{slot.PlayerName.ToUpper()}</color>";
-      }
+      string nameColor = slot.PlayerIndex == _activePlayerIndex ? "#EEE9E0" : "#A7A198";
+      slot.LabelText.text = slot.CardCount > 0
+          ? $"<color={nameColor}>{slot.PlayerName}</color><color=#A7A198> · {slot.CardCount}</color>"
+          : $"<color={nameColor}>{slot.PlayerName}</color>";
     }
 
     /// <summary>Affiche / cache le contour pointillé selon que la pile est vide ou non.</summary>
@@ -259,7 +221,7 @@ namespace LevelUp.UI
       if (slot.EmptyStateImage == null) return;
       // On laisse toujours le hit-test actif (raycastTarget) mais on cache visuellement
       // le contour quand une carte couvre la zone.
-      float a = slot.CardCount > 0 ? 0f : 0.10f;
+      float a = slot.CardCount > 0 ? 0f : 0.03f;
       Color c = slot.EmptyStateImage.color;
       slot.EmptyStateImage.color = new Color(c.r, c.g, c.b, a);
     }
@@ -274,9 +236,9 @@ namespace LevelUp.UI
 
         if (slot.ActiveGlow != null)
         {
-          Color g = Constants.AccentLight;
-          g.a = active ? 0.18f : 0f; // halo très doux
-          slot.ActiveGlow.color = g;
+          slot.ActiveGlow.color = active
+              ? UISkin.WithAlpha(UISkin.AccentLight, 0.7f)
+              : new Color(0f, 0f, 0f, 0f);
         }
         UpdateCountLabel(slot);
       }
@@ -303,7 +265,7 @@ namespace LevelUp.UI
       {
         cardView.Setup(evt.Card, true);
         cardView.SetInteractable(true);
-        cardView.RectTransform.localScale = Vector3.one * 0.65f;
+        cardView.RectTransform.localScale = Vector3.one * PileCardScale;
         slot.TopCardView = cardView;
 
         StartCoroutine(AnimateCardArrival(cardView, slot));
@@ -388,7 +350,7 @@ namespace LevelUp.UI
           {
             cardView.Setup(top.Value, true);
             cardView.SetInteractable(true);
-            cardView.RectTransform.localScale = Vector3.one * 0.65f;
+            cardView.RectTransform.localScale = Vector3.one * PileCardScale;
             cardView.RectTransform.anchoredPosition = Vector2.zero;
             slot.TopCardView = cardView;
           }

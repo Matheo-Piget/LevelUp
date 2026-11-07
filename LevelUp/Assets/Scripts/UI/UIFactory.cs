@@ -98,13 +98,13 @@ namespace LevelUp.UI
             RectTransform rt = panel.GetComponent<RectTransform>();
             rt.sizeDelta = size;
 
+            // Panneau de la maquette : #161B22 radius 28 + liseré 8 %.
             Image img = panel.GetComponent<Image>();
-            img.sprite = RoundedSprite;
-            img.type = Image.Type.Sliced;
-            img.color = color;
+            UISkin.SetRounded(img, 28f);
+            img.color = color.a > 0.5f ? UISkin.WithAlpha(UISkin.Surface, Mathf.Max(color.a, 0.97f)) : color;
+            UISkin.Outline(rt, 28f, 1f, new Color(1f, 1f, 1f, 0.08f));
 
-            // withBorder / borderColor conservés pour compat API mais plus rendus :
-            // le design s'appuie désormais uniquement sur des surfaces arrondies sans contour.
+            // withBorder / borderColor conservés pour compat API (une seule couleur d'accent).
             _ = withBorder; _ = borderColor;
 
             return panel;
@@ -265,10 +265,19 @@ namespace LevelUp.UI
         /// Crée un bouton stylé avec hover/press animations et feedback lumineux.
         /// </summary>
         public static Button CreateButton(Transform parent, string name, string label,
-            Vector2 size, Action onClick, Color? accentColor = null)
+            Vector2 size, Action onClick, Color? accentColor = null, bool primary = false,
+            bool subtle = false)
         {
-            // Une seule couleur d'accent dans toute l'UI : indigo.
-            Color accent = accentColor ?? Constants.AccentPrimary;
+            // Une seule couleur d'accent dans toute l'UI : accent (accentColor
+            // conservé pour compat d'API, ignoré : la DA n'en a qu'un).
+            _ = accentColor;
+
+            // Maquette : primaire = champagne plein radius 18 (serif 24),
+            // secondaire = surface #161B22 + liseré 10 % (Inter SemiBold 17),
+            // discret = transparent + liseré 6 % (texte gris).
+            float radius = primary ? 18f : 16f;
+            Color restColor = primary ? UISkin.Accent : subtle ? new Color(0f, 0f, 0f, 0f) : UISkin.Surface;
+            Color hoverColor = primary ? UISkin.AccentLight : UISkin.SurfaceRaised;
 
             GameObject btnObj = new(name, typeof(RectTransform), typeof(Image), typeof(Button), typeof(CanvasGroup));
             btnObj.transform.SetParent(parent, false);
@@ -277,63 +286,62 @@ namespace LevelUp.UI
             rt.sizeDelta = size;
 
             Image img = btnObj.GetComponent<Image>();
-            img.sprite = RoundedSprite;
-            img.type = Image.Type.Sliced;
-            img.color = Constants.PanelHighlight;
+            UISkin.SetRounded(img, radius);
+            img.color = restColor;
 
-            // Pas de bordure dure — la teinte + le glow au hover suffisent.
+            if (!primary)
+            {
+                UISkin.Outline(rt, radius, 1f,
+                    subtle ? new Color(1f, 1f, 1f, 0.06f) : new Color(1f, 1f, 1f, 0.10f));
+            }
+            else
+            {
+                // Halo accent sous le bouton principal (0 16px 40px rgba(99,102,241,.35))
+                GameObject glow = new("Glow", typeof(RectTransform), typeof(Image));
+                glow.transform.SetParent(btnObj.transform, false);
+                glow.transform.SetAsFirstSibling();
+                RectTransform grt = glow.GetComponent<RectTransform>();
+                UISkin.Stretch(grt, -26f);
+                grt.anchoredPosition = new Vector2(0f, -14f);
+                Image gimg = glow.GetComponent<Image>();
+                gimg.sprite = UISkin.Radial;
+                gimg.color = UISkin.WithAlpha(UISkin.Accent, 0.22f);
+                gimg.raycastTarget = false;
+            }
 
-            // Glow extérieur (cache, apparaît au hover)
-            GameObject glow = new("Glow", typeof(RectTransform), typeof(Image), typeof(CanvasGroup));
-            glow.transform.SetParent(btnObj.transform, false);
-            glow.transform.SetAsFirstSibling();
-            RectTransform grt = glow.GetComponent<RectTransform>();
-            grt.anchorMin = Vector2.zero;
-            grt.anchorMax = Vector2.one;
-            grt.sizeDelta = new Vector2(40f, 40f);
-            grt.anchoredPosition = Vector2.zero;
-            Image gimg = glow.GetComponent<Image>();
-            gimg.sprite = SoftShadowSprite;
-            gimg.color = new Color(accent.r, accent.g, accent.b, 0.55f);
-            gimg.raycastTarget = false;
-            CanvasGroup gcg = glow.GetComponent<CanvasGroup>();
-            gcg.alpha = 0f;
-            gcg.blocksRaycasts = false;
+            TextMeshProUGUI tmp = UISkin.Text(btnObj.transform, "Label", label,
+                primary ? (size.y >= 64f ? 24f : 20f) : 17f,
+                primary ? UISkin.OnAccent : subtle ? UISkin.TextMuted : UISkin.TextColor,
+                primary ? TextWeight.Display : TextWeight.SemiBold, TextAlignmentOptions.Center);
+            tmp.characterSpacing = primary ? 4f : 6f;
+            Stretch(tmp.rectTransform);
 
-            // Label
-            CreateText(btnObj.transform, "Label", label, 26f, Constants.TextPrimary,
-                TextAlignmentOptions.Center, FontStyles.Bold);
-
-            // Button
             Button btn = btnObj.GetComponent<Button>();
             btn.transition = Selectable.Transition.None;
             btn.targetGraphic = img;
             btn.onClick.AddListener(() => onClick?.Invoke());
 
-            // Hover / press feedback via event triggers
             EventTrigger trigger = btnObj.AddComponent<EventTrigger>();
-            AddTrigger(trigger, EventTriggerType.PointerEnter, _ =>
-            {
-                img.color = Color.Lerp(Constants.PanelHighlight, accent, 0.32f);
-                UITween.FadeTo(btnObj, gcg, 1f, 0.18f);
-                UITween.ScaleTo(btnObj, rt, Vector3.one * 1.04f, 0.16f);
-            });
+            AddTrigger(trigger, EventTriggerType.PointerEnter, _ => img.color = hoverColor);
             AddTrigger(trigger, EventTriggerType.PointerExit, _ =>
             {
-                img.color = Constants.PanelHighlight;
-                UITween.FadeTo(btnObj, gcg, 0f, 0.25f);
-                UITween.ScaleTo(btnObj, rt, Vector3.one, 0.16f);
+                img.color = restColor;
+                UITween.ScaleTo(btnObj, rt, Vector3.one, 0.12f);
             });
             AddTrigger(trigger, EventTriggerType.PointerDown, _ =>
-            {
-                UITween.ScaleTo(btnObj, rt, Vector3.one * 0.96f, 0.08f);
-            });
+                UITween.ScaleTo(btnObj, rt, Vector3.one * 0.97f, 0.08f));
             AddTrigger(trigger, EventTriggerType.PointerUp, _ =>
-            {
-                UITween.ScaleTo(btnObj, rt, Vector3.one * 1.04f, 0.12f);
-            });
+                UITween.ScaleTo(btnObj, rt, Vector3.one, 0.12f));
 
             return btn;
+        }
+
+        private static void Stretch(RectTransform rt)
+        {
+            rt.anchorMin = Vector2.zero;
+            rt.anchorMax = Vector2.one;
+            rt.offsetMin = Vector2.zero;
+            rt.offsetMax = Vector2.zero;
         }
 
         private static void AddTrigger(EventTrigger trigger, EventTriggerType type, Action<BaseEventData> callback)

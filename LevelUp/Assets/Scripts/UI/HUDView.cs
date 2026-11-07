@@ -337,15 +337,28 @@ namespace LevelUp.UI
 
             string hint = phase switch
             {
-                TurnPhase.Draw       => "Pioche ou defausse pour commencer",
-                TurnPhase.LayDown    => "Selectionne tes cartes puis clique la table",
+                TurnPhase.Draw       => "Pioche ou défausse pour commencer",
+                TurnPhase.LayDown    => "Sélectionne tes cartes puis clique la table",
                 TurnPhase.AddToMelds => "Glisse une carte sur une combinaison",
-                TurnPhase.Discard    => "Clique une carte a defausser",
+                TurnPhase.Discard    => "Clique une carte à défausser",
                 _                    => ""
             };
 
-            // Puce indigo (●) + hint en TextSecondary — tout sobre, lisible.
-            _currentPhaseText.text = $"<color=#818CF8>●</color>  {hint}";
+            // Étape du tour (Draw → LayDown → AddToMelds → Discard) : le joueur
+            // sait toujours où il en est et ce qu'il reste à faire.
+            int step = phase switch
+            {
+                TurnPhase.Draw       => 1,
+                TurnPhase.LayDown    => 2,
+                TurnPhase.AddToMelds => 3,
+                TurnPhase.Discard    => 4,
+                _                    => 0
+            };
+
+            // Étape en indigo gras + hint en TextSecondary — sobre, lisible.
+            _currentPhaseText.text = step > 0
+                ? $"<color=#D8B66E><b>{step}/4</b></color>  {hint}"
+                : hint;
             _currentPhaseText.color = Constants.TextSecondary;
 
             if (animated && _initialized)
@@ -366,7 +379,7 @@ namespace LevelUp.UI
             {
                 // "Pioche  42" — label muted + chiffre en blanc pour la hiérarchie.
                 _deckCountText.text =
-                    $"<color=#9CA3AF><size=11>Pioche</size></color>  {evt.CardsRemaining}";
+                    $"<color=#A7A198><size=11>Pioche</size></color>  {evt.CardsRemaining}";
             }
         }
 
@@ -449,7 +462,7 @@ namespace LevelUp.UI
             string req = DescribeLevelRequirement(level);
             // "Niveau X" en blanc, l'objectif en gris secondaire pour la hiérarchie.
             _currentLevelText.text =
-                $"NIVEAU {level}  <color=#9CA3AF>· {req}</color>";
+                $"NIVEAU {level}  <color=#A7A198>· {req}</color>";
 
             if (_initialized)
             {

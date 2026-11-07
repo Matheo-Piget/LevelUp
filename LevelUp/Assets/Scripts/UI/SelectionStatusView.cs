@@ -69,13 +69,14 @@ namespace LevelUp.UI
             rt.anchorMin = new Vector2(0.5f, 0f);
             rt.anchorMax = new Vector2(0.5f, 0f);
             rt.pivot = new Vector2(0.5f, 0f);
-            rt.anchoredPosition = new Vector2(0f, 270f);
-            rt.sizeDelta = new Vector2(620f, 76f);
+            rt.anchoredPosition = new Vector2(0f, 322f);
+            rt.sizeDelta = new Vector2(640f, 72f);
 
             _bg = _root.GetComponent<Image>();
-            _bg.sprite = UIFactory.RoundedSprite;
+            UISkin.SetRounded(_bg, 18f);
             _bg.type = Image.Type.Sliced;
-            _bg.color = new Color(0.06f, 0.10f, 0.16f, 0.88f);
+            _bg.color = UISkin.WithAlpha(UISkin.Surface, 0.96f);
+            UISkin.Outline(rt, 18f, 1f, UISkin.WithAlpha(UISkin.AccentLight, 0.4f));
             _bg.raycastTarget = false;
 
             _canvasGroup = _root.GetComponent<CanvasGroup>();
@@ -87,12 +88,13 @@ namespace LevelUp.UI
             GameObject barObj = new("Bar", typeof(RectTransform), typeof(Image));
             barObj.transform.SetParent(_root.transform, false);
             RectTransform barRt = barObj.GetComponent<RectTransform>();
-            barRt.anchorMin = new Vector2(0f, 0f);
-            barRt.anchorMax = new Vector2(0f, 1f);
+            barRt.anchorMin = new Vector2(0f, 0.5f);
+            barRt.anchorMax = new Vector2(0f, 0.5f);
             barRt.pivot = new Vector2(0f, 0.5f);
-            barRt.sizeDelta = new Vector2(5f, 0f);
-            barRt.anchoredPosition = Vector2.zero;
+            barRt.sizeDelta = new Vector2(10f, 10f);
+            barRt.anchoredPosition = new Vector2(20f, 0f);
             Image barImg = barObj.GetComponent<Image>();
+            UISkin.SetRounded(barImg, 5f); // pastille d'état (pas de liseré latéral)
             barImg.color = Constants.TextSecondary;
             barImg.raycastTarget = false;
 
@@ -103,12 +105,12 @@ namespace LevelUp.UI
             labelRt.anchorMin = new Vector2(0f, 0.5f);
             labelRt.anchorMax = new Vector2(1f, 1f);
             labelRt.sizeDelta = Vector2.zero;
-            labelRt.offsetMin = new Vector2(16f, 0f);
+            labelRt.offsetMin = new Vector2(42f, 0f);
             labelRt.offsetMax = new Vector2(-12f, -2f);
 
             _label = labelObj.GetComponent<TextMeshProUGUI>();
             _label.text = "";
-            _label.fontSize = 22f;
+            _label.fontSize = 18f;
             _label.color = Constants.TextPrimary;
             _label.alignment = TextAlignmentOptions.MidlineLeft;
             _label.fontStyle = FontStyles.Bold;
@@ -121,12 +123,12 @@ namespace LevelUp.UI
             hintRt.anchorMin = new Vector2(0f, 0f);
             hintRt.anchorMax = new Vector2(1f, 0.5f);
             hintRt.sizeDelta = Vector2.zero;
-            hintRt.offsetMin = new Vector2(16f, 4f);
+            hintRt.offsetMin = new Vector2(42f, 4f);
             hintRt.offsetMax = new Vector2(-12f, 0f);
 
             _hint = hintObj.GetComponent<TextMeshProUGUI>();
             _hint.text = "";
-            _hint.fontSize = 15f;
+            _hint.fontSize = 14f;
             _hint.color = Constants.TextSecondary;
             _hint.alignment = TextAlignmentOptions.MidlineLeft;
             _hint.raycastTarget = false;
@@ -187,7 +189,7 @@ namespace LevelUp.UI
                 }
                 else
                 {
-                    _label.text = $"NIVEAU {current.CurrentLevel}  <size=15><color=#9CA3AF>{requirementText}</color></size>";
+                    _label.text = $"NIVEAU {current.CurrentLevel}  <size=15><color=#A7A198>{requirementText}</color></size>";
                     _label.color = Constants.TextAccent;
                     _hint.text = $"{progress}  •  ou glisse ↑ pour défausser";
                     _hint.color = Constants.TextSecondary;
@@ -252,8 +254,8 @@ namespace LevelUp.UI
             System.Text.StringBuilder sb = new();
             foreach (ContractProgress.Entry e in entries)
             {
-                if (sb.Length > 0) sb.Append("<color=#4B5563>  ·  </color>");
-                string color = e.IsMet ? "#4DFF91" : (e.Have > 0 ? "#FBBF24" : "#9CA3AF");
+                if (sb.Length > 0) sb.Append("<color=#6E6A64>  ·  </color>");
+                string color = e.IsMet ? "#5FB98A" : (e.Have > 0 ? "#E6CB92" : "#A7A198");
                 int have = Mathf.Min(e.Have, e.Requirement.CardCount);
                 sb.Append(ContractCatalog.Name(e.Requirement))
                   .Append(' ')
