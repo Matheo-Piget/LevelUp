@@ -249,6 +249,7 @@ namespace LevelUp.UI
         private const int MaxQueued = 3;
         private readonly Queue<(string Text, bool Error)> _queue = new();
         private float _shownFor;
+        private Vector2? _statusRest;
 
         /// <summary>Le toast s'affiche (vrai = erreur) : le layout l'habille en conséquence.</summary>
         public event System.Action<bool>? StatusStyleChanged;
@@ -328,9 +329,12 @@ namespace LevelUp.UI
                 _statusRect.localScale = Vector3.one * 0.5f;
                 UITween.ScaleTo(_statusText!.gameObject, _statusRect, Vector3.one, 0.35f);
 
-                // Slide-in léger depuis le bas
-                Vector2 target = _statusRect.anchoredPosition;
-                _statusRect.anchoredPosition = target + Vector2.down * 20f;
+                // Slide-in léger depuis le haut (le toast vit sous le bord supérieur).
+                // Cible mémorisée : un message qui en chasse un autre en plein
+                // glissement ne doit pas faire dériver la position de repos.
+                _statusRest ??= _statusRect.anchoredPosition;
+                Vector2 target = _statusRest.Value;
+                _statusRect.anchoredPosition = target + Vector2.up * 20f;
                 UITween.MoveTo(_statusText.gameObject, _statusRect, target, 0.3f);
             }
         }

@@ -94,10 +94,33 @@ namespace LevelUp.UI
             _scroll.scrollSensitivity = 40f;
             _scroll.inertia = true;
 
-            BuildContent(content.transform);
+            _content = content.transform;
+            RebuildContent();
 
             _cg.alpha = 0f;
             _veil.SetActive(false);
+        }
+
+        private Transform? _content;
+        private int _builtFor = -1;
+
+        /// <summary>Le texte dépend des aides actives : reconstruit quand elles changent.</summary>
+        private void RebuildContent()
+        {
+            if (_content == null) return;
+            int key = (GameSettings.HintContract ? 1 : 0) | (GameSettings.HintPlayable ? 2 : 0)
+                      | (GameSettings.QuickDiscard ? 4 : 0);
+            if (key == _builtFor) return;
+            _builtFor = key;
+            for (int i = _content.childCount - 1; i >= 0; i--)
+            {
+                // Détaché tout de suite : Destroy n'agit qu'en fin d'image et la
+                // mise en page compterait encore les anciens blocs.
+                GameObject old = _content.GetChild(i).gameObject;
+                old.transform.SetParent(null, false);
+                Destroy(old);
+            }
+            BuildContent(_content);
         }
 
         private static void BuildContent(Transform c)
@@ -108,11 +131,20 @@ namespace LevelUp.UI
 
             Section(c, "TON TOUR, EN 4 ÉTAPES");
             Step(c, "1", "Piocher", "Touche la pioche, ou une défausse pour prendre sa carte visible.");
+            // Les aides coupées (Options) ne sont pas décrites comme si elles étaient là.
             Step(c, "2", "Poser", "Si ta main remplit le contrat, sélectionne les cartes puis touche « Poser » (ou la table). " +
-                                  "« Préparer la pose » sélectionne une répartition valide pour toi.");
+                                  (GameSettings.HintContract
+                                      ? "« Préparer la pose » sélectionne une répartition valide pour toi. "
+                                      : "") +
+                                  "Sinon, passe à la suite : touche « Défausser », ou glisse une carte sur ta défausse.");
             Step(c, "3", "Compléter", "Une fois ton contrat posé, ajoute des cartes aux combinaisons de la table " +
-                                      "(les tiennes comme celles des autres) : glisse la carte, ou touche une carte marquée « + ».");
-            Step(c, "4", "Défausser", "Termine en défaussant une carte : touche-la, ou glisse-la sur ta défausse.");
+                                      "(les tiennes comme celles des autres) en y glissant la carte" +
+                                      (GameSettings.HintPlayable ? ", ou en touchant une carte marquée « + »." : "."));
+            Step(c, "4", "Défausser", "Termine en défaussant une carte : " +
+                                      (GameSettings.QuickDiscard ? "touche-la" : "touche-la deux fois") +
+                                      ", glisse-la sur ta défausse, ou touche la carte puis ta défausse.");
+            Paragraph(c, "Les aides (détection du contrat, cartes jouables, défausse en un toucher) s'activent dans les Options.",
+                muted: true);
 
             Section(c, "LES COMBINAISONS");
             Paragraph(c, "<b>Suite</b> : valeurs qui se suivent, couleurs mélangées (4-5-6-7).\n" +
@@ -190,6 +222,7 @@ namespace LevelUp.UI
             if (_veil == null || _panel == null || _cg == null || _visible) return;
             _visible = true;
             _veil.SetActive(true);
+            RebuildContent();
             _veil.transform.SetAsLastSibling();
             if (_scroll != null) _scroll.verticalNormalizedPosition = 1f;
             _panel.localScale = Vector3.one * 0.95f;

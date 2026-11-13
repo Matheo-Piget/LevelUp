@@ -33,7 +33,6 @@ namespace LevelUp.UI
         private bool _isDragging;
         private bool _inputEnabled = true;
         private Vector2 _dragStartPos;
-        private float _dragStartTime;
         private int _dragCardIndex = -1;
 
         // Reorder drag tracking
@@ -103,6 +102,23 @@ namespace LevelUp.UI
         // Pile touchée en phase Piocher (paquet = DeckPress, défausse = index), -1 sinon.
         private const int DeckPress = -2;
         private int _pressedPile = -1;
+
+        // Appui commencé sur la table (étape Poser) : la pose part au relâchement,
+        // comme la pioche — un doigt qui effleure la table ne pose plus rien.
+        private bool _pressedTable;
+
+        // Appui commencé sur la zone des défausses avec une carte sélectionnée :
+        // au relâchement, cette carte est défaussée (toucher la carte, puis la défausse).
+        private bool _pressedDiscardZone;
+
+        // Action demandée pendant une animation qui verrouille le jeu (carte
+        // piochée en vol) : rejouée dès la fin de l'animation au lieu d'être
+        // perdue. Une seule en attente — la dernière demandée gagne.
+        private System.Action? _queuedAction;
+        private int _queuedPlayer = -1;
+        private int _queuedRound = -1;
+        private float _queuedUntil;
+        private const float QueuedActionLifetime = 1f;
 
         // Phase Défausser : la carte touchée était déjà soulevée (second toucher).
         private bool _tapWasSelected;
@@ -322,8 +338,44 @@ namespace LevelUp.UI
 
         private void LateUpdate()
         {
+            FlushQueuedAction();
             if (_hintsDirty) RefreshPlayableHints();
             ApplyPendingSort();
+        }
+
+        /// <summary>
+        /// Vrai si une animation verrouille les actions : <paramref name="retry"/>
+        /// est alors mis en attente et rejoué dès qu'elle se termine (même tour,
+        /// même manche). L'appelant n'a plus qu'à sortir.
+        /// </summary>
+        private bool Deferred(System.Action retry)
+        {
+            if (!ActionsLocked) return false;
+            if (_gameManager?.TurnManager == null) return true;
+            _queuedAction = retry;
+            _queuedPlayer = CurrentPlayerIndex;
+            _queuedRound = _gameManager.RoundNumber;
+            _queuedUntil = Time.unscaledTime + QueuedActionLifetime;
+            return true;
+        }
+
+        private void FlushQueuedAction()
+        {
+            if (_queuedAction == null) return;
+            if (ActionsLocked)
+            {
+                // Animation anormalement longue : l'action est abandonnée plutôt
+                // que de partir à un moment où le joueur ne l'attend plus.
+                if (Time.unscaledTime > _queuedUntil) _queuedAction = null;
+                return;
+            }
+
+            System.Action action = _queuedAction;
+            _queuedAction = null;
+            if (_gameManager?.TurnManager == null || _gameManager.State != GameState.PlayerTurn) return;
+            if (!IsLocalTurn || CurrentPlayerIndex != _queuedPlayer || _gameManager.RoundNumber != _queuedRound) return;
+            if (LayDownChooser.IsOpen || TargetChooser.IsOpen || _autoFinishing) return;
+            action();
         }
 
         /// <summary>
@@ -332,10 +384,11 @@ namespace LevelUp.UI
         /// </summary>
         public void SkipToDiscard()
         {
-            if (_gameManager?.TurnManager == null || !IsLocalTurn || ActionsLocked) return;
+            if (_gameManager?.TurnManager == null || !IsLocalTurn) return;
             if (_gameManager.State != GameState.PlayerTurn) return;
             TurnPhase phase = _gameManager.TurnManager.CurrentPhase;
             if (phase != TurnPhase.LayDown && phase != TurnPhase.AddToMelds) return;
+            if (Deferred(SkipToDiscard)) return;
 
             CancelGesture();
             _handView?.DeselectAll();
@@ -371,7 +424,7 @@ namespace LevelUp.UI
             }
 
             IReadOnlyList<PlayerModel> players = _gameManager.Players;
-            _handView.SetPlayableHints(card =>
+            bool Playable(CardModel card)
             {
                 foreach (PlayerModel p in players)
                 {
@@ -381,7 +434,25 @@ namespace LevelUp.UI
                     }
                 }
                 return false;
-            });
+            }
+
+            // Aide « cartes jouables » : si rien ne complète la table, l'étape
+            // est passée toute seule (annoncée), le joueur n'a plus qu'à défausser.
+            bool any = false;
+            foreach (CardModel card in tm!.CurrentPlayer.Hand)
+            {
+                if (Playable(card)) { any = true; break; }
+            }
+            if (!any && !_autoFinishing && !_isDragging && tm.CurrentPlayer.Hand.Count > 0)
+            {
+                _handView.SetPlayableHints(null);
+                _handView.DeselectAll();
+                ExecuteSkipPhase(TurnPhase.AddToMelds);
+                _hudView?.ShowStatus("Rien à compléter : défausse une carte");
+                return;
+            }
+
+            _handView.SetPlayableHints(Playable);
         }
 
         /// <summary>
@@ -407,34 +478,12 @@ namespace LevelUp.UI
 
         private void HandleInput()
         {
-            Vector2 position;
-            bool pressed, held, released;
-
-            // Tactile prioritaire dès qu'un doigt est actif : certains Android
-            // exposent un périphérique Mouse fantôme qui masquerait le touch
-            // si on testait la souris en premier.
-            var touch = Touchscreen.current?.primaryTouch;
-            bool touchActive = touch != null &&
-                (touch.press.isPressed || touch.press.wasReleasedThisFrame);
-
-            if (touchActive)
-            {
-                position = touch!.position.ReadValue();
-                pressed = touch.press.wasPressedThisFrame;
-                held = touch.press.isPressed;
-                released = touch.press.wasReleasedThisFrame;
-            }
-            else if (Mouse.current != null)
-            {
-                position = Mouse.current.position.ReadValue();
-                pressed = Mouse.current.leftButton.wasPressedThisFrame;
-                held = Mouse.current.leftButton.isPressed;
-                released = Mouse.current.leftButton.wasReleasedThisFrame;
-            }
-            else
-            {
-                return;
-            }
+            // Doigt ou souris (ou source scriptée du harnais) : une seule lecture.
+            if (!PointerInput.TryRead(out PointerState pointer)) return;
+            Vector2 position = pointer.Position;
+            bool pressed = pointer.Pressed;
+            bool held = pointer.Held;
+            bool released = pointer.Released;
 
             if (pressed)
             {
@@ -468,7 +517,6 @@ namespace LevelUp.UI
                 if (idx >= 0)
                 {
                     _dragStartPos = pos;
-                    _dragStartTime = Time.time;
                     _dragCardIndex = idx;
                     _isReorderCandidate = true;
                     _isDragging = true;
@@ -504,7 +552,6 @@ namespace LevelUp.UI
                     if (idx >= 0)
                     {
                         _dragStartPos = pos;
-                        _dragStartTime = Time.time;
                         _dragCardIndex = idx;
                         _isReorderCandidate = true;
                         _isDragging = true;
@@ -520,19 +567,23 @@ namespace LevelUp.UI
                 if (idx >= 0)
                 {
                     _dragStartPos = pos;
-                    _dragStartTime = Time.time;
                     _dragCardIndex = idx;
                     _isReorderCandidate = true;
                     _isDragging = true;
                     return;
                 }
 
-                // Toucher la table (et seulement la table) pose le niveau. Le bas
-                // de l'écran au-dessus de la main ne déclenche plus rien : un
-                // toucher égaré ne pose plus le contrat à la place du joueur.
+                // Une carte sélectionnée, puis la défausse : elle est jetée au relâchement.
+                if (TryPressDiscardZone(pos)) return;
+
+                // Toucher la table (et seulement la table) pose le niveau, au
+                // RELÂCHEMENT si le doigt y est resté : la pose est irréversible,
+                // un geste qui effleure la table ne doit pas la déclencher.
                 if (HitsRect(_tableHitArea, pos))
                 {
-                    ExecuteLayDown();
+                    _pressedTable = true;
+                    _isDragging = true;
+                    _dragStartPos = pos;
                     return;
                 }
                 return;
@@ -554,6 +605,7 @@ namespace LevelUp.UI
                     _handView.BeginDrag(idx, pos);
                     return;
                 }
+                TryPressDiscardZone(pos);
                 return;
             }
 
@@ -570,10 +622,25 @@ namespace LevelUp.UI
                     _isReorderCandidate = true;
                     _dragCardIndex = idx;
                     _dragStartPos = pos;
-                    _dragStartTime = Time.time;
                     return;
                 }
+                TryPressDiscardZone(pos);
             }
+        }
+
+        /// <summary>
+        /// Appui sur la zone des défausses alors qu'une seule carte est
+        /// sélectionnée : geste « je touche la carte, puis la défausse ». Rien
+        /// n'est joué ici — la défausse part au relâchement, au même endroit.
+        /// </summary>
+        private bool TryPressDiscardZone(Vector2 pos)
+        {
+            if (_handView == null || _handView.SelectedCard == null) return false;
+            if (!IsDropOnDiscardPile(pos)) return false;
+            _pressedDiscardZone = true;
+            _isDragging = true;
+            _dragStartPos = pos;
+            return true;
         }
 
         // ──────────────────────────────────────────────
@@ -770,6 +837,28 @@ namespace LevelUp.UI
                 return;
             }
 
+            // Pose : relâché sur la table, là où l'appui a commencé.
+            if (_pressedTable)
+            {
+                _pressedTable = false;
+                if (phase == TurnPhase.LayDown && !_reorderOnly && HitsRect(_tableHitArea, pos)) ExecuteLayDown();
+                return;
+            }
+
+            // Carte sélectionnée puis défausse touchée : la carte est jetée.
+            if (_pressedDiscardZone)
+            {
+                _pressedDiscardZone = false;
+                CardView? chosen = _handView.SelectedCard;
+                if (_reorderOnly || chosen == null || !IsDropOnDiscardPile(pos)) return;
+
+                CardModel toDiscard = chosen.CardModel;
+                _handView.DeselectAll();
+                if (phase == TurnPhase.Discard) ExecuteDiscard(toDiscard);
+                else if (phase == TurnPhase.LayDown || phase == TurnPhase.AddToMelds) AdvanceToDiscardAndDiscard(toDiscard);
+                return;
+            }
+
             // Reorder drag terminé
             if (_handView.IsReorderDragging)
             {
@@ -943,7 +1032,7 @@ namespace LevelUp.UI
             if (_gameManager?.TurnManager == null) return;
             // Guard ici (et pas seulement dans ExecuteDiscard) : sinon on
             // skipperait des phases sans pouvoir défausser derrière.
-            if (ActionsLocked) return;
+            if (Deferred(() => AdvanceToDiscardAndDiscard(card))) return;
 
             // Carte « Passe » / « +2 » : la cible se choisit AVANT de quitter
             // l'étape — annuler le choix ne doit rien avoir changé au tour.
@@ -1023,6 +1112,8 @@ namespace LevelUp.UI
             ClearMagnet();
             _actionCard = null;
             _pressedPile = -1;
+            _pressedTable = false;
+            _pressedDiscardZone = false;
             if (_handView != null)
             {
                 if (_handView.IsReorderDragging)
@@ -1044,7 +1135,7 @@ namespace LevelUp.UI
         private void ExecuteDrawFromDeck()
         {
             if (_gameManager == null || _handView == null) return;
-            if (ActionsLocked) return;
+            if (Deferred(ExecuteDrawFromDeck)) return;
 
             // Verrouiller l'animation AVANT l'exécution pour que
             // HandChangedEvent soit mis en file d'attente
@@ -1067,7 +1158,7 @@ namespace LevelUp.UI
         private void ExecuteDrawFromDiscard(int pileIndex)
         {
             if (_gameManager == null || _handView == null) return;
-            if (ActionsLocked) return;
+            if (Deferred(() => ExecuteDrawFromDiscard(pileIndex))) return;
 
             _handView.SetAnimatingDraw(true);
 
@@ -1099,7 +1190,7 @@ namespace LevelUp.UI
         private void ExecuteLayDown()
         {
             if (_gameManager == null || _handView == null) return;
-            if (ActionsLocked) return;
+            if (Deferred(ExecuteLayDown)) return;
 
             PlayerModel player = _gameManager.TurnManager!.CurrentPlayer;
             List<CardModel> selected = _handView.GetSelectedCardModels();
@@ -1168,7 +1259,7 @@ namespace LevelUp.UI
         private void LayDownWith(List<Meld> melds)
         {
             if (_gameManager?.TurnManager == null || _handView == null) return;
-            if (ActionsLocked) return;
+            if (Deferred(() => LayDownWith(melds))) return;
 
             PlayerModel player = _gameManager.TurnManager.CurrentPlayer;
             List<Meld> playerMelds = new();
@@ -1257,7 +1348,7 @@ namespace LevelUp.UI
         private void ExecuteAddToMeld(CardModel card, int ownerIdx, int meldIdx, CardView cardView)
         {
             if (_gameManager == null) return;
-            if (ActionsLocked) return;
+            if (Deferred(() => ExecuteAddToMeld(card, ownerIdx, meldIdx, cardView))) return;
 
             CommandResult result = _gameManager.ExecuteCommand(
                 new AddToMeldCommand(CurrentPlayerIndex, card, ownerIdx, meldIdx));
@@ -1287,7 +1378,7 @@ namespace LevelUp.UI
         private void ExecuteDiscard(CardModel card)
         {
             if (_gameManager == null) return;
-            if (ActionsLocked) return;
+            if (Deferred(() => ExecuteDiscard(card))) return;
 
             int player = CurrentPlayerIndex;
             if (card.IsAction && !card.IsWild)
@@ -1318,7 +1409,7 @@ namespace LevelUp.UI
         private void DiscardTo(CardModel card, int targetIndex)
         {
             if (_gameManager == null) return;
-            if (ActionsLocked) return;
+            if (Deferred(() => DiscardTo(card, targetIndex))) return;
 
             // ExecuteCommand gère automatiquement OnRoundEnd si la main est vide
             _gameManager.ExecuteCommand(

@@ -350,7 +350,8 @@ namespace LevelUp.UI
             _haptics = PlayerPrefs.GetInt(KeyHaptics, 1) == 1;
             _reducedMotion = PlayerPrefs.GetInt(KeyReducedMotion, 0) == 1;
             _uiScale = Mathf.Clamp(PlayerPrefs.GetInt(KeyUiScale, DefaultUiScale()), 0, 1);
-            _highFps = PlayerPrefs.GetInt(KeyHighFps, 1) == 1;
+            // 60 i/s par défaut sur mobile (batterie, chauffe) ; 120 reste un choix.
+            _highFps = PlayerPrefs.GetInt(KeyHighFps, Application.isMobilePlatform ? 0 : 1) == 1;
             _cardBack = Mathf.Clamp(PlayerPrefs.GetInt(KeyCardBack, 0), 0, 2);
             _felt = Mathf.Clamp(PlayerPrefs.GetInt(KeyFelt, 0), 0, 2);
             _loaded = true;

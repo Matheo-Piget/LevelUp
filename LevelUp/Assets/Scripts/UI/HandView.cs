@@ -231,30 +231,34 @@ namespace LevelUp.UI
         {
             if (_draggedCard != null || _handContainer == null) return;
 
-            Vector2 mousePos = Vector2.zero;
-            bool hasPointer = false;
-
-            // Tactile prioritaire (cohérent avec GameInputController) : un doigt
-            // posé gagne sur un éventuel périphérique Mouse fantôme Android.
-            if (Touchscreen.current != null && Touchscreen.current.primaryTouch.press.isPressed)
-            {
-                mousePos = Touchscreen.current.primaryTouch.position.ReadValue();
-                hasPointer = true;
-            }
-            else if (Mouse.current != null)
-            {
-                mousePos = Mouse.current.position.ReadValue();
-                hasPointer = true;
-            }
-
-            if (!hasPointer)
+            // Même source que GameInputController (doigt posé, sinon souris).
+            if (!PointerInput.TryReadHover(out Vector2 mousePos))
             {
                 SetHoveredCard(-1);
                 return;
             }
 
             int newHovered = GetCardIndexAtPosition(mousePos);
+
+            // La carte survolée se soulève : le pointeur resté sur son bord bas
+            // ne la touche alors plus, elle redescend, puis remonte… On garde
+            // le survol tant que le pointeur est dans la bande qu'elle a quittée.
+            if (newHovered != _hoveredIndex && _hoveredIndex >= 0 && _hoveredIndex < _cardViews.Count
+                && IsInLiftGap(_cardViews[_hoveredIndex].RectTransform, mousePos))
+            {
+                newHovered = _hoveredIndex;
+            }
             SetHoveredCard(newHovered);
+        }
+
+        /// <summary>Vrai si le point est juste sous la carte, dans la hauteur dont elle s'est soulevée.</summary>
+        private static bool IsInLiftGap(RectTransform card, Vector2 screenPosition)
+        {
+            if (!RectTransformUtility.ScreenPointToLocalPointInRectangle(card, screenPosition, null, out Vector2 local))
+                return false;
+            Rect r = card.rect;
+            float gap = Constants.HoverLiftY + 12f;
+            return local.x >= r.xMin && local.x <= r.xMax && local.y < r.yMin && local.y >= r.yMin - gap;
         }
 
         private void SetHoveredCard(int index)
@@ -451,7 +455,7 @@ namespace LevelUp.UI
                 _pendingHand = new List<CardModel>(evt.NewHand);
                 return;
             }
-            RefreshHand(evt.NewHand);
+            RefreshHand(evt.NewHand, flyInNew: true);
         }
 
         /// <summary>
@@ -472,7 +476,7 @@ namespace LevelUp.UI
         /// de tout détruire/réinstancier — bénéfice direct sur le GC à chaque action
         /// (pioche, défausse, pose, ajout meld).
         /// </summary>
-        public void RefreshHand(IReadOnlyList<CardModel> cards, bool dealAnimation = false)
+        public void RefreshHand(IReadOnlyList<CardModel> cards, bool dealAnimation = false, bool flyInNew = false)
         {
             _selectedCards.Clear();
             _hoveredIndex = -1;
@@ -546,8 +550,9 @@ namespace LevelUp.UI
             }
             else
             {
-                // Les cartes conservées glissent (LerpCardsToTarget) ; une carte
-                // apparue hors pioche (+2 subi, reprise) se pose directement.
+                // Les cartes conservées glissent (LerpCardsToTarget). Une carte
+                // apparue hors pioche est posée à sa place, puis — si elle vient
+                // d'un coup de jeu (« +2 » subi) — arrive en vol depuis la pioche.
                 for (int i = 0; i < _cardViews.Count && i < _targetPositions.Count; i++)
                 {
                     if (!_freshViews.Contains(_cardViews[i])) continue;
@@ -556,6 +561,7 @@ namespace LevelUp.UI
                     rt.localRotation = Quaternion.Euler(0, 0, _targetRotations[i]);
                     rt.localScale = _targetScales[i];
                     _cardViews[i].SetAlpha(1f);
+                    if (flyInNew && _animController != null) _animController.AnimateDrawToHand(rt, null);
                 }
             }
             _hasLaidOut = true;

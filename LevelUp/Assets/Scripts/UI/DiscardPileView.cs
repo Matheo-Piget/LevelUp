@@ -49,6 +49,22 @@ namespace LevelUp.UI
       EventBus.Subscribe<TurnStartedEvent>(OnTurnStarted);
       EventBus.Subscribe<TurnPhaseChangedEvent>(OnPhaseChanged);
       EventBus.Subscribe<RoundSummaryEvent>(OnRoundSummary);
+      EventBus.Subscribe<DeckChangedEvent>(OnDeckChanged);
+    }
+
+    private int _lastDeckCount = -1;
+
+    // Pioche qui remonte = défausses remélangées : compteurs à recaler.
+    private void OnDeckChanged(DeckChangedEvent evt)
+    {
+      bool recycled = _lastDeckCount >= 0 && evt.CardsRemaining > _lastDeckCount;
+      _lastDeckCount = evt.CardsRemaining;
+      if (!recycled) return;
+      foreach (PileSlot slot in _pileSlots)
+      {
+        UpdateCountLabel(slot);
+        UpdateEmptyState(slot);
+      }
     }
 
     private void OnDisable()
@@ -59,6 +75,7 @@ namespace LevelUp.UI
       EventBus.Unsubscribe<TurnStartedEvent>(OnTurnStarted);
       EventBus.Unsubscribe<TurnPhaseChangedEvent>(OnPhaseChanged);
       EventBus.Unsubscribe<RoundSummaryEvent>(OnRoundSummary);
+      EventBus.Unsubscribe<DeckChangedEvent>(OnDeckChanged);
     }
 
     /// <summary>Lie la partie (joueur local, pour l'anneau d'invite).</summary>
@@ -145,6 +162,9 @@ namespace LevelUp.UI
 
     private void UpdateCountLabel(PileSlot slot)
     {
+      // Le modèle fait foi : un remélange des défausses dans la pioche vide les
+      // piles sans passer par CardDiscarded / CardDrawn.
+      if (_deckManager != null) slot.CardCount = _deckManager.GetDiscardCount(slot.PlayerIndex);
       string nameColor = slot.PlayerIndex == _activePlayerIndex ? "#EEE9E0" : "#A7A198";
       slot.LabelText.text = slot.CardCount > 0
           ? $"<color={nameColor}>{slot.PlayerName}</color><color=#A7A198> · {slot.CardCount}</color>"

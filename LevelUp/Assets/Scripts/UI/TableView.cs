@@ -264,7 +264,7 @@ namespace LevelUp.UI
         for (int i = 0; i < kvp.Value.Count; i++)
         {
           RectTransform rt = (RectTransform)kvp.Value[i].transform;
-          if (IsInsidePaddedRect(rt, screenPosition, _meldHitPadding))
+          if (IsInsidePaddedRect(rt, screenPosition, _meldHitPadding / ContentScale))
           {
             ownerIndex = kvp.Key;
             meldIndex = i;
@@ -303,7 +303,9 @@ namespace LevelUp.UI
           Rect r = rt.rect;
           float dx = Mathf.Max(0f, Mathf.Max(r.xMin - local.x, local.x - r.xMax));
           float dy = Mathf.Max(0f, Mathf.Max(r.yMin - local.y, local.y - r.yMax));
-          float dist = Mathf.Sqrt(dx * dx + dy * dy);
+          // Distance ramenée en unités canvas : la table peut être réduite
+          // (LayoutTable), le rayon de l'aimant ne doit pas rétrécir avec elle.
+          float dist = Mathf.Sqrt(dx * dx + dy * dy) * ContentScale;
 
           if (dist <= best)
           {
@@ -316,6 +318,17 @@ namespace LevelUp.UI
         }
       }
       return found;
+    }
+
+    /// <summary>Échelle de repli appliquée au contenu de la table (1 = taille normale).</summary>
+    private float ContentScale => _content != null ? Mathf.Max(0.1f, _content.localScale.x) : 1f;
+
+    /// <summary>Rect d'une combinaison posée (harnais de test des gestes).</summary>
+    public RectTransform? GetMeldRect(int ownerIndex, int meldIndex)
+    {
+      if (!_playerMeldGroups.TryGetValue(ownerIndex, out List<MeldGroupView>? groups)) return null;
+      if (meldIndex < 0 || meldIndex >= groups.Count) return null;
+      return (RectTransform)groups[meldIndex].transform;
     }
 
     private static bool IsInsidePaddedRect(RectTransform rt, Vector2 screenPos, float padding)

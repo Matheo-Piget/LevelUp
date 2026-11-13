@@ -232,8 +232,10 @@ namespace LevelUp.UI
             _selectRing.enabled = false;
 
             _checkBadge = UISkin.Rect(root, "CheckBadge", UISkin.Accent, 11f);
-            UISkin.Place(_checkBadge.rectTransform, new Vector2(1f, 1f), new Vector2(1f, 1f),
-                new Vector2(-8f, -8f), new Vector2(22f, 22f));
+            // En haut au centre, à cheval sur le bord : dans l'éventail, le coin
+            // haut-droit est recouvert par la carte voisine (la coche disparaissait).
+            UISkin.Place(_checkBadge.rectTransform, new Vector2(0.5f, 1f), new Vector2(0.5f, 0.5f),
+                new Vector2(0f, 2f), new Vector2(22f, 22f));
             Image check = UISkin.IconImage(_checkBadge.transform, "Check", UIIcon.Check, 14f, UISkin.OnAccent);
             UISkin.Place(check.rectTransform, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), Vector2.zero,
                 new Vector2(14f, 14f));

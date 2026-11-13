@@ -46,6 +46,7 @@ namespace LevelUp.UI
 
         // Étapes
         private readonly List<StepPill> _steps = new();
+        private Image? _skipOutline;
 
         // Contrat
         private TextMeshProUGUI? _contractTitle;
@@ -316,6 +317,10 @@ namespace LevelUp.UI
                 () => { _pauseMenu?.Show(); _pauseMenu?.ShowOptions(); });
             _pauseButton = IconButton(right.transform, "BtnPause", UIIcon.Pause, 20f, "Pause",
                 () => _pauseMenu?.Toggle());
+            // Zones tactiles agrandies sans changer le visuel (48 unités = moins
+            // de 4 mm sur téléphone) ; côté voisin : la moitié de l'écart seulement.
+            ((Image)_settingsButton.targetGraphic).raycastPadding = new Vector4(-20f, -20f, -5f, -16f);
+            ((Image)_pauseButton.targetGraphic).raycastPadding = new Vector4(-5f, -20f, -20f, -16f);
 
             SetLevel(1);
         }
@@ -504,8 +509,15 @@ namespace LevelUp.UI
             Image discardStep = _steps[3].Bg;
             discardStep.raycastTarget = true;
             Button skip = discardStep.gameObject.AddComponent<Button>();
-            skip.transition = Selectable.Transition.None;
+            skip.targetGraphic = discardStep;
             skip.onClick.AddListener(() => _input?.SkipToDiscard());
+            // Zone tactile agrandie (la pastille fait ~40 unités de haut).
+            discardStep.raycastPadding = new Vector4(-4f, -22f, -16f, -22f);
+            // Liseré visible quand l'étape est touchable : c'est un vrai bouton.
+            _skipOutline = UISkin.Outline(discardStep.rectTransform, 20f, 1.5f,
+                UISkin.WithAlpha(UISkin.AccentLight, 0.55f), "SkipOutline");
+            _skipOutline.gameObject.AddComponent<LayoutElement>().ignoreLayout = true;
+            _skipOutline.enabled = false;
 
             // Consigne de l'étape en cours, juste au-dessus des étapes.
             _phaseHint = UISkin.Text(root, "PhaseHint", "", 15f, UISkin.TextMuted, TextWeight.Medium,
@@ -530,7 +542,7 @@ namespace LevelUp.UI
 
             if (!_localTurn)
             {
-                _phaseHint.text = $"Tour de {tm.CurrentPlayer.Name}…  <color=#7E7A73>tu peux ranger ta main</color>";
+                _phaseHint.text = $"Tour de {tm.CurrentPlayer.Name}…  <color=#8F8A82>tu peux ranger ta main</color>";
                 return;
             }
 
@@ -560,7 +572,13 @@ namespace LevelUp.UI
             bool canSkip = _localTurn && (_phase == TurnPhase.LayDown || _phase == TurnPhase.AddToMelds);
             Button? b = _steps[3].Bg.GetComponent<Button>();
             if (b != null) b.interactable = canSkip;
-            if (canSkip) _steps[3].Label.color = UISkin.TextColor;
+            if (_skipOutline != null) _skipOutline.enabled = canSkip;
+            _steps[3].Label.text = canSkip ? "Défausser  ›" : "Défausser";
+            if (canSkip)
+            {
+                _steps[3].Label.color = UISkin.TextColor;
+                _steps[3].Bg.color = UISkin.Glass;
+            }
         }
 
         private void UpdateTurnContext(int playerIndex, TurnPhase phase)
@@ -780,8 +798,10 @@ namespace LevelUp.UI
             RectTransform? status = Find(hud, "StatusText");
             if (status == null) return;
             status.SetParent(root, false);
-            UISkin.Place(status, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), new Vector2(0f, 60f),
-                new Vector2(520f, 64f));
+            // En haut au centre, dans la hauteur de la top bar : au milieu de
+            // l'écran, le toast masquait les combinaisons qu'il annonçait.
+            UISkin.Place(status, new Vector2(0.5f, 1f), new Vector2(0.5f, 1f), new Vector2(0f, -16f),
+                new Vector2(520f, 48f));
             status.SetAsLastSibling();
 
             TextMeshProUGUI? text = status.GetComponent<TextMeshProUGUI>();
@@ -796,8 +816,8 @@ namespace LevelUp.UI
             RectTransform prt = (RectTransform)panel.transform;
             prt.anchorMin = Vector2.zero;
             prt.anchorMax = Vector2.one;
-            prt.offsetMin = new Vector2(-32f, -18f);
-            prt.offsetMax = new Vector2(32f, 18f);
+            prt.offsetMin = new Vector2(-28f, -10f);
+            prt.offsetMax = new Vector2(28f, 10f);
             Image pimg = panel.GetComponent<Image>();
             UISkin.SetRounded(pimg, 24f);
             pimg.color = UISkin.WithAlpha(UISkin.Surface, 0.94f);
@@ -808,8 +828,8 @@ namespace LevelUp.UI
                 TextAlignmentOptions.Center);
             UISkin.Stretch(front.rectTransform);
             front.enableAutoSizing = true;
-            front.fontSizeMin = 18f;
-            front.fontSizeMax = 30f;
+            front.fontSizeMin = 16f;
+            front.fontSizeMax = 24f;
             status.gameObject.AddComponent<TextMirror>().Bind(text, front);
         }
 

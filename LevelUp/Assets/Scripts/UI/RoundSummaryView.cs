@@ -120,7 +120,9 @@ namespace LevelUp.UI
 
         private void Update()
         {
-            if (!_visible || !_canContinue) return;
+            // Suite automatique en ligne seulement (l'hôte ne doit pas bloquer la
+            // table) ; en solo, le joueur lit le récap aussi longtemps qu'il veut.
+            if (!_visible || !_canContinue || !GameSession.IsOnline) return;
             _remaining -= Time.deltaTime;
             int second = Mathf.CeilToInt(Mathf.Max(0f, _remaining));
             if (second != _shownSecond && _waitingLabel != null)

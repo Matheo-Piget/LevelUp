@@ -212,9 +212,13 @@ namespace LevelUp.UI
             {
                 _label.text = $"NIVEAU {current.CurrentLevel}  <size=15><color=#A7A198>{requirementText}</color></size>";
                 _label.color = Constants.TextAccent;
+                // Consigne neutre (aucune information de jeu) : comment poser, et
+                // comment finir son tour sans poser.
                 _hint.text = selectedCount == 0
-                    ? "Sélectionne les cartes de ton contrat pour le poser"
-                    : $"{selectedCount} carte{(selectedCount > 1 ? "s" : "")} sélectionnée{(selectedCount > 1 ? "s" : "")}";
+                    ? "Sélectionne ton contrat pour le poser, ou glisse une carte sur ta défausse"
+                    : selectedCount == 1
+                        ? "1 carte sélectionnée · touche ta défausse pour la jeter"
+                        : $"{selectedCount} cartes sélectionnées";
                 _hint.color = Constants.TextSecondary;
                 SetBarColor(Constants.TextSecondary);
                 SetLayDownButton(selectedCount > 0);
