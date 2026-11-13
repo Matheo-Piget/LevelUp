@@ -69,3 +69,7 @@ LevelUp/ExportedObj/
 *.plastic
 
 # Les .meta DOIVENT etre versionnes : ils portent les GUID qui relient scene, prefabs et scripts.
+
+# Clés de signature Android : jamais dans le dépôt
+*.keystore
+*.jks

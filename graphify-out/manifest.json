@@ -168,9 +168,9 @@
     "semantic_hash": ""
   },
   "LevelUp/Assets/Scripts/UI/GameOverCelebration.cs": {
-    "mtime": 1794579384.5045283,
-    "seen": 1794579831.2848449,
-    "ast_hash": "6e48791fa50a6f9bf0abd40f72b24813",
+    "mtime": 1794588491.9137988,
+    "seen": 1794589168.022077,
+    "ast_hash": "68e25d9ddadc448f5f08c592792a3a1f",
     "semantic_hash": ""
   },
   "LevelUp/Assets/Scripts/UI/GameSettings.cs": {
@@ -198,27 +198,27 @@
     "semantic_hash": ""
   },
   "LevelUp/Assets/Scripts/UI/MainMenuController.cs": {
-    "mtime": 1794580441.1399415,
-    "seen": 1794581142.4700391,
-    "ast_hash": "6a45c01bbab893accad826eb20125b50",
+    "mtime": 1794588684.7884517,
+    "seen": 1794589168.022077,
+    "ast_hash": "47962a688644e9ecc10560ce6ca2c9ef",
     "semantic_hash": ""
   },
   "LevelUp/Assets/Scripts/UI/OnlinePanel.cs": {
-    "mtime": 1794490233.6525137,
-    "seen": 1794491874.4744282,
-    "ast_hash": "fde325580b8fe30314ddc1184eaf44da",
+    "mtime": 1794588491.9588087,
+    "seen": 1794589168.022077,
+    "ast_hash": "44a26ac8f25dde2e26c69db4fed24ed4",
     "semantic_hash": ""
   },
   "LevelUp/Assets/Scripts/UI/OptionsPanel.cs": {
-    "mtime": 1794587019.121838,
-    "seen": 1794587297.5005689,
-    "ast_hash": "711285a1ab199e619eebd25d495cbaac",
+    "mtime": 1794588540.4723294,
+    "seen": 1794589168.022077,
+    "ast_hash": "9c15b3364cabf0251b1a6ef63c997578",
     "semantic_hash": ""
   },
   "LevelUp/Assets/Scripts/UI/PauseMenuController.cs": {
-    "mtime": 1794490259.951486,
-    "seen": 1794491874.4744282,
-    "ast_hash": "ae138c73246d43258f9e6de1fa729686",
+    "mtime": 1794588491.9824085,
+    "seen": 1794589168.022077,
+    "ast_hash": "cf27da301ba9d7e0da709b2b0e1b9133",
     "semantic_hash": ""
   },
   "LevelUp/Assets/Scripts/UI/SafeAreaFitter.cs": {
@@ -440,9 +440,9 @@
     "semantic_hash": ""
   },
   "LevelUp/Assets/Scripts/UI/LayDownChooser.cs": {
-    "mtime": 1794490234.521917,
-    "seen": 1794491874.4744282,
-    "ast_hash": "7424fce09bd6e2ef540a858bad60adc4",
+    "mtime": 1794588492.0013957,
+    "seen": 1794589168.022077,
+    "ast_hash": "8e53abe40e1a32524fd4a4168be79f9b",
     "semantic_hash": ""
   },
   "LevelUp/Assets/Scripts/UI/UIInputBlocker.cs": {
@@ -494,27 +494,27 @@
     "semantic_hash": ""
   },
   "LevelUp/Assets/Scripts/UI/MatchSetupPanel.cs": {
-    "mtime": 1794579933.0149753,
-    "seen": 1794580090.881605,
-    "ast_hash": "622563d395db01c0880ae49c550b4d6d",
+    "mtime": 1794588540.5220559,
+    "seen": 1794589168.022077,
+    "ast_hash": "26eec55cf3c8df8923c7f8d57e51b402",
     "semantic_hash": ""
   },
   "LevelUp/Assets/Scripts/UI/ProfileDialog.cs": {
-    "mtime": 1794585922.9740915,
-    "seen": 1794586480.0781944,
-    "ast_hash": "b18fccd5213267bcc8ae3ed7f8e31eff",
+    "mtime": 1794588491.9368515,
+    "seen": 1794589168.022077,
+    "ast_hash": "fdbcc280a70a0d54a775c4fe60931fcc",
     "semantic_hash": ""
   },
   "LevelUp/Assets/Scripts/UI/RoundSummaryView.cs": {
-    "mtime": 1794580454.786908,
-    "seen": 1794581142.4700391,
-    "ast_hash": "f2e2e50636a07ac41ffb86a5818a0d42",
+    "mtime": 1794588492.0498383,
+    "seen": 1794589168.022077,
+    "ast_hash": "ead91df826f18d7e4b4cba02391dbe8e",
     "semantic_hash": ""
   },
   "LevelUp/Assets/Scripts/UI/TargetChooser.cs": {
-    "mtime": 1794490242.6868577,
-    "seen": 1794491874.4744282,
-    "ast_hash": "0347e3c71eb2b51d274e0584546082f3",
+    "mtime": 1794588492.028915,
+    "seen": 1794589168.022077,
+    "ast_hash": "fa457c4bb95ad21618a37922f8fa70a2",
     "semantic_hash": ""
   },
   "LevelUp/Assets/Scripts/UI/TurnTimer.cs": {
@@ -596,9 +596,9 @@
     "semantic_hash": ""
   },
   "LevelUp/Assets/Scripts/UI/RulesPanel.cs": {
-    "mtime": 1794587043.4866016,
-    "seen": 1794587297.5005689,
-    "ast_hash": "6c74c342093861b16d5d29ee445dd03d",
+    "mtime": 1794588491.842214,
+    "seen": 1794589168.022077,
+    "ast_hash": "46150131ba6acd0bfee96aa1c5166dc4",
     "semantic_hash": ""
   },
   "LevelUp/Assets/Scripts/UI/UIBackStack.cs": {
@@ -614,9 +614,9 @@
     "semantic_hash": ""
   },
   "LevelUp/Assets/Scripts/UI/ConfirmDialog.cs": {
-    "mtime": 1794493618.449813,
-    "seen": 1794494506.7642496,
-    "ast_hash": "d1115d31f1efa5d50f2b9faa4aeff53d",
+    "mtime": 1794588491.8910663,
+    "seen": 1794589168.022077,
+    "ast_hash": "e75f7c74fde64ba21b883c04221ed1b4",
     "semantic_hash": ""
   },
   "LevelUp/Assets/Scripts/DevInputTest.cs": {
@@ -674,9 +674,9 @@
     "semantic_hash": ""
   },
   "LevelUp/Assets/Scripts/UI/DailyPanel.cs": {
-    "mtime": 1794587043.5089674,
-    "seen": 1794587297.5005689,
-    "ast_hash": "30addd20476ae62ca38e9df2fc636c1e",
+    "mtime": 1794588491.8682039,
+    "seen": 1794589168.022077,
+    "ast_hash": "185385a260eef26637b4e4d8ac83309e",
     "semantic_hash": ""
   },
   "LevelUp/Assets/Tests/EditMode/PersonaTests.cs": {
@@ -692,9 +692,9 @@
     "semantic_hash": ""
   },
   "LevelUp/Assets/Scripts/TutorialDirector.cs": {
-    "mtime": 1794585923.0214274,
-    "seen": 1794586480.0781944,
-    "ast_hash": "e06e554e934aa37c57137ea8217a6d79",
+    "mtime": 1794588565.9198453,
+    "seen": 1794589168.022077,
+    "ast_hash": "456b48fcc2de22716397d7bc2015cf3b",
     "semantic_hash": ""
   },
   "LevelUp/Assets/Scripts/Core/SocialProtocol.cs": {
@@ -710,9 +710,9 @@
     "semantic_hash": ""
   },
   "LevelUp/Assets/Scripts/UI/EmoteView.cs": {
-    "mtime": 1794579408.7148256,
-    "seen": 1794579831.2848449,
-    "ast_hash": "0198aa4913610352798500847fd51763",
+    "mtime": 1794588565.9443789,
+    "seen": 1794589168.022077,
+    "ast_hash": "5d3d5f24779c212319774e775a2199c6",
     "semantic_hash": ""
   },
   "LevelUp/Assets/Tests/EditMode/SocialProtocolTests.cs": {
@@ -728,15 +728,15 @@
     "semantic_hash": ""
   },
   "LevelUp/Assets/Scripts/GameBootstrapper.Replay.cs": {
-    "mtime": 1794580155.1267953,
-    "seen": 1794580403.9874225,
-    "ast_hash": "cac542143bcab106a1b0e2c291748733",
+    "mtime": 1794588565.945911,
+    "seen": 1794589168.022077,
+    "ast_hash": "8d8f7d0000155bb3b42307a823dedb94",
     "semantic_hash": ""
   },
   "LevelUp/Assets/Scripts/ChallengeDirector.cs": {
-    "mtime": 1794580516.0828948,
-    "seen": 1794581142.4700391,
-    "ast_hash": "4d7d9ceb19cf7882892b71258e7f4453",
+    "mtime": 1794588565.9211526,
+    "seen": 1794589168.022077,
+    "ast_hash": "8d53f4fc63c38675b0cee6a329c64888",
     "semantic_hash": ""
   },
   "LevelUp/Assets/Scripts/Core/ChallengeGenerator.cs": {
@@ -809,6 +809,12 @@
     "mtime": 1794587284.122152,
     "seen": 1794587297.5005689,
     "ast_hash": "ca08059126792f9397ece0c5c6e61b1b",
+    "semantic_hash": ""
+  },
+  "LevelUp/Assets/Scripts/UI/PortraitFit.cs": {
+    "mtime": 1794588520.3819811,
+    "seen": 1794589168.022077,
+    "ast_hash": "a215bb6169482be69eadb54d99bf0be4",
     "semantic_hash": ""
   }
 }
