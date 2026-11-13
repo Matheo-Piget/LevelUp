@@ -95,6 +95,33 @@ namespace LevelUp.UI
       }
 
       SetActivePlayer(0);
+      if (_portrait) SetPortrait(true);
+    }
+
+    private bool _portrait;
+
+    /// <summary>Portrait : les pastilles passent en grille de deux colonnes (elles ne tiennent pas en ligne).</summary>
+    public void SetPortrait(bool portrait)
+    {
+      _portrait = portrait;
+      if (_row == null) return;
+      HorizontalLayoutGroup? h = _row.GetComponent<HorizontalLayoutGroup>();
+      GridLayoutGroup? g = _row.GetComponent<GridLayoutGroup>();
+      if (portrait)
+      {
+        if (h != null) DestroyImmediate(h);
+        if (g == null) g = _row.gameObject.AddComponent<GridLayoutGroup>();
+        g.cellSize = new Vector2(358f, 64f);
+        g.spacing = new Vector2(12f, 10f);
+        g.constraint = GridLayoutGroup.Constraint.FixedColumnCount;
+        g.constraintCount = 2;
+        g.childAlignment = TextAnchor.MiddleCenter;
+      }
+      else
+      {
+        if (g != null) DestroyImmediate(g);
+        if (h == null) UISkin.HRow(_row.gameObject, 20f, null, TextAnchor.MiddleCenter);
+      }
     }
 
     private PlayerPill CreatePill(RectTransform parent, int index, string name)

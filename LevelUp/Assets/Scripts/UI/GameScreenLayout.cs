@@ -142,6 +142,15 @@ namespace LevelUp.UI
         private void Update()
         {
             // Invitation sur la pioche pendant l'étape « Piocher » du joueur local.
+            // Rotation de l'appareil / fenêtre redimensionnée : on remet l'écran en page.
+            if (Screen.width != _lastWidth || Screen.height != _lastHeight)
+            {
+                _lastWidth = Screen.width;
+                _lastHeight = Screen.height;
+                if (_canvas != null) ConfigureScaler(_canvas);
+                ApplyOrientation();
+            }
+
             if (_deckRing == null) return;
             bool show = _localTurn && _phase == TurnPhase.Draw && GameSettings.HintSteps
                         && _gameManager != null && _gameManager.State == GameState.PlayerTurn;
@@ -198,6 +207,13 @@ namespace LevelUp.UI
             // et la largeur s'étend ; plus étroit (tablettes) : on cale la largeur.
             float aspect = Screen.height > 0 ? (float)Screen.width / Screen.height : 16f / 9f;
             scaler.matchWidthOrHeight = aspect >= 16f / 9f ? 1f : 0f;
+
+            // Portrait : une maquette étroite (780 unités de large), calée sur la largeur.
+            if (IsPortrait)
+            {
+                scaler.referenceResolution = new Vector2(PortraitWidth, PortraitWidth * 2.1f);
+                scaler.matchWidthOrHeight = 0f;
+            }
         }
 
         // ═══════════════════════════════════════════════════════════
@@ -371,7 +387,7 @@ namespace LevelUp.UI
             if (_rulesPill == null || _rulesText == null) return;
             string tags = MatchRulesText.ShortTags(GameSession.Rules);
             _rulesText.text = tags;
-            _rulesPill.SetActive(tags.Length > 0);
+            _rulesPill.SetActive(tags.Length > 0 && !IsPortrait);
             if (tags.Length == 0) return;
 
             // Largeur bornée : la pastille ne doit jamais toucher la barre de niveau.
@@ -465,8 +481,137 @@ namespace LevelUp.UI
         /// la table des combinaisons récupère la largeur. Sinon : la maquette
         /// d'origine (pioche + défausses en ligne sur 824 unités).
         /// </summary>
+        private int _lastWidth, _lastHeight;
+        private const float PortraitWidth = 780f;
+
+        /// <summary>Vrai quand l'écran est tenu en hauteur.</summary>
+        public static bool IsPortrait => Screen.height > Screen.width;
+
+        /// <summary>
+        /// Paysage : la maquette d'origine. Portrait : pastilles joueurs en grille,
+        /// pioche et défausses sur une rangée en haut du tapis, table en dessous sur
+        /// toute la largeur, puis étapes, contrat + tri, et la main en bas.
+        /// </summary>
+        private void ApplyOrientation()
+        {
+            if (_root == null) return;
+            bool p = IsPortrait;
+            float side = p ? 16f : Margin;
+
+            RectTransform? felt = Find(_root, "Felt");
+            if (felt != null)
+            {
+                felt.offsetMin = new Vector2(side, p ? PortraitFeltBottom : FeltBottom);
+                felt.offsetMax = new Vector2(-side, -(p ? PortraitFeltTop : FeltTop));
+            }
+
+            RectTransform? players = Find(_root, "LevelProgress");
+            if (players != null)
+            {
+                players.offsetMin = new Vector2(side, -(PlayersTop + (p ? 140f : 64f)));
+                players.offsetMax = new Vector2(-side, -PlayersTop);
+                LevelProgressView? view = players.GetComponentInChildren<LevelProgressView>(true);
+                if (view != null) view.SetPortrait(p);
+            }
+
+            RectTransform? hand = Find(_root, "PlayerHand");
+            HandView? handView = hand != null ? hand.GetComponent<HandView>() : null;
+            if (handView != null) handView.SetLayout(p ? 62f : 84f, p ? 600f : 980f);
+
+            RectTransform? stepper = Find(_root, "PhaseStepper");
+            if (stepper != null) stepper.anchoredPosition = new Vector2(0f, p ? 408f : StepperBottom);
+            if (_phaseHint != null)
+            {
+                _phaseHint.rectTransform.anchoredPosition = new Vector2(0f, (p ? 408f : StepperBottom) + 60f);
+                _phaseHint.rectTransform.sizeDelta = new Vector2(p ? 740f : 1100f, p ? 44f : 24f);
+                _phaseHint.enableWordWrapping = p;
+            }
+
+            // Contrat et tri : aux coins en paysage, au-dessus de la main en portrait.
+            RectTransform? contract = Find(_root, "ContractCard");
+            if (contract != null) contract.anchoredPosition = p ? new Vector2(20f, 282f) : new Vector2(Margin, Margin);
+            RectTransform? sort = Find(_root, "SortControl");
+            if (sort != null) sort.anchoredPosition = p ? new Vector2(-20f, 282f) : new Vector2(-Margin, Margin);
+
+            // Top bar : en portrait, le niveau (déjà sur la carte contrat) et les règles cèdent la place.
+            RectTransform? level = Find(_root, "Level");
+            if (level != null) level.gameObject.SetActive(!p);
+            RefreshRulesPill();
+
+            if (_canvas != null)
+            {
+                RectTransform? selection = Find(_canvas.transform, "SelectionStatus");
+                if (selection != null)
+                {
+                    selection.anchoredPosition = new Vector2(0f, p ? 522f : 346f);
+                    selection.sizeDelta = new Vector2(p ? 620f : 640f, 72f);
+                }
+            }
+
+            ApplyZones();
+        }
+
+        private const float PortraitFeltTop = 256f;
+        private const float PortraitFeltBottom = 500f;
+
         private void ApplyZones()
         {
+            // Ancrage vertical de la pioche et des défausses : haut du tapis en
+            // portrait, milieu en paysage.
+            bool portrait = IsPortrait;
+            Vector2 anchor = new(0f, portrait ? 1f : 0.5f);
+            if (_deckArea != null) { _deckArea.anchorMin = anchor; _deckArea.anchorMax = anchor; }
+            if (_deckCaption != null)
+            {
+                _deckCaption.rectTransform.anchorMin = anchor;
+                _deckCaption.rectTransform.anchorMax = anchor;
+            }
+            if (_pilesArea != null)
+            {
+                _pilesArea.anchorMin = anchor;
+                _pilesArea.anchorMax = anchor;
+                _pilesArea.pivot = anchor;
+            }
+
+            if (portrait)
+            {
+                if (_deckArea != null)
+                {
+                    _deckArea.anchoredPosition = new Vector2(72f, -100f);
+                    _deckArea.localScale = Vector3.one * 0.8f;
+                }
+                if (_deckCaption != null)
+                {
+                    _deckCaption.rectTransform.anchoredPosition = new Vector2(72f, -186f);
+                    _deckCaption.fontSize = 15f;
+                }
+                if (_pilesArea != null)
+                {
+                    _pilesArea.anchoredPosition = new Vector2(150f, -8f);
+                    _pilesArea.sizeDelta = new Vector2(560f, 190f);
+                    DiscardPileView? view = _pilesArea.GetComponent<DiscardPileView>();
+                    if (view != null)
+                    {
+                        view.Compact = true;
+                        view.CompactRow = true;
+                    }
+                }
+                if (_tableArea != null)
+                {
+                    _tableArea.offsetMin = new Vector2(30f, PortraitFeltBottom + 20f);
+                    _tableArea.offsetMax = new Vector2(-30f, -(PortraitFeltTop + 210f));
+                    TableView? tv = _tableArea.GetComponentInChildren<TableView>(true);
+                    if (tv != null) tv.Relayout();
+                }
+                return;
+            }
+
+            if (_pilesArea != null)
+            {
+                DiscardPileView? row = _pilesArea.GetComponent<DiscardPileView>();
+                if (row != null) row.CompactRow = false;
+            }
+
             bool compact = GameSettings.UiScale == 1;
             float leftZone = compact ? 392f : FeltLeftZone;
 

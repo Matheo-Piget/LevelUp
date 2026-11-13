@@ -117,6 +117,20 @@ namespace LevelUp.UI
 
     private const float CompactScale = 0.7f;
 
+    private bool _compactRow;
+
+    /// <summary>Disposition compacte sur UNE rangée (portrait : la hauteur est rendue à la table).</summary>
+    public bool CompactRow
+    {
+      get => _compactRow;
+      set
+      {
+        if (_compactRow == value) return;
+        _compactRow = value;
+        LayoutSlots();
+      }
+    }
+
     private void LayoutSlots()
     {
       int n = _pileSlots.Count;
@@ -136,6 +150,18 @@ namespace LevelUp.UI
       }
 
       const float colStep = 106f, rowStep = 150f;
+      if (_compactRow)
+      {
+        for (int i = 0; i < n; i++)
+        {
+          RectTransform rt = (RectTransform)_pileSlots[i].Root.transform;
+          rt.anchoredPosition = new Vector2((i - (n - 1) * 0.5f) * 112f, 10f);
+          rt.localScale = Vector3.one * CompactScale;
+          SetLabelStyle(_pileSlots[i], 21f, new Vector2(150f, 28f), -94f);
+        }
+        return;
+      }
+
       int rows = (n + 1) / 2;
       for (int i = 0; i < n; i++)
       {
