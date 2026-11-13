@@ -75,7 +75,12 @@ namespace LevelUp.Core
                     : null;
             }
 
-            foreach (PlayerModel p in gameManager.Players)
+            // Hors ligne : le siège affiché sur cet appareil s'il est humain
+            // (pass-and-play : il change à chaque passage), sinon le premier humain.
+            var all = gameManager.Players;
+            if (LocalPlayerIndex >= 0 && LocalPlayerIndex < all.Count && !all[LocalPlayerIndex].IsAI)
+                return all[LocalPlayerIndex];
+            foreach (PlayerModel p in all)
             {
                 if (!p.IsAI) return p;
             }

@@ -84,6 +84,14 @@ namespace LevelUp.UI
             UIControls.SectionLabel(left.transform, "LA TABLE", ColumnWidth);
             Choice(left.transform, "Joueurs", new[] { "2", "3", "4" },
                 () => GameSettings.PlayerCount - 2, v => GameSettings.PlayerCount = v + 2);
+            _humansRow = Choice(left.transform, "Humains", new[] { "1", "2", "3", "4" },
+                () => Mathf.Min(GameSettings.HumanCount, GameSettings.PlayerCount) - 1,
+                v =>
+                {
+                    GameSettings.HumanCount = Mathf.Min(v + 1, GameSettings.PlayerCount);
+                    foreach (Action refresh in _refreshers) refresh();
+                    RefreshCaptions();
+                });
             Choice(left.transform, "Bots", new[] { "FACILE", "NORMAL", "EXPERT" },
                 () => GameSettings.Difficulty, v => GameSettings.Difficulty = v);
             Choice(left.transform, "Minuteur", new[] { "AUCUN", "30 S", "60 S" },
@@ -158,11 +166,15 @@ namespace LevelUp.UI
             _veil.SetActive(false);
         }
 
-        private void Choice(Transform parent, string label, string[] options, Func<int> get, Action<int> set)
+        private GameObject? _humansRow;
+        private bool _soloSetup = true;
+
+        private GameObject Choice(Transform parent, string label, string[] options, Func<int> get, Action<int> set)
         {
             GameObject row = UIControls.Row(parent, label + "Row", ColumnWidth, 52f);
             UIControls.RowLabel(row.transform, label, LabelWidth);
             _refreshers.Add(UIControls.Segmented(row.transform, "Segmented", options, ControlWidth, get, set));
+            return row;
         }
 
         /// <summary>Pastille à bascule : pleine (accent) quand la variante est active.</summary>
@@ -232,7 +244,9 @@ namespace LevelUp.UI
         {
             if (_playersCaption != null)
             {
-                _playersCaption.text = _playersCaptionBase
+                _playersCaption.text = (_soloSetup && GameSettings.HumanCount > 1
+                        ? "Plusieurs joueurs sur cet appareil : on se le passe à chaque tour."
+                        : _playersCaptionBase)
                     + $"\nPartie en {GameSettings.LevelsToWin} niveaux : environ {EstimatedMinutes(GameSettings.LevelsToWin)} min.";
             }
             if (_specialCaption != null)
@@ -283,6 +297,8 @@ namespace LevelUp.UI
             if (_subtitle != null) _subtitle.text = subtitle;
             if (_primaryLabel != null) _primaryLabel.text = primary;
             _playersCaptionBase = playersCaption;
+            _soloSetup = !applyOnClose;
+            if (_humansRow != null) _humansRow.SetActive(_soloSetup);
             foreach (Action refresh in _refreshers) refresh();
             RefreshCaptions();
 

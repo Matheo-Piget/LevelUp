@@ -46,6 +46,12 @@ namespace LevelUp.Core
                 i = Array.IndexOf(args, "-tutorialtest");
                 tutorial = true;
             }
+            if (i < 0)
+            {
+                i = Array.IndexOf(args, "-passtest");
+                tutorial = false;
+                _passMode = i >= 0;
+            }
             if (i < 0 || i + 1 >= args.Length) return;
             _tutorialMode = tutorial;
 
@@ -61,6 +67,8 @@ namespace LevelUp.Core
         {
             Directory.CreateDirectory(_dir);
             int savedPlayers = GameSettings.PlayerCount;
+            int savedHumans = GameSettings.HumanCount;
+            GameSettings.HumanCount = _passMode ? 2 : 1;
             int savedSpeed = GameSettings.BotSpeed;
             int savedSpecial = GameSettings.SpecialCards;
             int savedTimer = GameSettings.TurnTimer;
@@ -103,7 +111,7 @@ namespace LevelUp.Core
             }
 
             PointerInput.Override = () => _pointer;
-            IEnumerator scenarios = _tutorialMode ? RunTutorial() : RunScenarios();
+            IEnumerator scenarios = _tutorialMode ? RunTutorial() : _passMode ? RunPassAndPlay() : RunScenarios();
             while (true)
             {
                 bool more;
@@ -119,6 +127,7 @@ namespace LevelUp.Core
             PointerInput.Override = null;
 
             GameSettings.PlayerCount = savedPlayers;
+            GameSettings.HumanCount = savedHumans;
             GameSettings.BotSpeed = savedSpeed;
             GameSettings.SpecialCards = savedSpecial;
             GameSettings.TurnTimer = savedTimer;
@@ -273,6 +282,56 @@ namespace LevelUp.Core
                 }
             }
             if (!laid) Line("IGNORE", "pose au relâchement sur la table", "contrat jamais réalisable en 30 tours");
+        }
+
+        private static bool _passMode;
+
+        /// <summary>Deux humains sur l'appareil : la main reste cachée jusqu'au passage.</summary>
+        private IEnumerator RunPassAndPlay()
+        {
+            if (_gm?.TurnManager == null || _hand == null || _piles == null || _deck == null)
+            {
+                Line("ECHEC", "pass-and-play", "objets de jeu introuvables");
+                yield break;
+            }
+            TurnManager tm = _gm.TurnManager;
+            bool twoHumans = _gm.Players.Count == 2 && !_gm.Players[0].IsAI && !_gm.Players[1].IsAI;
+            Check("pass-and-play : deux humains, aucun bot", twoHumans, $"{_gm.Players.Count} joueurs");
+
+            Check("pass-and-play : donne cachée derrière l'écran de passage",
+                FindButton("BtnPassReady") != null && _hand.CardCount == 0, $"cartes visibles : {_hand.CardCount}");
+            yield return Capture("p1_passage");
+
+            Click("BtnPassReady");
+            yield return new WaitForSecondsRealtime(2.2f);
+            Check("pass-and-play : main du joueur 1 affichée",
+                FindButton("BtnPassReady") == null && _hand.CardCount == _gm.Players[0].Hand.Count
+                && GameSession.LocalPlayerIndex == 0, $"cartes : {_hand.CardCount}");
+
+            yield return Tap(Center(_deck));
+            yield return new WaitForSecondsRealtime(0.8f);
+            yield return Drag(CardPos(0), PilePos(0));
+            yield return new WaitForSecondsRealtime(0.6f);
+            Check("pass-and-play : tour passé, main cachée, écran de passage",
+                tm.CurrentPlayerIndex == 1 && FindButton("BtnPassReady") != null && _hand.CardCount == 0,
+                $"joueur courant {tm.CurrentPlayerIndex}, cartes visibles {_hand.CardCount}");
+
+            Click("BtnPassReady");
+            yield return new WaitForSecondsRealtime(2.2f);
+            bool sameCards = _hand.CardCount == _gm.Players[1].Hand.Count;
+            for (int i = 0; sameCards && i < _hand.CardCount; i++)
+            {
+                if (!_gm.Players[1].TryGetHandCard(_hand.GetCardViewAt(i)!.CardModel.Id, out _)) sameCards = false;
+            }
+            Check("pass-and-play : main du joueur 2 affichée", sameCards && GameSession.LocalPlayerIndex == 1,
+                $"siège affiché {GameSession.LocalPlayerIndex}, cartes {_hand.CardCount}");
+            yield return Capture("p2_joueur2");
+
+            int before = _gm.Players[1].Hand.Count;
+            yield return Tap(Center(_deck));
+            yield return new WaitForSecondsRealtime(0.8f);
+            Check("pass-and-play : le joueur 2 joue son tour", _gm.Players[1].Hand.Count == before + 1,
+                $"main {before} -> {_gm.Players[1].Hand.Count}");
         }
 
         private static bool _tutorialMode;

@@ -183,6 +183,7 @@ namespace LevelUp.Core
         {
             Time.timeScale = 1f;
             _tutorial?.End();
+            _passAndPlay?.End();
             _pauseMenu?.SetPauseButtonVisible(false);
             _emotes?.SetAvailable(false);
             _gameOverCelebration?.SetReplayLabel("REJOUER");
@@ -225,6 +226,26 @@ namespace LevelUp.Core
         }
 
         private EmoteView? _emotes;
+        private PassAndPlayController? _passAndPlay;
+
+        /// <summary>Active l'écran de passage si la partie lancée compte plusieurs humains sur cet appareil.</summary>
+        private void BeginPassAndPlay()
+        {
+            if (_passAndPlay == null && _mainCanvas != null && _gameManager != null)
+            {
+                _passAndPlay = gameObject.AddComponent<PassAndPlayController>();
+                _passAndPlay.Setup(_mainCanvas, _gameManager, _handView);
+                _passAndPlay.SeatShown += seat =>
+                {
+                    if (_gameManager == null) return;
+                    List<string> names = new();
+                    foreach (PlayerModel p in _gameManager.Players) names.Add(p.Name);
+                    _tableView?.SetPlayerNames(names, seat);
+                    _screenLayout?.RefreshLocal();
+                };
+            }
+            _passAndPlay?.Begin();
+        }
 
         private void EnsureEmotes()
         {
@@ -289,7 +310,9 @@ namespace LevelUp.Core
         /// <summary>Nouvelle partie solo avec les réglages de "Nouvelle partie".</summary>
         private void StartNewSoloGame()
         {
-            _aiPlayerCount = Mathf.Max(1, GameSettings.PlayerCount - _humanPlayerCount);
+            // Plusieurs humains sur l'appareil (pass-and-play) : les places restantes vont aux bots.
+            _humanPlayerCount = Mathf.Clamp(GameSettings.HumanCount, 1, GameSettings.PlayerCount);
+            _aiPlayerCount = Mathf.Max(_humanPlayerCount > 1 ? 0 : 1, GameSettings.PlayerCount - _humanPlayerCount);
             StartSoloGame(BuildSoloSetups(), System.Environment.TickCount, GameSettings.BuildMatchRules(),
                 GameSettings.Difficulty, mode: 0, dailyKey: 0);
         }
@@ -352,6 +375,7 @@ namespace LevelUp.Core
                 InitializePauseAndGameOver();
                 _pauseMenu?.SetPauseButtonVisible(true);
                 _gameStarted = true;
+                _passAndPlay?.End();
                 if (_handView != null) StartCoroutine(FirstDealCascade());
                 _tutorial.Begin();
             }
@@ -386,6 +410,7 @@ namespace LevelUp.Core
             _pauseMenu?.SetPauseButtonVisible(true);
             _gameStarted = true;
 
+            BeginPassAndPlay();
             if (_handView != null) StartCoroutine(FirstDealCascade());
         }
 
@@ -427,6 +452,7 @@ namespace LevelUp.Core
                 _pauseMenu?.SetPauseButtonVisible(true);
                 _gameStarted = true;
                 SyncViewsFromModel();
+                BeginPassAndPlay();
 
                 CreateAIPlayers(saved.BotDifficulty, saved.Mode == 1 ? saved.Seed : (int?)null);
 
@@ -630,6 +656,7 @@ namespace LevelUp.Core
         {
             PlayerModel? local = GameSession.GetLocalPlayer(_gameManager);
             if (_tutorial != null && _tutorial.IsRunning) return; // le tutoriel ne compte pas
+            if (_passAndPlay != null && _passAndPlay.Active) return;
             if (local != null && local.Index == evt.WinnerIndex) PlayerProfile.RecordRoundWon();
         }
 
@@ -637,7 +664,8 @@ namespace LevelUp.Core
         {
             PlayerModel? local = GameSession.GetLocalPlayer(_gameManager);
             bool won = local != null && local.Index == evt.WinnerIndex;
-            if (local != null) PlayerProfile.RecordGame(won);
+            bool shared = _passAndPlay != null && _passAndPlay.Active; // plusieurs joueurs : pas de stats perso
+            if (local != null && !shared) PlayerProfile.RecordGame(won);
 
             if (!GameSession.IsOnline)
             {
@@ -652,6 +680,8 @@ namespace LevelUp.Core
         /// </summary>
         private IEnumerator FirstDealCascade()
         {
+            // Pass-and-play : la donne reste cachée jusqu'au passage de l'appareil.
+            if (_passAndPlay != null && _passAndPlay.HidesDeal) yield break;
             // Attendre une frame pour que tout soit initialisé
             yield return null;
 
@@ -685,6 +715,7 @@ namespace LevelUp.Core
 
         private IEnumerator DealAfterDelay(PlayerModel player)
         {
+            if (_passAndPlay != null && _passAndPlay.HidesDeal) yield break;
             yield return null; // Attendre que les cartes soient distribuées
             _inputController?.ApplyPreferredSort(player);
             _handView?.RefreshHand(player.Hand, dealAnimation: true);

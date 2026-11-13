@@ -327,6 +327,13 @@ namespace LevelUp.UI
             set { PlayerPrefs.SetInt("levelup.hint.coach", value ? 1 : 0); Notify(); }
         }
 
+        /// <summary>Humains sur cet appareil en partie locale (1 = solo ; plus = on se passe l'appareil).</summary>
+        public static int HumanCount
+        {
+            get => Mathf.Clamp(PlayerPrefs.GetInt("levelup.humans", 1), 1, 4);
+            set { PlayerPrefs.SetInt("levelup.humans", Mathf.Clamp(value, 1, 4)); Notify(); }
+        }
+
         // ─── Variantes de règles (toutes coupées par défaut : jeu classique) ───
 
         /// <summary>Tours par joueur quand la variante « limite de tours » est active.</summary>

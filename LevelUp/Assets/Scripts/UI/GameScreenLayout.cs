@@ -979,6 +979,14 @@ namespace LevelUp.UI
             if (_localTurn && _phase == TurnPhase.LayDown) RefreshPhaseHint();
         }
 
+        /// <summary>Le siège affiché a changé (pass-and-play) : niveau et contrat du nouveau joueur.</summary>
+        public void RefreshLocal()
+        {
+            RefreshLocalLevel();
+            RefreshContract();
+            RefreshPhaseHint();
+        }
+
         private void RefreshLocalLevel()
         {
             PlayerModel? local = GameSession.GetLocalPlayer(_gameManager);
