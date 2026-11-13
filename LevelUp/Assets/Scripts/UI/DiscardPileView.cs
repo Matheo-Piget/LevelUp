@@ -200,7 +200,9 @@ namespace LevelUp.UI
         if (localDraw)
         {
           // On peut ramasser n'importe quelle carte visible : invitation discrète.
+          // (sauf une carte « Passe » / « +2 » : elle ne se ramasse pas).
           ring = slot.TopCardView != null && slot.TopCardView.gameObject.activeSelf
+                 && GameCommandExecutor.CanPickFromDiscard(slot.TopCardView.CardModel)
               ? UISkin.WithAlpha(UISkin.AccentLight, 0.45f)
               : new Color(0f, 0f, 0f, 0f);
         }

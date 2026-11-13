@@ -269,13 +269,13 @@ namespace LevelUp.Core
             };
             System.Collections.Generic.List<Meld> a = new()
             {
-                new Meld(Utils.MeldType.Set, new() { b7, g7, y7 }, 0),
-                new Meld(Utils.MeldType.Flush, new(reds) { r7 }, 0)
+                new Meld(Utils.MeldType.Set, new System.Collections.Generic.List<CardModel> { b7, g7, y7 }, 0),
+                new Meld(Utils.MeldType.Flush, new System.Collections.Generic.List<CardModel>(reds) { r7 }, 0)
             };
             System.Collections.Generic.List<Meld> b = new()
             {
-                new Meld(Utils.MeldType.Set, new() { r7, b7, g7 }, 0),
-                new Meld(Utils.MeldType.Flush, new(reds) { Card(13, C(0)) }, 0)
+                new Meld(Utils.MeldType.Set, new System.Collections.Generic.List<CardModel> { r7, b7, g7 }, 0),
+                new Meld(Utils.MeldType.Flush, new System.Collections.Generic.List<CardModel>(reds) { Card(13, C(0)) }, 0)
             };
             chooser.Show(new System.Collections.Generic.List<System.Collections.Generic.List<Meld>> { a, b },
                 false, _ => { });

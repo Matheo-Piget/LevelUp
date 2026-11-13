@@ -163,7 +163,6 @@ namespace LevelUp.AI
             int round = _gameManager.RoundNumber;
             if (!StillMyTurn(round)) yield break;
 
-            EventBus.Publish(new AIThinkingEvent { PlayerIndex = _playerIndex, IsThinking = true });
 
             // Phase 1 : Piocher (sautée si le tour a déjà dépassé cette phase)
             yield return Wait(_thinkDelay);
@@ -201,7 +200,6 @@ namespace LevelUp.AI
                 DecideDiscard();
             }
 
-            EventBus.Publish(new AIThinkingEvent { PlayerIndex = _playerIndex, IsThinking = false });
             _turnRoutine = null;
         }
 

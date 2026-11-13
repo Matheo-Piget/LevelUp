@@ -205,15 +205,17 @@ namespace LevelUp.Core
         public MeldType Type { get; }
 
         /// <summary>Cartes composant la combinaison.</summary>
-        public List<CardModel> Cards { get; }
+        public IReadOnlyList<CardModel> Cards => _cards;
+
+        private readonly List<CardModel> _cards;
 
         /// <summary>Index du joueur propriétaire.</summary>
         public int OwnerIndex { get; }
 
-        public Meld(MeldType type, List<CardModel> cards, int ownerIndex)
+        public Meld(MeldType type, IReadOnlyList<CardModel> cards, int ownerIndex)
         {
             Type = type;
-            Cards = new List<CardModel>(cards);
+            _cards = new List<CardModel>(cards);
             OwnerIndex = ownerIndex;
         }
 
@@ -223,12 +225,11 @@ namespace LevelUp.Core
         /// </summary>
         public bool CanAddCard(CardModel card)
         {
-            List<CardModel> test = new(Cards) { card };
             return Type switch
             {
-                MeldType.Run   => CardExtensions.IsValidRun(test),
-                MeldType.Set   => CardExtensions.IsValidSet(test),
-                MeldType.Flush => CardExtensions.IsValidFlush(test),
+                MeldType.Run   => CardExtensions.IsValidRun(Cards, card),
+                MeldType.Set   => CardExtensions.IsValidSet(Cards, card),
+                MeldType.Flush => CardExtensions.IsValidFlush(Cards, card),
                 _              => false
             };
         }
@@ -249,10 +250,10 @@ namespace LevelUp.Core
         {
             if (!CanAddCard(card)) return false;
 
-            Cards.Add(card);
+            _cards.Add(card);
             if (Type == MeldType.Run)
             {
-                SortRunCards(Cards);
+                SortRunCards(_cards);
             }
             return true;
         }

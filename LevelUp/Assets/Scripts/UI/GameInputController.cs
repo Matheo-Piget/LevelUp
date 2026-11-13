@@ -1151,7 +1151,7 @@ namespace LevelUp.UI
             else
             {
                 _handView.SetAnimatingDraw(false);
-                _hudView?.ShowError(result.Message);
+                _hudView?.ShowError(CommandErrorText.For(result));
             }
         }
 
@@ -1176,9 +1176,7 @@ namespace LevelUp.UI
             else
             {
                 _handView.SetAnimatingDraw(false);
-                _hudView?.ShowError(result.Message == "Défausse vide"
-                    ? "Cette défausse est vide : touche la pioche"
-                    : result.Message);
+                _hudView?.ShowError(CommandErrorText.For(result));
                 if (_animController != null && pile != null)
                 {
                     _animController.AnimateShake(pile);
@@ -1274,7 +1272,7 @@ namespace LevelUp.UI
                 new LayDownLevelCommand(CurrentPlayerIndex, playerMelds));
 
             // Succès : annoncé par le HUD (LevelLaidDownEvent), pas de toast en double.
-            if (!result.Success) _hudView?.ShowError(result.Message);
+            if (!result.Success) _hudView?.ShowError(CommandErrorText.For(result));
         }
 
         private LayDownChooser? GetChooser()
@@ -1355,7 +1353,7 @@ namespace LevelUp.UI
 
             if (!result.Success)
             {
-                _hudView?.ShowError(result.Message);
+                _hudView?.ShowError(CommandErrorText.For(result));
                 if (_animController != null)
                 {
                     _animController.AnimatePulse(cardView.RectTransform);

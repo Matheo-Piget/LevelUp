@@ -62,24 +62,28 @@ namespace LevelUp.UI
                 onComplete?.Invoke();
                 return;
             }
+            FrameBudget.Ping(0.8f);
             StartCoroutine(AnimateDrawCoroutine(card, onComplete, fromWorld ?? _deckPosition!.position));
         }
 
         /// <summary>Secousse horizontale (erreur, action invalide).</summary>
         public void AnimateShake(RectTransform card, Action? onComplete = null)
         {
+            FrameBudget.Ping(0.6f);
             StartCoroutine(AnimateShakeCoroutine(card, onComplete));
         }
 
         /// <summary>Pulsation : agrandit puis revient (succès, confirmation).</summary>
         public void AnimatePulse(RectTransform target, Action? onComplete = null)
         {
+            FrameBudget.Ping(0.5f);
             StartCoroutine(AnimatePulseCoroutine(target, onComplete));
         }
 
         /// <summary>Apparition : de 0 à 1 avec rebond.</summary>
         public void AnimatePopIn(RectTransform target, Action? onComplete = null)
         {
+            FrameBudget.Ping(0.6f);
             StartCoroutine(AnimatePopInCoroutine(target, onComplete));
         }
 
@@ -87,6 +91,7 @@ namespace LevelUp.UI
         public void AnimateScreenFlash(Color? color = null, float duration = 0.3f)
         {
             if (GameSettings.ReducedMotion) return;
+            FrameBudget.Ping(duration + 0.2f);
             StartCoroutine(AnimateScreenFlashCoroutine(color ?? new Color(1f, 1f, 1f, 0.3f), duration));
         }
 
@@ -94,6 +99,7 @@ namespace LevelUp.UI
         public void SpawnParticleBurst(Vector2 position, Color color, int count = 12)
         {
             if (GameSettings.ReducedMotion) return;
+            FrameBudget.Ping(0.9f);
             StartCoroutine(ParticleBurstCoroutine(position, color, count));
         }
 

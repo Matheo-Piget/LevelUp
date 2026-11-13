@@ -83,6 +83,7 @@ namespace LevelUp.UI
             rt.localScale = Vector3.one * (fromScale / parentScale);
             rt.localRotation = Quaternion.identity;
             view.SetAlpha(1f);
+            FrameBudget.Ping(1.2f);
             StartCoroutine(FlyRoutine(view, from, to, fromScale / parentScale, toScale / parentScale));
         }
 

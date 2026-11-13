@@ -114,6 +114,7 @@ namespace LevelUp.UI
         {
             // Converge puis s'arrête : pas de réécriture de couleur à chaque frame.
             if (_glowAlpha == _targetGlowAlpha) return;
+            FrameBudget.Ping(0.2f);
             _glowAlpha = Mathf.Lerp(_glowAlpha, _targetGlowAlpha, 1f - Mathf.Exp(-15f * Time.deltaTime));
             if (Mathf.Abs(_glowAlpha - _targetGlowAlpha) < 0.003f) _glowAlpha = _targetGlowAlpha;
             if (_glow != null) _glow.color = UISkin.WithAlpha(_glowColor, _glowAlpha * 0.55f);

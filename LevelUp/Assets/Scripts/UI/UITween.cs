@@ -198,6 +198,7 @@ namespace LevelUp.UI
         private static IEnumerator ScaleCo(GameObject owner, RectTransform rt, Vector3 target,
             float duration, (int, string) key, Action? onComplete)
         {
+            FrameBudget.Ping(duration + 0.2f);
             Vector3 start = rt.localScale;
             float t = 0f;
             while (t < duration)
@@ -216,6 +217,7 @@ namespace LevelUp.UI
         private static IEnumerator FadeCo(GameObject owner, CanvasGroup cg, float target,
             float duration, (int, string) key, Action? onComplete)
         {
+            FrameBudget.Ping(duration + 0.2f);
             float start = cg.alpha;
             float t = 0f;
             while (t < duration)
@@ -234,6 +236,7 @@ namespace LevelUp.UI
         private static IEnumerator MoveCo(GameObject owner, RectTransform rt, Vector2 target,
             float duration, (int, string) key, Action? onComplete)
         {
+            FrameBudget.Ping(duration + 0.2f);
             Vector2 start = rt.anchoredPosition;
             float t = 0f;
             while (t < duration)
@@ -252,6 +255,7 @@ namespace LevelUp.UI
         private static IEnumerator ColorCo(GameObject owner, Graphic graphic, Color target,
             float duration, (int, string) key, Action? onComplete)
         {
+            FrameBudget.Ping(duration + 0.2f);
             Color start = graphic.color;
             float t = 0f;
             while (t < duration)

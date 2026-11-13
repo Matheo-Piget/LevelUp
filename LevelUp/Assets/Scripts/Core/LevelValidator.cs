@@ -25,16 +25,11 @@ namespace LevelUp.Core
 
         /// <summary>
         /// Retourne les exigences pour un niveau donné (1-8).
-        /// Priorité : définitions explicites du GameConfig, sinon le plan de
+        /// Le plan de
         /// contrats de la partie (<see cref="GameSession.Contracts"/>, cf. <see cref="ContractCatalog"/>).
         /// </summary>
         public static List<List<LevelRequirement>> GetRequirements(int level, GameConfig? config = null)
         {
-            if (config != null && config.LevelDefinitions.Count >= level)
-            {
-                return config.LevelDefinitions[level - 1].ToRequirements();
-            }
-
             List<LevelRequirement> reqs = GameSession.Contracts.GetRequirements(level);
             return reqs.Count == 0
                 ? new List<List<LevelRequirement>>()

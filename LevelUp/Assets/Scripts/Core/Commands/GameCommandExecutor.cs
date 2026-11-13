@@ -39,7 +39,7 @@ namespace LevelUp.Core
         public CommandResult Execute(IGameCommand command)
         {
             if (command.PlayerIndex != _turnManager.CurrentPlayerIndex)
-                return CommandResult.Failure("Ce n'est pas votre tour");
+                return CommandResult.Failure(CommandError.NotYourTurn, "Ce n'est pas le tour de ce joueur");
 
             return command switch
             {
@@ -61,7 +61,7 @@ namespace LevelUp.Core
         private CommandResult ExecuteDrawFromDeck()
         {
             if (_turnManager.CurrentPhase != TurnPhase.Draw)
-                return CommandResult.Failure("Phase incorrecte pour piocher");
+                return CommandResult.Failure(CommandError.WrongPhase, "Phase incorrecte pour piocher");
 
             CardModel? card = _deckManager.DrawFromPile();
             if (!card.HasValue)
@@ -71,7 +71,6 @@ namespace LevelUp.Core
                 // forcément : on désigne comme gagnant le joueur avec la main la
                 // plus courte (variante "match au plus court").
                 int forcedWinner = FindPlayerWithSmallestHand();
-                EventBus.Publish(new DeckExhaustedEvent { WinnerIndex = forcedWinner });
                 return CommandResult.RoundCompleteWithWinner(
                     forcedWinner, "Pioche épuisée");
             }
@@ -99,24 +98,43 @@ namespace LevelUp.Core
         /// </summary>
         private int FindPlayerWithSmallestHand()
         {
-            int best = 0;
-            int min = int.MaxValue;
-            for (int i = 0; i < _players.Count; i++)
+            // Départage : moins de cartes, puis moins de points en main, puis le
+            // plus proche APRÈS le joueur courant (et non le siège 0, qui
+            // favorisait toujours l'humain en solo et l'hôte en ligne).
+            int count = _players.Count;
+            int best = -1;
+            for (int step = 1; step <= count; step++)
             {
-                int n = _players[i].Hand.Count;
-                if (n < min) { min = n; best = i; }
+                int i = (_turnManager.CurrentPlayerIndex + step) % count;
+                if (best < 0) { best = i; continue; }
+                PlayerModel p = _players[i], b = _players[best];
+                if (p.Hand.Count < b.Hand.Count
+                    || (p.Hand.Count == b.Hand.Count && p.HandPenalty() < b.HandPenalty()))
+                {
+                    best = i;
+                }
             }
-            return best;
+            return best < 0 ? 0 : best;
         }
+
+        /// <summary>Vrai si la carte du dessus d'une défausse peut être ramassée.</summary>
+        public static bool CanPickFromDiscard(CardModel card) => !card.IsAction || card.IsWild;
 
         private CommandResult ExecuteDrawFromDiscard(int discardPileIndex)
         {
             if (_turnManager.CurrentPhase != TurnPhase.Draw)
-                return CommandResult.Failure("Phase incorrecte pour piocher");
+                return CommandResult.Failure(CommandError.WrongPhase, "Phase incorrecte pour piocher");
+
+            // Une carte « Passe » / « +2 » défaussée a été jouée : personne ne la
+            // reprend (sinon elle tournerait de main en main). Un joker, oui.
+            CardModel? top = _deckManager.PeekDiscard(discardPileIndex);
+            if (top.HasValue && !CanPickFromDiscard(top.Value))
+                return CommandResult.Failure(CommandError.ActionCardNotPickable,
+                    "Une carte action ne se ramasse pas dans une défausse");
 
             CardModel? card = _deckManager.DrawFromDiscard(discardPileIndex);
             if (!card.HasValue)
-                return CommandResult.Failure("Défausse vide");
+                return CommandResult.Failure(CommandError.EmptyDiscard, "Défausse vide");
 
             PlayerModel player = _turnManager.CurrentPlayer;
             player.AddToHand(card.Value);
@@ -155,11 +173,11 @@ namespace LevelUp.Core
         private CommandResult ExecuteLayDown(List<Meld> melds)
         {
             if (_turnManager.CurrentPhase != TurnPhase.LayDown)
-                return CommandResult.Failure("Phase incorrecte pour poser");
+                return CommandResult.Failure(CommandError.WrongPhase, "Phase incorrecte pour poser");
 
             PlayerModel player = _turnManager.CurrentPlayer;
             if (player.HasLaidDownThisRound)
-                return CommandResult.Failure("Niveau déjà posé ce round");
+                return CommandResult.Failure(CommandError.AlreadyLaidDown, "Niveau déjà posé ce round");
 
             if (melds == null || melds.Count == 0)
                 return CommandResult.Failure("Aucune combinaison fournie");
@@ -173,13 +191,13 @@ namespace LevelUp.Core
             foreach (Meld meld in proposed)
             {
                 if (meld == null || meld.Cards == null)
-                    return CommandResult.Failure("Combinaison invalide");
+                    return CommandResult.Failure(CommandError.InvalidMeld, "Combinaison invalide");
 
                 List<CardModel> realCards = new(meld.Cards.Count);
                 foreach (CardModel announced in meld.Cards)
                 {
                     if (!player.TryGetHandCard(announced.Id, out CardModel card))
-                        return CommandResult.Failure("Carte introuvable dans la main");
+                        return CommandResult.Failure(CommandError.CardNotInHand, "Carte introuvable dans la main");
                     if (allCards.Contains(card))
                         return CommandResult.Failure("Une carte ne peut pas être utilisée deux fois");
                     allCards.Add(card);
@@ -199,12 +217,12 @@ namespace LevelUp.Core
                     _              => false
                 };
                 if (!structurallyValid)
-                    return CommandResult.Failure("Combinaison invalide");
+                    return CommandResult.Failure(CommandError.InvalidMeld, "Combinaison invalide");
             }
 
             // 3. La structure des melds doit correspondre aux exigences du niveau.
             if (!LevelValidator.MeldsSatisfyLevel(melds, player.CurrentLevel, _config))
-                return CommandResult.Failure("Combinaisons ne correspondent pas au niveau");
+                return CommandResult.Failure(CommandError.ContractMismatch, "Combinaisons ne correspondent pas au niveau");
 
             player.RemoveFromHand(allCards);
 
@@ -220,7 +238,7 @@ namespace LevelUp.Core
             List<MeldType> meldTypes = new();
             foreach (Meld m in melds)
             {
-                meldCards.Add(m.Cards);
+                meldCards.Add(new List<CardModel>(m.Cards));
                 meldTypes.Add(m.Type);
             }
 
@@ -251,26 +269,26 @@ namespace LevelUp.Core
         private CommandResult ExecuteAddToMeld(CardModel card, int meldOwnerIndex, int meldIndex)
         {
             if (_turnManager.CurrentPhase != TurnPhase.AddToMelds)
-                return CommandResult.Failure("Phase incorrecte");
+                return CommandResult.Failure(CommandError.WrongPhase, "Phase incorrecte");
 
             PlayerModel player = _turnManager.CurrentPlayer;
             if (!player.HasLaidDownThisRound)
-                return CommandResult.Failure("Vous devez d'abord poser votre niveau");
+                return CommandResult.Failure(CommandError.MustLayDownFirst, "Le niveau doit être posé avant de compléter");
 
             if (meldOwnerIndex < 0 || meldOwnerIndex >= _players.Count)
                 return CommandResult.Failure("Joueur cible invalide");
 
             PlayerModel meldOwner = _players[meldOwnerIndex];
             if (meldIndex < 0 || meldIndex >= meldOwner.LaidMelds.Count)
-                return CommandResult.Failure("Combinaison invalide");
+                return CommandResult.Failure(CommandError.InvalidMeld, "Combinaison invalide");
 
             // La vraie carte de la main (l'identifiant fait foi, pas les champs reçus).
             if (!player.TryGetHandCard(card.Id, out card))
-                return CommandResult.Failure("Carte introuvable dans la main");
+                return CommandResult.Failure(CommandError.CardNotInHand, "Carte introuvable dans la main");
 
             Meld meld = meldOwner.GetMeld(meldIndex);
             if (!meld.TryAddCard(card))
-                return CommandResult.Failure("Cette carte ne peut pas être ajoutée ici");
+                return CommandResult.Failure(CommandError.CardDoesNotFit, "Cette carte ne peut pas être ajoutée ici");
 
             player.RemoveFromHand(card);
 
@@ -305,7 +323,7 @@ namespace LevelUp.Core
                 return CommandResult.Failure("Cette phase ne se passe pas");
 
             if (_turnManager.CurrentPhase != phaseToSkip)
-                return CommandResult.Failure("Phase incorrecte");
+                return CommandResult.Failure(CommandError.WrongPhase, "Phase incorrecte");
 
             _turnManager.AdvancePhase();
             return CommandResult.Ok();
@@ -318,11 +336,11 @@ namespace LevelUp.Core
         private CommandResult ExecuteDiscard(CardModel card, int targetPlayerIndex)
         {
             if (_turnManager.CurrentPhase != TurnPhase.Discard)
-                return CommandResult.Failure("Phase incorrecte pour défausser");
+                return CommandResult.Failure(CommandError.WrongPhase, "Phase incorrecte pour défausser");
 
             PlayerModel player = _turnManager.CurrentPlayer;
             if (!player.TryGetHandCard(card.Id, out card))
-                return CommandResult.Failure("Carte introuvable dans la main");
+                return CommandResult.Failure(CommandError.CardNotInHand, "Carte introuvable dans la main");
 
             player.RemoveFromHand(card);
 

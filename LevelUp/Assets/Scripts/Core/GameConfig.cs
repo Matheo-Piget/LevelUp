@@ -31,10 +31,6 @@ namespace LevelUp.Core
         [Tooltip("Nombre maximum de joueurs")]
         [SerializeField] private int _maxPlayers = 6;
 
-        [Header("Level Definitions")]
-        [Tooltip("Définitions personnalisées des 8 niveaux (laisser vide pour les valeurs par défaut)")]
-        [SerializeField] private List<LevelDefinition> _levelDefinitions = new();
-
         /// <summary>Nombre total de cartes dans le deck.</summary>
         public int DeckSize => _deckSize;
 
@@ -53,43 +49,5 @@ namespace LevelUp.Core
         /// <summary>Nombre maximum de joueurs.</summary>
         public int MaxPlayers => _maxPlayers;
 
-        /// <summary>Définitions des niveaux.</summary>
-        public List<LevelDefinition> LevelDefinitions => _levelDefinitions;
-    }
-
-    /// <summary>
-    /// Définition d'un niveau : liste d'exigences de combinaisons.
-    /// </summary>
-    [System.Serializable]
-    public class LevelDefinition
-    {
-        [Tooltip("Les combinaisons requises pour ce niveau")]
-        public List<MeldRequirement> Requirements = new();
-
-        /// <summary>
-        /// Convertit en format utilisé par le LevelValidator.
-        /// </summary>
-        public List<List<LevelValidator.LevelRequirement>> ToRequirements()
-        {
-            List<LevelValidator.LevelRequirement> reqs = new();
-            foreach (MeldRequirement req in Requirements)
-            {
-                reqs.Add(new LevelValidator.LevelRequirement(req.Type, req.CardCount));
-            }
-            return new List<List<LevelValidator.LevelRequirement>> { reqs };
-        }
-    }
-
-    /// <summary>
-    /// Exigence de combinaison sérialisable pour l'inspecteur Unity.
-    /// </summary>
-    [System.Serializable]
-    public class MeldRequirement
-    {
-        [Tooltip("Type de combinaison (Suite, Set, Flush)")]
-        public MeldType Type;
-
-        [Tooltip("Nombre de cartes requises")]
-        public int CardCount;
     }
 }

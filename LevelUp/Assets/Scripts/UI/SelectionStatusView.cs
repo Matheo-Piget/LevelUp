@@ -169,6 +169,7 @@ namespace LevelUp.UI
         private void Update()
         {
             if (_canvasGroup == null || _currentAlpha == _targetAlpha) return;
+            FrameBudget.Ping(0.2f);
             _currentAlpha = Mathf.Lerp(_currentAlpha, _targetAlpha, 1f - Mathf.Exp(-12f * Time.unscaledDeltaTime));
             if (Mathf.Abs(_currentAlpha - _targetAlpha) < 0.004f) _currentAlpha = _targetAlpha;
             _canvasGroup.alpha = _currentAlpha;

@@ -77,6 +77,23 @@ namespace LevelUp.Core
             _lifecycle.Initialize(() => _gameStarted && (_mainMenu == null || !_mainMenu.IsVisible));
 
             ShowMainMenu();
+            StartCoroutine(PrewarmCards());
+        }
+
+        /// <summary>
+        /// Pendant le menu, crée quelques cartes d'avance (2 par image) : la première
+        /// donne et les premières poses ne paient plus leur création en plein jeu.
+        /// </summary>
+        private IEnumerator PrewarmCards()
+        {
+            GameObject? prefab = _handView != null ? _handView.CardPrefab : null;
+            if (prefab == null) yield break;
+            yield return null;
+            for (int target = 2; target <= 28; target += 2)
+            {
+                CardViewPool.Prewarm(prefab, target);
+                yield return null;
+            }
         }
 
         // ────────────────────────────────────────────────────

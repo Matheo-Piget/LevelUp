@@ -114,10 +114,33 @@ namespace LevelUp.Core
     /// Résultat d'exécution d'une commande.
     /// Porte le succès/échec, un message, et des données optionnelles.
     /// </summary>
+    /// <summary>
+    /// Motif d'un refus. L'UI s'en sert pour écrire son propre message (ton,
+    /// langue) : <see cref="CommandResult.Message"/> reste un texte de diagnostic.
+    /// </summary>
+    public enum CommandError
+    {
+        None = 0,
+        Other,
+        NotYourTurn,
+        WrongPhase,
+        EmptyDiscard,
+        ActionCardNotPickable,
+        CardNotInHand,
+        InvalidMeld,
+        ContractMismatch,
+        AlreadyLaidDown,
+        MustLayDownFirst,
+        CardDoesNotFit,
+        NoRoundInProgress
+    }
+
     public readonly struct CommandResult
     {
         public bool Success { get; }
         public string Message { get; }
+        /// <summary>Motif du refus (<see cref="CommandError.None"/> en cas de succès).</summary>
+        public CommandError Error { get; }
         public bool RoundEnded { get; }
         public CardModel? DrawnCard { get; }
         /// <summary>
@@ -128,8 +151,9 @@ namespace LevelUp.Core
         public int? WinnerOverride { get; }
 
         private CommandResult(bool success, string message, bool roundEnded,
-            CardModel? drawnCard, int? winnerOverride)
+            CardModel? drawnCard, int? winnerOverride, CommandError error = CommandError.None)
         {
+            Error = error;
             Success = success;
             Message = message;
             RoundEnded = roundEnded;
@@ -150,6 +174,9 @@ namespace LevelUp.Core
             => new(true, message, true, null, winnerIndex);
 
         public static CommandResult Failure(string reason)
-            => new(false, reason, false, null, null);
+            => new(false, reason, false, null, null, CommandError.Other);
+
+        public static CommandResult Failure(CommandError error, string reason)
+            => new(false, reason, false, null, null, error);
     }
 }

@@ -377,5 +377,24 @@ namespace LevelUp.Tests
             Assert.AreEqual(2, SaveGame.Load()!.History.Count, "Le fichier a été réparé");
             SaveGame.Delete();
         }
+
+        [Test]
+        public void ExecuteCommand_fromAnEventHandler_isRefused()
+        {
+            GameManager gm = CreateGameManager();
+            gm.StartGame(ThreePlayers, 42, MatchRules.Classic);
+
+            CommandResult? nested = null;
+            EventBus.Subscribe<CardDrawnEvent>(_ =>
+                nested = gm.ExecuteCommand(new SkipPhaseCommand(0, TurnPhase.LayDown)));
+
+            UnityEngine.TestTools.LogAssert.Expect(LogType.Error,
+                new System.Text.RegularExpressions.Regex("ré-entrante"));
+            CommandResult outer = gm.ExecuteCommand(new DrawFromDeckCommand(0));
+
+            Assert.IsTrue(outer.Success);
+            Assert.IsTrue(nested.HasValue && !nested.Value.Success, "La commande imbriquée doit être refusée");
+            Assert.AreEqual(TurnPhase.LayDown, gm.TurnManager!.CurrentPhase, "La phase ne doit pas avoir été sautée");
+        }
     }
 }

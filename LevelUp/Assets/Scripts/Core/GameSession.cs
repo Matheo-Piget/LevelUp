@@ -31,6 +31,16 @@ namespace LevelUp.Core
         /// </summary>
         public static MatchRules Rules { get; set; } = MatchRules.Classic;
 
+        // Sans rechargement de domaine (Enter Play Mode Options), les statiques
+        // survivent entre deux Play : on repart d'un état propre.
+        [UnityEngine.RuntimeInitializeOnLoadMethod(UnityEngine.RuntimeInitializeLoadType.SubsystemRegistration)]
+        private static void ResetStatics()
+        {
+            Reset();
+            Contracts = ContractPlan.Classic;
+            Rules = MatchRules.Classic;
+        }
+
         /// <summary>Retour à l'état hors ligne (solo).</summary>
         public static void Reset()
         {

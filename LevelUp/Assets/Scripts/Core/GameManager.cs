@@ -45,10 +45,12 @@ namespace LevelUp.Core
         /// Version des règles : à incrémenter dès qu'une règle ou le format d'une
         /// commande change. Deux appareils (en ligne) ou une sauvegarde d'une autre
         /// version ne produiraient pas la même partie en rejouant les commandes.
+        /// v6 : cartes « Passe » / « +2 » non ramassables et exclues des combinaisons,
+        /// départage de la pioche épuisée.
         /// v5 : fin de manche explicite (StartNextRoundCommand), sortie par pose,
         /// phases Piocher/Défausser non passables, points de pénalité.
         /// </summary>
-        public const int RulesVersion = 5;
+        public const int RulesVersion = 6;
 
         /// <summary>
         /// Vrai (défaut, tests et simulations) : la manche suivante démarre dans la
@@ -319,6 +321,31 @@ namespace LevelUp.Core
         /// </summary>
         public CommandResult ExecuteCommand(IGameCommand command)
         {
+            // Les événements partent PENDANT l'exécution : un abonné qui
+            // rejouerait une commande depuis son handler serait notifié avant la
+            // commande en cours (sauvegarde et relais réseau dans le désordre).
+            // Une commande se joue donc toujours hors d'un handler d'événement.
+            if (_executing)
+            {
+                Debug.LogError($"[GameManager] Commande ré-entrante refusée : {command?.GetType().Name}");
+                return CommandResult.Failure("Commande déjà en cours");
+            }
+
+            _executing = true;
+            try
+            {
+                return ExecuteCommandCore(command);
+            }
+            finally
+            {
+                _executing = false;
+            }
+        }
+
+        private bool _executing;
+
+        private CommandResult ExecuteCommandCore(IGameCommand command)
+        {
             if (_executor == null)
                 return CommandResult.Failure("Game not initialized");
 
@@ -329,7 +356,7 @@ namespace LevelUp.Core
             // se joue — une commande réseau tardive ne peut pas rejouer une fin
             // de manche ni agir sur une partie terminée.
             if (_state != GameState.PlayerTurn)
-                return CommandResult.Failure("Aucune manche en cours");
+                return CommandResult.Failure(CommandError.NoRoundInProgress, "Aucune manche en cours");
 
             CommandResult result = _executor.Execute(command);
 

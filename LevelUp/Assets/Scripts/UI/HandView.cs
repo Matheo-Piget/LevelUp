@@ -58,12 +58,6 @@ namespace LevelUp.UI
         /// <summary>Indique si la main est en cours de deal (cascade animation).</summary>
         public bool IsAnimatingDeal => _animatingDeal;
 
-        /// <summary>Événement déclenché quand une carte est sélectionnée.</summary>
-        public event System.Action<CardModel>? OnCardSelected;
-
-        /// <summary>Événement déclenché quand une carte est drag & drop sur une cible.</summary>
-        public event System.Action<CardModel, Vector2>? OnCardDropped;
-
         /// <summary>Événement déclenché quand les cartes sont réordonnées.</summary>
         public event System.Action<int, int>? OnCardsReordered;
 
@@ -221,7 +215,11 @@ namespace LevelUp.UI
         private void Update()
         {
             UpdateHover();
-            if (!_settled) LerpCardsToTarget();
+            if (!_settled)
+            {
+                FrameBudget.Ping();
+                LerpCardsToTarget();
+            }
         }
 
         /// <summary>
@@ -524,8 +522,7 @@ namespace LevelUp.UI
                 }
                 else
                 {
-                    GameObject cardObj = Instantiate(_cardPrefab, _handContainer);
-                    view = cardObj.GetComponent<CardView>();
+                    view = CardViewPool.Get(_cardPrefab, _handContainer)!;
                 }
                 view.Setup(cards[i], faceUp: true);
                 _nextViews[i] = view;
@@ -533,7 +530,7 @@ namespace LevelUp.UI
             }
             for (int i = spare; i < _spareViews.Count; i++)
             {
-                if (_spareViews[i] != null) Destroy(_spareViews[i].gameObject);
+                CardViewPool.Release(_spareViews[i]);
             }
 
             _cardViews.Clear();
@@ -652,8 +649,7 @@ namespace LevelUp.UI
 
             _animatingDraw = true;
 
-            GameObject cardObj = Instantiate(_cardPrefab, _handContainer);
-            CardView cardView = cardObj.GetComponent<CardView>();
+            CardView? cardView = CardViewPool.Get(_cardPrefab, _handContainer);
             if (cardView == null)
             {
                 _animatingDraw = false;
@@ -916,7 +912,6 @@ namespace LevelUp.UI
 
             _draggedCard.SetAlpha(1f);
             _draggedCard.RectTransform.localScale = Vector3.one;
-            OnCardDropped?.Invoke(_draggedCard.CardModel, screenPosition);
             _draggedCard = null;
             _isReorderDrag = false;
 
@@ -951,7 +946,6 @@ namespace LevelUp.UI
             }
 
             RecalculateTargets();
-            OnCardSelected?.Invoke(card.CardModel);
             OnSelectionChanged?.Invoke();
         }
 
@@ -970,7 +964,6 @@ namespace LevelUp.UI
             clicked.SetSelected(true);
             _selectedCards.Add(clicked);
             RecalculateTargets();
-            OnCardSelected?.Invoke(clicked.CardModel);
             OnSelectionChanged?.Invoke();
         }
 

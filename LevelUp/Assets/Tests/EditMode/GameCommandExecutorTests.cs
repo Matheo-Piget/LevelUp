@@ -206,17 +206,78 @@ namespace LevelUp.Tests
 
             // Tour de P0, phase Draw (StartRound l'a fait au SetUp).
             // P0 tente de piocher : la pile est vide, aucune défausse à recycler.
-            int? capturedWinner = null;
-            EventBus.Subscribe<DeckExhaustedEvent>(e => capturedWinner = e.WinnerIndex);
-
             CommandResult result = _executor.Execute(new DrawFromDeckCommand(0));
 
             Assert.IsTrue(result.Success, "Doit retourner success (pas Failure)");
             Assert.IsTrue(result.RoundEnded, "Le round doit se terminer");
             Assert.AreEqual(1, result.WinnerOverride,
                 "Le gagnant override doit être P1 (main la plus courte)");
-            Assert.AreEqual(1, capturedWinner,
-                "DeckExhaustedEvent doit annoncer P1 comme gagnant");
+        }
+
+        [Test]
+        public void DrawFromDeck_deckEmpty_tieGoesToLowestPenaltyNotSeatZero()
+        {
+            int safety = 200;
+            while (safety-- > 0 && _deck.DrawFromPile().HasValue) { /* drain */ }
+
+            // Même nombre de cartes : P0 a des cartes hautes (10 pts), P1 des basses (5 pts).
+            _players[0].AddToHand(CardFactory.R(12));
+            _players[0].AddToHand(CardFactory.R(13));
+            _players[1].AddToHand(CardFactory.B(2));
+            _players[1].AddToHand(CardFactory.B(3));
+
+            CommandResult result = _executor.Execute(new DrawFromDeckCommand(0));
+            Assert.AreEqual(1, result.WinnerOverride, "À égalité de cartes, le moins de points l'emporte");
+        }
+
+        // ──────────────────────────────────────────────
+        //  Cartes action : ni ramassées, ni posées
+        // ──────────────────────────────────────────────
+
+        [Test]
+        public void DrawFromDiscard_actionCardOnTop_isRefused()
+        {
+            _deck.Discard(1, CardFactory.Skip());
+            CommandResult result = _executor.Execute(new DrawFromDiscardCommand(0, 1));
+            Assert.IsFalse(result.Success);
+            Assert.AreEqual(CommandError.ActionCardNotPickable, result.Error);
+            Assert.AreEqual(1, _deck.GetDiscardCount(1), "La carte reste sur la défausse");
+            Assert.AreEqual(TurnPhase.Draw, _turn.CurrentPhase);
+        }
+
+        [Test]
+        public void DrawFromDiscard_jokerOnTop_isAllowed()
+        {
+            _deck.Discard(1, CardFactory.Wild());
+            Assert.IsTrue(_executor.Execute(new DrawFromDiscardCommand(0, 1)).Success);
+        }
+
+        [Test]
+        public void ActionCards_neverFitInAMeld()
+        {
+            CardModel skip = CardFactory.Skip();
+            CardModel draw2 = CardFactory.Draw2();
+            List<CardModel> run = new() { CardFactory.R(5), CardFactory.B(6), skip };
+            Assert.IsFalse(run.IsValidRun(), "Une carte Passe ne complète pas une suite");
+            Assert.IsFalse(new List<CardModel> { CardFactory.R(7), CardFactory.B(7), draw2 }.IsValidSet());
+            Assert.IsFalse(new List<CardModel> { CardFactory.R(7), CardFactory.R(9), skip }.IsValidFlush());
+            Assert.IsFalse(new List<CardModel> { skip, draw2 }.IsValidSet(), "Deux cartes action ne font pas une paire");
+
+            Meld meld = new(MeldType.Run, new List<CardModel> { CardFactory.G(5), CardFactory.G(6), CardFactory.G(7) }, 0);
+            Assert.IsFalse(meld.CanAddCard(skip));
+            Assert.IsFalse(meld.TryAddCard(draw2));
+            Assert.IsTrue(meld.CanAddCard(CardFactory.Wild()), "Un joker, lui, complète");
+            Assert.IsTrue(meld.CanAddCard(CardFactory.Y(8)));
+            Assert.IsFalse(meld.CanAddCard(CardFactory.Y(6)), "Doublon de valeur refusé");
+        }
+
+        [Test]
+        public void Failure_carriesAnErrorCode()
+        {
+            CommandResult wrongTurn = _executor.Execute(new DrawFromDeckCommand(1));
+            Assert.AreEqual(CommandError.NotYourTurn, wrongTurn.Error);
+            CommandResult wrongPhase = _executor.Execute(new DiscardCommand(0, CardFactory.R(1)));
+            Assert.AreEqual(CommandError.WrongPhase, wrongPhase.Error);
         }
     }
 }

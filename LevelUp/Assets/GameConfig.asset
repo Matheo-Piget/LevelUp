@@ -18,4 +18,4 @@ MonoBehaviour:
   _cardsPerPlayer: 10
   _minPlayers: 2
   _maxPlayers: 6
-  _levelDefinitions: []
+

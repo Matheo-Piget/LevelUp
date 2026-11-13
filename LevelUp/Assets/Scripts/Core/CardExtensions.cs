@@ -97,23 +97,31 @@ namespace LevelUp.Core
         /// Vérifie si un ensemble de cartes forme une suite valide (consécutive).
         /// Les Wilds peuvent combler des trous.
         /// </summary>
-        public static bool IsValidRun(this List<CardModel> cards)
+        public static bool IsValidRun(this IReadOnlyList<CardModel> cards, CardModel? extra = null)
         {
-            if (cards.Count < 2) return false;
+            int count = cards.Count + (extra.HasValue ? 1 : 0);
+            if (count < 2) return false;
 
-            List<CardModel> normals = cards.GetNormalCards().SortByValue();
-            int wilds = cards.WildCount();
-
-            if (normals.Count == 0) return wilds >= 2;
-
-            int gaps = 0;
-            for (int i = 1; i < normals.Count; i++)
+            // Sans allocation : masque des valeurs présentes (1..63), appelé pour
+            // chaque carte × chaque combinaison par les aides, l'aimant et les bots.
+            ulong seen = 0;
+            int normals = 0, wilds = 0, min = int.MaxValue, max = int.MinValue;
+            for (int i = 0; i < count; i++)
             {
-                int diff = normals[i].Value - normals[i - 1].Value;
-                if (diff == 0) return false; // doublon
-                if (diff > 1) gaps += diff - 1;
+                CardModel c = i < cards.Count ? cards[i] : extra!.Value;
+                if (c.IsWild) { wilds++; continue; }
+                // Une carte « Passe » / « +2 » n'entre dans aucune combinaison.
+                if (c.Type != CardType.Normal || c.Value < 1 || c.Value > 63) return false;
+                ulong bit = 1UL << c.Value;
+                if ((seen & bit) != 0) return false; // doublon
+                seen |= bit;
+                normals++;
+                if (c.Value < min) min = c.Value;
+                if (c.Value > max) max = c.Value;
             }
 
+            if (normals == 0) return wilds >= 2;
+            int gaps = (max - min + 1) - normals;
             return gaps <= wilds;
         }
 
@@ -121,30 +129,43 @@ namespace LevelUp.Core
         /// Vérifie si un ensemble de cartes forme un set valide (même valeur).
         /// Les Wilds peuvent compléter.
         /// </summary>
-        public static bool IsValidSet(this List<CardModel> cards)
+        public static bool IsValidSet(this IReadOnlyList<CardModel> cards, CardModel? extra = null)
         {
-            if (cards.Count < 2) return false;
+            int count = cards.Count + (extra.HasValue ? 1 : 0);
+            if (count < 2) return false;
 
-            List<CardModel> normals = cards.GetNormalCards();
-            if (normals.Count == 0) return true; // que des wilds
-
-            int targetValue = normals[0].Value;
-            return normals.All(c => c.Value == targetValue);
+            int target = int.MinValue;
+            for (int i = 0; i < count; i++)
+            {
+                CardModel c = i < cards.Count ? cards[i] : extra!.Value;
+                if (c.IsWild) continue;
+                if (c.Type != CardType.Normal) return false;
+                if (target == int.MinValue) target = c.Value;
+                else if (c.Value != target) return false;
+            }
+            return true;
         }
 
         /// <summary>
         /// Vérifie si un ensemble de cartes forme un flush valide (même couleur).
         /// Les Wilds comptent comme n'importe quelle couleur.
         /// </summary>
-        public static bool IsValidFlush(this List<CardModel> cards)
+        public static bool IsValidFlush(this IReadOnlyList<CardModel> cards, CardModel? extra = null)
         {
-            if (cards.Count < 2) return false;
+            int count = cards.Count + (extra.HasValue ? 1 : 0);
+            if (count < 2) return false;
 
-            List<CardModel> normals = cards.GetNormalCards();
-            if (normals.Count == 0) return true; // que des wilds
-
-            CardColor targetColor = normals[0].Color;
-            return normals.All(c => c.Color == targetColor);
+            bool hasColor = false;
+            CardColor target = default;
+            for (int i = 0; i < count; i++)
+            {
+                CardModel c = i < cards.Count ? cards[i] : extra!.Value;
+                if (c.IsWild) continue;
+                if (c.Type != CardType.Normal) return false;
+                if (!hasColor) { target = c.Color; hasColor = true; }
+                else if (c.Color != target) return false;
+            }
+            return true;
         }
 
         /// <summary>

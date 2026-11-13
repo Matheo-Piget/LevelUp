@@ -35,7 +35,6 @@ namespace LevelUp.UI
     private int _localIndex;
     private RectTransform? _content;
 
-    public event System.Action<CardModel, int, int>? OnCardDroppedOnMeld;
 
     private void OnEnable()
     {
@@ -380,12 +379,13 @@ namespace LevelUp.UI
       {
         foreach (MeldGroupView group in kvp.Value)
         {
-          if (group != null) Destroy(group.gameObject);
+          if (group == null) continue;
+          group.ReleaseCards();
+          Destroy(group.gameObject);
         }
       }
       _playerMeldGroups.Clear();
       _ownerOrder.Clear();
-      _ = OnCardDroppedOnMeld;
     }
   }
 
@@ -415,6 +415,15 @@ namespace LevelUp.UI
     private GameObject? _dropPill;
     private RectTransform? _cardsRoot;
     private readonly List<CardView> _cards = new();
+
+    /// <summary>Rend les cartes à la réserve partagée avant la destruction du panneau.</summary>
+    public void ReleaseCards()
+    {
+      StopAllCoroutines();
+      foreach (CardView cv in _cards) CardViewPool.Release(cv);
+      _cards.Clear();
+      _pendingArrivals.Clear();
+    }
 
     public int OwnerIndex => _ownerIndex;
     public MeldType MeldType => _meldType;
@@ -485,8 +494,7 @@ namespace LevelUp.UI
     {
       if (cardPrefab == null || _cardsRoot == null) return false;
 
-      GameObject cardObj = Instantiate(cardPrefab, _cardsRoot);
-      CardView cardView = cardObj.GetComponent<CardView>();
+      CardView? cardView = CardViewPool.Get(cardPrefab, _cardsRoot);
       if (cardView == null) return false;
 
       cardView.Setup(card, true);

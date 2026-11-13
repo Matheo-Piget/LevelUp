@@ -171,7 +171,8 @@ namespace LevelUp.UI
             Section(c, "CARTES SPÉCIALES (OPTION)");
             Paragraph(c, "<b>Joker</b> : remplace n'importe quelle carte dans une combinaison.\n" +
                          "<b>Passe</b> : défaussée, elle fait sauter le prochain tour d'un adversaire.\n" +
-                         "<b>+2</b> : défaussée, l'adversaire choisi pioche 2 cartes — attention, ça peut l'aider à poser !");
+                         "<b>+2</b> : défaussée, l'adversaire choisi pioche 2 cartes — attention, ça peut l'aider à poser !\n" +
+                         "Une carte « Passe » ou « +2 » défaussée ne se ramasse pas, et n'entre dans aucune combinaison.");
         }
 
         private static void Section(Transform parent, string text)

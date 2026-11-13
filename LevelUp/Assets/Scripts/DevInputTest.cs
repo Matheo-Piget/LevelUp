@@ -233,6 +233,13 @@ namespace LevelUp.Core
                     yield return null;
                     _pointer = null;
                     yield return new WaitForSecondsRealtime(0.6f);
+                    // Plusieurs répartitions possibles : le jeu demande laquelle.
+                    bool asked = LayDownChooser.IsOpen;
+                    if (asked)
+                    {
+                        Click("Option0");
+                        yield return new WaitForSecondsRealtime(0.6f);
+                    }
                     laid = me.HasLaidDownThisRound;
                     Check("pose au relâchement sur la table", notOnPress && laid,
                         $"rien à l'appui : {notOnPress}, posé au relâchement : {laid}");

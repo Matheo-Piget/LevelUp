@@ -411,6 +411,8 @@ namespace LevelUp.UI
                 _deckRing = UISkin.Outline(deck, 17f, 2.5f, UISkin.AccentLight, "DeckRing");
                 UISkin.Stretch(_deckRing.rectTransform, -6f);
                 _deckRing.enabled = false;
+                // Son propre canvas : la pulsation ne fait plus reconstruire tout l'écran de jeu.
+                _deckRing.gameObject.AddComponent<Canvas>();
 
                 _deckCaption = UISkin.Text(felt, "DeckCaption", "Pioche", 13f, UISkin.TextMuted,
                     TextWeight.SemiBold, TextAlignmentOptions.Center);

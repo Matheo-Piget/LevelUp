@@ -1,6 +1,5 @@
 using System.Collections.Generic;
 using UnityEngine;
-using UnityEngine.UI;
 using TMPro;
 using LevelUp.Core;
 using LevelUp.Utils;
@@ -8,91 +7,61 @@ using LevelUp.Utils;
 namespace LevelUp.UI
 {
     /// <summary>
-    /// HUD style Balatro : badges arrondis, textes punchy, status pop-in animé.
+    /// Messages de statut du jeu (« toast ») : annonces des coups marquants et
+    /// erreurs d'action, avec une courte file d'attente. Le reste de l'ancien
+    /// HUD (tour, phase, niveau, pioche) est porté par <see cref="GameScreenLayout"/>
+    /// et les pastilles joueurs ; l'habillage du toast aussi.
     /// </summary>
     public class HUDView : MonoBehaviour
     {
-        [Header("Current Player Info")]
-        [SerializeField] private TextMeshProUGUI? _currentPlayerText;
-        [SerializeField] private TextMeshProUGUI? _currentPhaseText;
-        [SerializeField] private TextMeshProUGUI? _currentLevelText;
-
-        [Header("Deck Info")]
-        [SerializeField] private TextMeshProUGUI? _deckCountText;
-        [SerializeField] private TextMeshProUGUI? _roundNumberText;
-
         [Header("Status")]
         [SerializeField] private TextMeshProUGUI? _statusText;
         [SerializeField] private CanvasGroup? _statusCanvasGroup;
         [SerializeField] private float _statusDisplayDuration = 2.5f;
 
-        [Header("Game Over Panel")]
-        [SerializeField] private GameObject? _gameOverPanel;
-        [SerializeField] private TextMeshProUGUI? _winnerText;
-
-        [Header("Animation")]
-        [SerializeField] private AnimationController? _animController;
-
         private float _statusTimer;
         private RectTransform? _statusRect;
-        private bool _initialized;
+        private Vector2? _statusRest;
 
-        // Décor pill autour du texte "Tour de X" — flag d'idempotence pour ne pas
-        // recréer le décor à chaque restyle.
-        private bool _turnPillBuilt;
-        private bool _deckPillBuilt;
-
-        // Noms des joueurs (injectés par GameBootstrapper) — sert à afficher "Tour de Bot 2".
+        // Noms des joueurs (injectés par GameBootstrapper) : « Bot 2 pose le niveau 3 ».
         private List<string>? _playerNames;
 
-        // Le tour en cours utilise toujours l'indigo (couleur d'accent unique de l'UI).
-        // Les couleurs de cartes restent saturées car elles portent l'info de jeu,
-        // mais ici on parle de l'UI -> neutre + indigo.
-        private static readonly Color ActiveColor = Constants.AccentPrimary;
+        // File des messages : un message arrivé pendant qu'un autre vient de
+        // s'afficher attend son tour (au lieu de l'écraser dans la même image).
+        private const float MinVisibleSeconds = 1.1f;
+        private const int MaxQueued = 3;
+        private readonly Queue<(string Text, bool Error)> _queue = new();
+        private float _shownFor;
 
-        /// <summary>
-        /// Injecte les noms des joueurs pour afficher "Tour de Bot 2" plutôt que "PLAYER 2".
-        /// À appeler depuis GameBootstrapper après <see cref="GameManager.StartGame"/>.
-        /// </summary>
-        public void SetPlayerNames(List<string> names)
-        {
-            _playerNames = names;
-        }
+        /// <summary>Le toast s'affiche (vrai = erreur) : le layout l'habille en conséquence.</summary>
+        public event System.Action<bool>? StatusStyleChanged;
+
+        /// <summary>Noms des joueurs, à injecter après <see cref="GameManager.StartGame(int, int, bool)"/>.</summary>
+        public void SetPlayerNames(List<string> names) => _playerNames = names;
 
         private void OnEnable()
         {
-            EventBus.Subscribe<TurnStartedEvent>(OnTurnStarted);
-            EventBus.Subscribe<TurnPhaseChangedEvent>(OnPhaseChanged);
-            EventBus.Subscribe<DeckChangedEvent>(OnDeckChanged);
             EventBus.Subscribe<RoundStartedEvent>(OnRoundStarted);
             EventBus.Subscribe<LevelLaidDownEvent>(OnLevelLaidDown);
             EventBus.Subscribe<PlayerSkippedEvent>(OnPlayerSkipped);
             EventBus.Subscribe<ForcedDrawEvent>(OnForcedDraw);
             EventBus.Subscribe<RoundEndedEvent>(OnRoundEnded);
-            EventBus.Subscribe<GameOverEvent>(OnGameOver);
             EventBus.Subscribe<ActionCardPlayedEvent>(OnActionCardPlayed);
         }
 
         private void OnDisable()
         {
-            EventBus.Unsubscribe<TurnStartedEvent>(OnTurnStarted);
-            EventBus.Unsubscribe<TurnPhaseChangedEvent>(OnPhaseChanged);
-            EventBus.Unsubscribe<DeckChangedEvent>(OnDeckChanged);
             EventBus.Unsubscribe<RoundStartedEvent>(OnRoundStarted);
             EventBus.Unsubscribe<LevelLaidDownEvent>(OnLevelLaidDown);
             EventBus.Unsubscribe<PlayerSkippedEvent>(OnPlayerSkipped);
             EventBus.Unsubscribe<ForcedDrawEvent>(OnForcedDraw);
             EventBus.Unsubscribe<RoundEndedEvent>(OnRoundEnded);
-            EventBus.Unsubscribe<GameOverEvent>(OnGameOver);
             EventBus.Unsubscribe<ActionCardPlayedEvent>(OnActionCardPlayed);
         }
 
         private void Start()
         {
-            if (_gameOverPanel != null) _gameOverPanel.SetActive(false);
-
-            // Filet de sécurité : sans CanvasGroup, le fade de ShowStatus
-            // n'agit sur rien et le statut ("ROUND 1"…) reste affiché à vie.
+            // Sans CanvasGroup, le fondu n'agirait sur rien et le message resterait affiché.
             if (_statusCanvasGroup == null && _statusText != null)
             {
                 _statusCanvasGroup = _statusText.GetComponent<CanvasGroup>();
@@ -104,155 +73,7 @@ namespace LevelUp.UI
 
             if (_statusCanvasGroup != null) _statusCanvasGroup.alpha = 0f;
             if (_statusText != null) _statusRect = _statusText.GetComponent<RectTransform>();
-
-            StyleHUD();
         }
-
-        /// <summary>
-        /// Style minimal et neutre : la topbar reste fine, lisible, pas de couleurs criardes.
-        /// Tailles inspirées de la spec : 12px pill, 13px body, 11px labels.
-        /// </summary>
-        private void StyleHUD()
-        {
-            // Joueur actif : "Tour de X" rendu en pill indigo (12px, indigo lighter)
-            StyleText(_currentPlayerText, Constants.AccentLighter, 12f, FontStyles.Bold);
-            BuildTurnPill(_currentPlayerText);
-
-            // Phase : hint discret (TextSecondary, 13px). Plus de couleur verte criarde.
-            StyleText(_currentPhaseText, Constants.TextSecondary, 13f, FontStyles.Normal);
-
-            // Niveau actif : texte primaire neutre, taille topbar (13px)
-            StyleText(_currentLevelText, Constants.TextSecondary, 13f, FontStyles.Normal);
-
-            // Deck count : chiffre lisible (12px, blanc) + pill subtile
-            StyleText(_deckCountText, Constants.TextPrimary, 12f, FontStyles.Bold);
-            BuildDeckPill(_deckCountText);
-
-            // Round : label discret en majuscules avec letter-spacing
-            StyleText(_roundNumberText, Constants.TextMuted, 11f, FontStyles.Bold);
-            ApplyLetterSpacing(_roundNumberText, 6f);
-
-            // Status message
-            StyleText(_statusText, Constants.TextPrimary, 22f, FontStyles.Bold);
-
-            // Winner
-            StyleText(_winnerText, Constants.AccentLight, 36f, FontStyles.Bold);
-
-            _initialized = true;
-        }
-
-        /// <summary>
-        /// Habille _currentPlayerText d'une pill indigo (bg 0.12, border 0.35, dot 6px).
-        /// Idempotent : ne crée les éléments qu'une fois.
-        /// </summary>
-        private void BuildTurnPill(TextMeshProUGUI? text)
-        {
-            if (text == null || _turnPillBuilt) return;
-            _turnPillBuilt = true;
-
-            RectTransform rt = text.rectTransform;
-            // Padding interne : le bg et le border débordent du rect texte pour faire la pill.
-            const float padH = 14f;
-            const float padV = 6f;
-            const float dotRoom = 14f; // espace réservé à gauche pour le dot
-
-            // Background (Surface 1 indigo translucide)
-            CreatePillLayer(rt, "TurnPillBg", UIFactory.RoundedSprite,
-                Constants.PillIndigoBg, padH + dotRoom, padV);
-            // Border (Ring)
-            CreatePillLayer(rt, "TurnPillBorder", UIFactory.RingSprite,
-                Constants.PillIndigoBorder, padH + dotRoom, padV);
-
-            // Dot 6px à gauche du texte
-            GameObject dotObj = new("TurnPillDot",
-                typeof(RectTransform), typeof(Image));
-            dotObj.transform.SetParent(rt, false);
-            RectTransform drt = dotObj.GetComponent<RectTransform>();
-            drt.anchorMin = new Vector2(0f, 0.5f);
-            drt.anchorMax = new Vector2(0f, 0.5f);
-            drt.pivot = new Vector2(0f, 0.5f);
-            drt.sizeDelta = new Vector2(6f, 6f);
-            drt.anchoredPosition = new Vector2(-22f, 0f);
-            Image dotImg = dotObj.GetComponent<Image>();
-            dotImg.sprite = UIFactory.RoundedSprite;
-            dotImg.type = Image.Type.Sliced;
-            dotImg.color = Constants.AccentLight;
-            dotImg.raycastTarget = false;
-        }
-
-        private static void CreatePillLayer(RectTransform parent, string name,
-            Sprite sprite, Color color, float padHLeft, float padV)
-        {
-            GameObject obj = new(name, typeof(RectTransform), typeof(Image));
-            obj.transform.SetParent(parent, false);
-            obj.transform.SetAsFirstSibling();
-            RectTransform rt = obj.GetComponent<RectTransform>();
-            rt.anchorMin = Vector2.zero;
-            rt.anchorMax = Vector2.one;
-            // Le côté gauche reçoit dotRoom + pad (place pour le dot 6px),
-            // le côté droit garde un padding standard de 12px.
-            rt.offsetMin = new Vector2(-padHLeft, -padV);
-            rt.offsetMax = new Vector2(12f, padV);
-
-            Image img = obj.GetComponent<Image>();
-            img.sprite = sprite;
-            img.type = Image.Type.Sliced;
-            img.color = color;
-            img.raycastTarget = false;
-        }
-
-        /// <summary>
-        /// Pill discrète autour du compteur de pioche.
-        /// </summary>
-        private void BuildDeckPill(TextMeshProUGUI? text)
-        {
-            if (text == null || _deckPillBuilt) return;
-            _deckPillBuilt = true;
-
-            RectTransform rt = text.rectTransform;
-            GameObject bgObj = new("DeckPillBg",
-                typeof(RectTransform), typeof(Image));
-            bgObj.transform.SetParent(rt, false);
-            bgObj.transform.SetAsFirstSibling();
-            RectTransform bgRt = bgObj.GetComponent<RectTransform>();
-            bgRt.anchorMin = Vector2.zero;
-            bgRt.anchorMax = Vector2.one;
-            bgRt.offsetMin = new Vector2(-50f, -6f);
-            bgRt.offsetMax = new Vector2(10f, 6f);
-            Image bgImg = bgObj.GetComponent<Image>();
-            bgImg.sprite = UIFactory.RoundedSprite;
-            bgImg.type = Image.Type.Sliced;
-            bgImg.color = Constants.GlassTint;
-            bgImg.raycastTarget = false;
-        }
-
-        private static void ApplyLetterSpacing(TextMeshProUGUI? text, float spacing)
-        {
-            if (text == null) return;
-            text.characterSpacing = spacing;
-        }
-
-        /// <summary>
-        /// Style un TextMeshProUGUI avec les couleurs Balatro.
-        /// </summary>
-        private static void StyleText(TextMeshProUGUI? text, Color color, float size, FontStyles style)
-        {
-            if (text == null) return;
-            text.color = color;
-            text.fontSize = size;
-            text.fontStyle = style;
-        }
-
-        // File des messages : un message arrivé pendant qu'un autre vient de
-        // s'afficher attend son tour (au lieu de l'écraser dans la même frame).
-        private const float MinVisibleSeconds = 1.1f;
-        private const int MaxQueued = 3;
-        private readonly Queue<(string Text, bool Error)> _queue = new();
-        private float _shownFor;
-        private Vector2? _statusRest;
-
-        /// <summary>Le toast s'affiche (vrai = erreur) : le layout l'habille en conséquence.</summary>
-        public event System.Action<bool>? StatusStyleChanged;
 
         private void Update()
         {
@@ -265,29 +86,23 @@ namespace LevelUp.UI
                 Display(text, error);
             }
 
-            if (_statusTimer > 0f)
+            if (_statusTimer <= 0f) return;
+            _statusTimer -= Time.unscaledDeltaTime;
+            FrameBudget.Ping();
+
+            // Fondu dans la dernière demi-seconde.
+            if (_statusTimer <= 0.5f && _statusCanvasGroup != null)
             {
-                _statusTimer -= Time.unscaledDeltaTime;
-
-                // Fade out progressif dans la dernière demi-seconde
-                if (_statusTimer <= 0.5f && _statusCanvasGroup != null)
-                {
-                    _statusCanvasGroup.alpha = Mathf.Max(0f, _statusTimer / 0.5f);
-                }
-
-                if (_statusTimer <= 0f && _statusCanvasGroup != null)
-                {
-                    _statusCanvasGroup.alpha = 0f;
-                }
+                _statusCanvasGroup.alpha = Mathf.Max(0f, _statusTimer / 0.5f);
             }
         }
 
-        /// <summary>Message d'erreur (action refusée) : toast teinté, placé au même endroit.</summary>
+        /// <summary>Message d'erreur (action refusée) : toast teinté, au même endroit.</summary>
         public void ShowError(string message) => ShowStatus(message, error: true);
 
         /// <summary>
-        /// Affiche un message de statut avec pop-in animé et slide. Si un message
-        /// vient d'apparaître, celui-ci attend son tour (file courte, sans doublon).
+        /// Affiche un message. Si un autre vient d'apparaître, celui-ci attend
+        /// son tour (file courte, sans doublon).
         /// </summary>
         public void ShowStatus(string message) => ShowStatus(message, error: false);
 
@@ -313,53 +128,22 @@ namespace LevelUp.UI
         {
             _shownFor = 0f;
             StatusStyleChanged?.Invoke(error);
-            if (_statusText != null)
-            {
-                _statusText.text = message;
-            }
-            if (_statusCanvasGroup != null)
-            {
-                _statusCanvasGroup.alpha = 1f;
-            }
+            if (_statusText != null) _statusText.text = message;
+            if (_statusCanvasGroup != null) _statusCanvasGroup.alpha = 1f;
             _statusTimer = _statusDisplayDuration;
 
-            if (_statusRect != null)
-            {
-                // Scale pop via UITween
-                _statusRect.localScale = Vector3.one * 0.5f;
-                UITween.ScaleTo(_statusText!.gameObject, _statusRect, Vector3.one, 0.35f);
+            if (_statusRect == null || _statusText == null) return;
 
-                // Slide-in léger depuis le haut (le toast vit sous le bord supérieur).
-                // Cible mémorisée : un message qui en chasse un autre en plein
-                // glissement ne doit pas faire dériver la position de repos.
-                _statusRest ??= _statusRect.anchoredPosition;
-                Vector2 target = _statusRest.Value;
-                _statusRect.anchoredPosition = target + Vector2.up * 20f;
-                UITween.MoveTo(_statusText.gameObject, _statusRect, target, 0.3f);
-            }
-        }
+            _statusRect.localScale = Vector3.one * 0.9f;
+            UITween.ScaleTo(_statusText.gameObject, _statusRect, Vector3.one, 0.25f);
 
-        private void OnTurnStarted(TurnStartedEvent evt)
-        {
-            if (_currentPlayerText != null)
-            {
-                string playerName = ResolvePlayerName(evt.PlayerIndex);
-                _currentPlayerText.text = $"Tour de {playerName}";
-                _currentPlayerText.color = Constants.AccentLighter;
-
-                // Pulse de la pill au changement de tour : pop subtil, pas de flash de couleur.
-                if (_initialized)
-                {
-                    RectTransform rt = _currentPlayerText.GetComponent<RectTransform>();
-                    if (rt != null)
-                    {
-                        rt.localScale = Vector3.one * 1.05f;
-                        UITween.ScaleTo(_currentPlayerText.gameObject, rt, Vector3.one, 0.25f);
-                    }
-                }
-            }
-            UpdateCurrentLevel(evt.PlayerLevel);
-            UpdatePhaseText(evt.Phase);
+            // Glisse depuis le haut (le toast vit sous le bord supérieur). Cible
+            // mémorisée : un message qui en chasse un autre en plein glissement
+            // ne doit pas faire dériver la position de repos.
+            _statusRest ??= _statusRect.anchoredPosition;
+            Vector2 target = _statusRest.Value;
+            _statusRect.anchoredPosition = target + Vector2.up * 20f;
+            UITween.MoveTo(_statusText.gameObject, _statusRect, target, 0.3f);
         }
 
         private string ResolvePlayerName(int playerIndex)
@@ -371,91 +155,16 @@ namespace LevelUp.UI
             return $"Joueur {playerIndex + 1}";
         }
 
-        private void OnPhaseChanged(TurnPhaseChangedEvent evt)
-        {
-            UpdatePhaseText(evt.NewPhase, animated: true);
-        }
+        private void OnRoundStarted(RoundStartedEvent evt) => ShowStatus($"Manche {evt.RoundNumber}");
 
-        /// <summary>
-        /// Hint discret de phase : phrase courte, gris secondaire, puce indigo en préfixe.
-        /// Plus de couleurs criardes par phase — l'info portée est minimale et neutre.
-        /// </summary>
-        private void UpdatePhaseText(TurnPhase phase, bool animated = false)
-        {
-            if (_currentPhaseText == null) return;
+        private void OnLevelLaidDown(LevelLaidDownEvent evt) =>
+            ShowStatus($"{ResolvePlayerName(evt.PlayerIndex)} pose le niveau {evt.Level} !");
 
-            string hint = phase switch
-            {
-                TurnPhase.Draw       => "Pioche ou défausse pour commencer",
-                TurnPhase.LayDown    => "Sélectionne tes cartes puis clique la table",
-                TurnPhase.AddToMelds => "Glisse une carte sur une combinaison",
-                TurnPhase.Discard    => "Clique une carte à défausser",
-                _                    => ""
-            };
+        private void OnPlayerSkipped(PlayerSkippedEvent evt) =>
+            ShowStatus($"{ResolvePlayerName(evt.PlayerIndex)} passe son tour");
 
-            // Étape du tour (Draw → LayDown → AddToMelds → Discard) : le joueur
-            // sait toujours où il en est et ce qu'il reste à faire.
-            int step = phase switch
-            {
-                TurnPhase.Draw       => 1,
-                TurnPhase.LayDown    => 2,
-                TurnPhase.AddToMelds => 3,
-                TurnPhase.Discard    => 4,
-                _                    => 0
-            };
-
-            // Étape en indigo gras + hint en TextSecondary — sobre, lisible.
-            _currentPhaseText.text = step > 0
-                ? $"<color=#D8B66E><b>{step}/4</b></color>  {hint}"
-                : hint;
-            _currentPhaseText.color = Constants.TextSecondary;
-
-            if (animated && _initialized)
-            {
-                RectTransform phaseRt = _currentPhaseText.GetComponent<RectTransform>();
-                if (phaseRt != null)
-                {
-                    UITween.ScaleTo(
-                        _currentPhaseText.gameObject, phaseRt, Vector3.one, 0.25f);
-                    phaseRt.localScale = Vector3.one * 0.95f;
-                }
-            }
-        }
-
-        private void OnDeckChanged(DeckChangedEvent evt)
-        {
-            if (_deckCountText != null)
-            {
-                // "Pioche  42" — label muted + chiffre en blanc pour la hiérarchie.
-                _deckCountText.text =
-                    $"<color=#A7A198><size=11>Pioche</size></color>  {evt.CardsRemaining}";
-            }
-        }
-
-        private void OnRoundStarted(RoundStartedEvent evt)
-        {
-            if (_roundNumberText != null)
-            {
-                _roundNumberText.text = $"MANCHE  {evt.RoundNumber}";
-                _roundNumberText.color = Constants.TextMuted;
-            }
-            ShowStatus($"Manche {evt.RoundNumber}");
-        }
-
-        private void OnLevelLaidDown(LevelLaidDownEvent evt)
-        {
-            ShowStatus($"{ResolvePlayerName(evt.PlayerIndex)} pose le NIVEAU {evt.Level} !");
-        }
-
-        private void OnPlayerSkipped(PlayerSkippedEvent evt)
-        {
-            ShowStatus($"{ResolvePlayerName(evt.PlayerIndex)} passe son tour !");
-        }
-
-        private void OnForcedDraw(ForcedDrawEvent evt)
-        {
-            ShowStatus($"+{evt.CardCount} cartes pour {ResolvePlayerName(evt.PlayerIndex)} !");
-        }
+        private void OnForcedDraw(ForcedDrawEvent evt) =>
+            ShowStatus($"+{evt.CardCount} cartes pour {ResolvePlayerName(evt.PlayerIndex)}");
 
         /// <summary>Carte action jouée : un seul message clair, qui nomme la cible.</summary>
         private void OnActionCardPlayed(ActionCardPlayedEvent evt)
@@ -464,74 +173,14 @@ namespace LevelUp.UI
             string message = evt.Card.Type switch
             {
                 CardType.Skip      => $"{ResolvePlayerName(evt.PlayerIndex)} fait passer son tour à {target}",
-                CardType.Draw2     => $"{target} pioche 2 cartes !",
-                CardType.WildDraw2 => $"{target} pioche 2 cartes !",
+                CardType.Draw2     => $"{target} pioche 2 cartes",
+                CardType.WildDraw2 => $"{target} pioche 2 cartes",
                 _                  => ""
             };
             if (message.Length > 0) ShowStatus(message);
         }
 
-        private void OnRoundEnded(RoundEndedEvent evt)
-        {
-            // Le récap de fin de manche annonce le vainqueur : pas de toast en double.
-            _queue.Clear();
-        }
-
-        private void OnGameOver(GameOverEvent evt)
-        {
-            if (_gameOverPanel != null)
-            {
-                _gameOverPanel.SetActive(true);
-
-                // Style le panel game over
-                Image? panelImg = _gameOverPanel.GetComponent<Image>();
-                if (panelImg != null)
-                {
-                    panelImg.color = new Color(0f, 0f, 0f, 0.85f);
-                }
-
-                // Pop-in animation
-                RectTransform? panelRt = _gameOverPanel.GetComponent<RectTransform>();
-                if (_animController != null && panelRt != null)
-                {
-                    _animController.AnimatePopIn(panelRt);
-                }
-            }
-            if (_winnerText != null)
-            {
-                _winnerText.text = $"{ResolvePlayerName(evt.WinnerIndex).ToUpperInvariant()} GAGNE !";
-            }
-        }
-
-        /// <summary>
-        /// Met à jour l'affichage du niveau du joueur actif avec l'objectif.
-        /// </summary>
-        public void UpdateCurrentLevel(int level)
-        {
-            if (_currentLevelText == null) return;
-
-            string req = DescribeLevelRequirement(level);
-            // "Niveau X" en blanc, l'objectif en gris secondaire pour la hiérarchie.
-            _currentLevelText.text =
-                $"NIVEAU {level}  <color=#A7A198>· {req}</color>";
-
-            if (_initialized)
-            {
-                RectTransform rt = _currentLevelText.GetComponent<RectTransform>();
-                if (rt != null)
-                {
-                    rt.localScale = Vector3.one * 1.1f;
-                    UITween.ScaleTo(_currentLevelText.gameObject, rt, Vector3.one, 0.25f);
-                }
-            }
-        }
-
-        /// <summary>
-        /// Décrit l'objectif d'un niveau en texte court.
-        /// </summary>
-        private static string DescribeLevelRequirement(int level)
-        {
-            return ContractCatalog.DescribeLevel(level);
-        }
+        // Le récap de fin de manche annonce le vainqueur : pas de toast en double.
+        private void OnRoundEnded(RoundEndedEvent evt) => _queue.Clear();
     }
 }
