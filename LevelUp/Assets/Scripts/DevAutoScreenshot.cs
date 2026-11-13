@@ -229,8 +229,10 @@ namespace LevelUp.Core
         private IEnumerator Shot(string name)
         {
             yield return new WaitForEndOfFrame();
+            // -supersize N : capture N fois plus grande que la fenêtre (visuels de fiche Play Store).
+            int super = int.TryParse(GetArg("-supersize"), out int s) && s > 1 ? Mathf.Min(s, 4) : 1;
             string path = Path.Combine(_dir, name + ".png");
-            ScreenCapture.CaptureScreenshot(path);
+            ScreenCapture.CaptureScreenshot(path, super);
             Debug.Log($"[DevAutoScreenshot] {path}");
             yield return new WaitForSecondsRealtime(0.3f);
         }
