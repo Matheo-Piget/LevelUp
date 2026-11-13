@@ -38,6 +38,13 @@ namespace LevelUp.Core
             _rng = seed.HasValue ? new System.Random(seed.Value) : new System.Random();
         }
 
+        /// <summary>
+        /// Ordre imposé de la prochaine pioche (dernier élément = carte du dessus),
+        /// consommé par le prochain <see cref="CreateAndShuffle"/>. Sert aux donnes
+        /// scriptées ; null = paquet normal mélangé.
+        /// </summary>
+        public List<CardModel>? PresetOrder { get; set; }
+
         /// <summary>Cartes distribuées par joueur : règle de la partie, sinon la config.</summary>
         public int CardsPerPlayer => _rules.HandSize > 0 ? _rules.HandSize : _config.CardsPerPlayer;
 
@@ -48,6 +55,14 @@ namespace LevelUp.Core
         {
             _drawPile.Clear();
             _discardPiles.Clear();
+            if (PresetOrder != null)
+            {
+                // Donne imposée (tutoriel, défi) : l'ordre exact, sans mélange — une seule fois.
+                _drawPile.AddRange(PresetOrder);
+                PresetOrder = null;
+                for (int i = 0; i < playerCount; i++) _discardPiles.Add(new List<CardModel>());
+                return;
+            }
             _drawPile.AddRange(BuildComposition(_config, _rules));
 
             Shuffle();

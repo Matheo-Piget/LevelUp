@@ -150,7 +150,8 @@ namespace LevelUp.Core
                 _players.Add(new PlayerModel(i, setups[i].Name, setups[i].IsAI));
             }
 
-            _deckManager = new DeckManager(_config, seed, _rules);
+            _deckManager = new DeckManager(_config, seed, _rules) { PresetOrder = NextDeckOrder };
+            NextDeckOrder = null;
             _actionHandler = new ActionCardHandler(_deckManager, _players);
             _turnManager = new TurnManager(_players, _actionHandler);
             _executor = new GameCommandExecutor(
@@ -369,10 +370,31 @@ namespace LevelUp.Core
 
         private bool _executing;
 
+        /// <summary>
+        /// Ordre imposé du paquet pour la PROCHAINE partie (donne scriptée du
+        /// tutoriel ou d'un défi), consommé par <see cref="StartGame(IReadOnlyList{PlayerSetup}, int, MatchRules)"/>.
+        /// </summary>
+        public List<CardModel>? NextDeckOrder { get; set; }
+
+        /// <summary>
+        /// Filtre optionnel (tutoriel, défi) : une commande refusée par le filtre
+        /// n'est pas exécutée. Null en jeu normal.
+        /// </summary>
+        public System.Func<IGameCommand, bool>? CommandFilter { get; set; }
+
+        /// <summary>Une commande a été refusée par <see cref="CommandFilter"/>.</summary>
+        public event System.Action<IGameCommand>? CommandFiltered;
+
         private CommandResult ExecuteCommandCore(IGameCommand command)
         {
             if (_executor == null)
                 return CommandResult.Failure("Game not initialized");
+
+            if (CommandFilter != null && !_rebuilding && !CommandFilter(command))
+            {
+                CommandFiltered?.Invoke(command);
+                return CommandResult.Failure(CommandError.Filtered, "Commande refusée par le scénario");
+            }
 
             if (command is StartNextRoundCommand next)
                 return ExecuteStartNextRound(next);

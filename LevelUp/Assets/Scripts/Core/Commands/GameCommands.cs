@@ -132,7 +132,9 @@ namespace LevelUp.Core
         AlreadyLaidDown,
         MustLayDownFirst,
         CardDoesNotFit,
-        NoRoundInProgress
+        NoRoundInProgress,
+        /// <summary>Refusée par un scénario (tutoriel, défi) : il affiche sa propre consigne.</summary>
+        Filtered
     }
 
     public readonly struct CommandResult

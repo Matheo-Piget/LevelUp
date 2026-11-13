@@ -61,6 +61,15 @@ namespace LevelUp.UI
                 TextWeight.Display);
             title.characterSpacing = 2f;
             UISkin.Size(title.gameObject, -1f, -1f, 1f);
+            // Tutoriel jouable (depuis le menu seulement : pas en pleine partie).
+            Button tutorial = UIFactory.CreateButton(header.transform, "BtnTutorial", "TUTORIEL JOUABLE",
+                new Vector2(260f, 52f), () =>
+                {
+                    Hide();
+                    TutorialRequested?.Invoke();
+                }, primary: true);
+            UISkin.Size(tutorial.gameObject, 260f, 52f);
+            _tutorialButton = tutorial.gameObject;
             GameScreenLayout.IconButton(header.transform, "BtnCloseRules", UIIcon.Close, 20f, "Fermer", Hide);
 
             // Zone défilante
@@ -100,6 +109,14 @@ namespace LevelUp.UI
             _cg.alpha = 0f;
             _veil.SetActive(false);
         }
+
+        /// <summary>Lance le tutoriel jouable (branché par le bootstrapper).</summary>
+        public static System.Action? TutorialRequested { get; set; }
+
+        /// <summary>Vrai si le tutoriel peut être lancé maintenant (aucune partie en cours).</summary>
+        public static System.Func<bool>? TutorialAvailable { get; set; }
+
+        private GameObject? _tutorialButton;
 
         private Transform? _content;
         private int _builtFor = -1;
@@ -224,6 +241,10 @@ namespace LevelUp.UI
             _visible = true;
             _veil.SetActive(true);
             RebuildContent();
+            if (_tutorialButton != null)
+            {
+                _tutorialButton.SetActive(TutorialRequested != null && (TutorialAvailable?.Invoke() ?? false));
+            }
             _veil.transform.SetAsLastSibling();
             if (_scroll != null) _scroll.verticalNormalizedPosition = 1f;
             _panel.localScale = Vector3.one * 0.95f;

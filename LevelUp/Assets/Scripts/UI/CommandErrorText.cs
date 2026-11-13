@@ -24,6 +24,8 @@ namespace LevelUp.UI
             CommandError.MustLayDownFirst => "Pose d'abord ton contrat",
             CommandError.CardDoesNotFit => "Cette carte ne va pas sur cette combinaison",
             CommandError.NoRoundInProgress => "La manche est terminée",
+            // Le scénario (tutoriel) affiche sa propre consigne : pas de message en plus.
+            CommandError.Filtered => "",
             _ => "Action impossible"
         };
     }

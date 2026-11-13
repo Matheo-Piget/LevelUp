@@ -118,6 +118,8 @@ namespace LevelUp.Core
                 _mainMenu.OnOnlineClicked += HandleMenuOnline;
                 _mainMenu.OnResumeClicked += HandleResumeSolo;
                 _mainMenu.OnDailyClicked += HandleDaily;
+                RulesPanel.TutorialRequested = StartTutorial;
+                RulesPanel.TutorialAvailable = () => !_gameStarted;
                 _mainMenu.Setup(_mainCanvas);
             }
             else
@@ -179,6 +181,7 @@ namespace LevelUp.Core
         private void HandleReturnToMainMenu()
         {
             Time.timeScale = 1f;
+            _tutorial?.End();
             _pauseMenu?.SetPauseButtonVisible(false);
 
             if (GameSession.IsOnline)
@@ -303,6 +306,44 @@ namespace LevelUp.Core
         }
 
         private DailyPanel? _dailyPanel;
+        private TutorialDirector? _tutorial;
+
+        /// <summary>
+        /// Tutoriel jouable : une manche scriptée à deux, sans sauvegarde ni
+        /// statistiques. Lancé depuis « Comment jouer » (menu principal).
+        /// </summary>
+        private void StartTutorial()
+        {
+            if (_gameManager == null || _gameManager.Config == null || _screenLayout?.Root == null) return;
+
+            void Launch()
+            {
+                GameSession.Reset();
+                EnsureGameSystems();
+                CleanupAIPlayers();
+                _handView?.SetPlayerIndex(0);
+
+                if (_tutorial == null)
+                {
+                    _tutorial = gameObject.AddComponent<TutorialDirector>();
+                    _tutorial.Setup(_gameManager, _hudView, _screenLayout.Root, HandleReturnToMainMenu);
+                }
+
+                _saveActive = false; // la partie solo sauvegardée reste intacte
+                _gameManager.NextDeckOrder = _tutorial.BuildDeck(_gameManager.Config);
+                _gameManager.StartGame(TutorialDirector.Seats(), 1, TutorialDirector.Rules);
+
+                RefreshPlayerViews();
+                InitializePauseAndGameOver();
+                _pauseMenu?.SetPauseButtonVisible(true);
+                _gameStarted = true;
+                if (_handView != null) StartCoroutine(FirstDealCascade());
+                _tutorial.Begin();
+            }
+
+            if (_mainMenu != null) _mainMenu.Hide(Launch);
+            else Launch();
+        }
 
         private void StartSoloGame(List<PlayerSetup> setups, int seed, MatchRules rules, int difficulty,
             int mode, int dailyKey)
@@ -573,6 +614,7 @@ namespace LevelUp.Core
         private void OnRoundEndedStats(RoundEndedEvent evt)
         {
             PlayerModel? local = GameSession.GetLocalPlayer(_gameManager);
+            if (_tutorial != null && _tutorial.IsRunning) return; // le tutoriel ne compte pas
             if (local != null && local.Index == evt.WinnerIndex) PlayerProfile.RecordRoundWon();
         }
 

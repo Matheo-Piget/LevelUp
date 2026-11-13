@@ -40,7 +40,14 @@ namespace LevelUp.Core
         {
             string[] args = Environment.GetCommandLineArgs();
             int i = Array.IndexOf(args, "-inputtest");
+            bool tutorial = false;
+            if (i < 0)
+            {
+                i = Array.IndexOf(args, "-tutorialtest");
+                tutorial = true;
+            }
             if (i < 0 || i + 1 >= args.Length) return;
+            _tutorialMode = tutorial;
 
             Application.runInBackground = true;
             GameObject go = new("DevInputTest");
@@ -69,11 +76,18 @@ namespace LevelUp.Core
             GameSettings.HandSort = 0;
 
             yield return new WaitForSecondsRealtime(2.5f);
-            Click("BtnPlay");
-            yield return new WaitForSecondsRealtime(1.0f);
-            Click("BtnLaunch");
-            yield return new WaitForSecondsRealtime(0.7f);
-            if (FindButton("BtnConfirmOk") != null) Click("BtnConfirmOk");
+            if (_tutorialMode)
+            {
+                RulesPanel.TutorialRequested?.Invoke();
+            }
+            else
+            {
+                Click("BtnPlay");
+                yield return new WaitForSecondsRealtime(1.0f);
+                Click("BtnLaunch");
+                yield return new WaitForSecondsRealtime(0.7f);
+                if (FindButton("BtnConfirmOk") != null) Click("BtnConfirmOk");
+            }
             yield return new WaitForSecondsRealtime(4.5f);
 
             _gm = FindObjectOfType<GameManager>();
@@ -89,7 +103,7 @@ namespace LevelUp.Core
             }
 
             PointerInput.Override = () => _pointer;
-            IEnumerator scenarios = RunScenarios();
+            IEnumerator scenarios = _tutorialMode ? RunTutorial() : RunScenarios();
             while (true)
             {
                 bool more;
@@ -259,6 +273,122 @@ namespace LevelUp.Core
                 }
             }
             if (!laid) Line("IGNORE", "pose au relâchement sur la table", "contrat jamais réalisable en 30 tours");
+        }
+
+        private static bool _tutorialMode;
+
+        /// <summary>Joue le tutoriel de bout en bout avec de vrais gestes.</summary>
+        private IEnumerator RunTutorial()
+        {
+            if (_gm?.TurnManager == null || _hand == null || _input == null || _piles == null || _deck == null
+                || _table == null)
+            {
+                Line("ECHEC", "tutoriel", "objets de jeu introuvables");
+                yield break;
+            }
+            TurnManager tm = _gm.TurnManager;
+            PlayerModel me = _gm.Players[0];
+            yield return Capture("t1_debut");
+
+            // Geste non attendu : refusé par le scénario, rien ne bouge.
+            CommandResult wrong = _gm.ExecuteCommand(new DrawFromDiscardCommand(0, 1));
+            Check("tutoriel : geste hors scénario refusé", wrong.Error == CommandError.Filtered, $"{wrong.Error}");
+
+            yield return Tap(Center(_deck));
+            yield return new WaitForSecondsRealtime(0.9f);
+            Check("tutoriel : pioche", me.Hand.Count == TutorialDirector.HandSize + 1, $"main {me.Hand.Count}");
+
+            foreach (int value in new[] { 3, 4, 5, 9, 10, 11 })
+            {
+                yield return Tap(CardPos(IndexOfValue(value)));
+                yield return new WaitForSecondsRealtime(0.15f);
+            }
+            yield return Capture("t2_selection");
+            _input.OnLayDownButton();
+            yield return new WaitForSecondsRealtime(0.8f);
+            Check("tutoriel : pose du contrat", me.HasLaidDownThisRound && me.LaidMelds.Count == 2,
+                $"posé : {me.HasLaidDownThisRound}");
+
+            yield return DragOnMeldContaining(me, 6, 5);
+            Check("tutoriel : 6 ajouté à la suite", me.Hand.Count == 2, $"main {me.Hand.Count}");
+
+            _input.SkipToDiscard();
+            yield return new WaitForSecondsRealtime(0.3f);
+            int seventeen = IndexOfValue(17);
+            yield return Tap(CardPos(seventeen));
+            yield return new WaitForSecondsRealtime(0.3f);
+            yield return Tap(CardPos(IndexOfValue(17)));
+            yield return new WaitForSecondsRealtime(0.4f);
+            Check("tutoriel : défausse", me.Hand.Count == 1, $"main {me.Hand.Count}");
+
+            // Tour scripté de l'adversaire, puis son 12 à ramasser.
+            float waited = 0f;
+            while (waited < 8f && !(tm.CurrentPlayerIndex == 0 && tm.CurrentPhase == TurnPhase.Draw))
+            {
+                waited += Time.unscaledDeltaTime;
+                yield return null;
+            }
+            yield return new WaitForSecondsRealtime(1.0f);
+            CardModel? top = _gm.DeckManager!.PeekDiscard(1);
+            Check("tutoriel : l'adversaire a jeté le 12", top.HasValue && top.Value.Value == 12, $"{top}");
+            yield return Capture("t3_ramasser");
+
+            yield return Tap(PilePos(1));
+            yield return new WaitForSecondsRealtime(0.9f);
+            Check("tutoriel : 12 ramassé dans la défausse", me.Hand.Count == 2, $"main {me.Hand.Count}");
+
+            yield return DragOnMeldContaining(me, 12, 11);
+            Check("tutoriel : 12 ajouté à la suite", me.Hand.Count == 1, $"main {me.Hand.Count}");
+
+            _input.SkipToDiscard();
+            yield return new WaitForSecondsRealtime(0.3f);
+            yield return Tap(CardPos(0));
+            yield return new WaitForSecondsRealtime(0.3f);
+            if (_hand.CardCount > 0) yield return Tap(CardPos(0));
+            yield return new WaitForSecondsRealtime(1.2f);
+            Check("tutoriel : sortie, manche gagnée, +2 niveaux",
+                _gm.State == GameState.EndRound && me.Hand.Count == 0 && me.CurrentLevel == 3,
+                $"état {_gm.State}, main {me.Hand.Count}, niveau {me.CurrentLevel}");
+            yield return Capture("t4_fin");
+
+            Click("BtnTutorialQuit");
+            yield return new WaitForSecondsRealtime(1.2f);
+            Check("tutoriel : retour au menu", _gm.State == GameState.Setup, $"état {_gm.State}");
+        }
+
+        private IEnumerator DragOnMeldContaining(PlayerModel me, int cardValue, int meldValue)
+        {
+            for (int m = 0; m < me.LaidMelds.Count; m++)
+            {
+                bool match = false;
+                foreach (CardModel c in me.LaidMelds[m].Cards)
+                {
+                    if (c.Value == meldValue) match = true;
+                }
+                RectTransform? rect = match ? _table!.GetMeldRect(0, m) : null;
+                if (rect == null) continue;
+                yield return Drag(CardPos(IndexOfValue(cardValue)), Center(rect));
+                yield return new WaitForSecondsRealtime(0.6f);
+                yield break;
+            }
+        }
+
+        private int IndexOfValue(int value)
+        {
+            for (int i = 0; i < _hand!.CardCount; i++)
+            {
+                CardView? cv = _hand.GetCardViewAt(i);
+                if (cv != null && cv.CardModel.Value == value) return i;
+            }
+            return 0;
+        }
+
+        private IEnumerator Capture(string name)
+        {
+            yield return new WaitForEndOfFrame();
+            ScreenCapture.CaptureScreenshot(Path.Combine(_dir, name + ".png"));
+            yield return null;
+            yield return null;
         }
 
         private IEnumerator TryAddToMeld(PlayerModel me, TurnManager tm)
