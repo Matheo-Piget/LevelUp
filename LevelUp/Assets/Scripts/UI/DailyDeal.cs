@@ -71,6 +71,45 @@ namespace LevelUp.UI
             return (result > 0 ? $"gagnée en {rounds} manche{(rounds > 1 ? "s" : "")}" : "perdue") + streakText;
         }
 
+        /// <summary>Série de jours joués d'affilée encore en cours (0 si elle est rompue).</summary>
+        public static int Streak
+        {
+            get
+            {
+                int today = TodayKey;
+                int last = PlayerPrefs.GetInt(KeyLastDay, 0);
+                return last == today || last == PreviousDay(today) ? PlayerPrefs.GetInt(KeyStreak, 0) : 0;
+            }
+        }
+
+        /// <summary>Le jour situé <paramref name="daysBack"/> jours avant <paramref name="dayKey"/>.</summary>
+        public static int DayBefore(int dayKey, int daysBack)
+        {
+            DateTime d = new DateTime(dayKey / 10000, dayKey / 100 % 100, dayKey % 100).AddDays(-daysBack);
+            return d.Year * 10000 + d.Month * 100 + d.Day;
+        }
+
+        /// <summary>"13/11" pour 20261113.</summary>
+        public static string ShortDate(int dayKey) => $"{dayKey % 100:00}/{dayKey / 100 % 100:00}";
+
+        /// <summary>
+        /// Résultat à partager (presse-papiers) : la donne est la même pour tous,
+        /// on compare donc directement entre amis.
+        /// </summary>
+        public static string ShareText(int dayKey)
+        {
+            int result = ResultFor(dayKey);
+            if (result == 0) return "";
+            int rounds = Math.Abs(result);
+            string outcome = result > 0
+                ? $"gagnée en {rounds} manche{(rounds > 1 ? "s" : "")}"
+                : $"perdue en {rounds} manche{(rounds > 1 ? "s" : "")}";
+            int streak = Streak;
+            return $"LevelUp · Donne du {ShortDate(dayKey)} : {outcome}"
+                   + (streak > 1 ? $" · série de {streak} jours" : "")
+                   + "\nMême donne pour tout le monde aujourd'hui : fais mieux !";
+        }
+
         private static int PreviousDay(int dayKey)
         {
             DateTime d = new(dayKey / 10000, dayKey / 100 % 100, dayKey % 100);

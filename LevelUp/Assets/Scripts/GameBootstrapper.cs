@@ -54,6 +54,7 @@ namespace LevelUp.Core
         private AppLifecycle? _lifecycle;
         private CardFlights? _flights;
         private ConfirmDialog? _confirm;
+        private CoachAdvisor? _coach;
 
         // Partie solo sauvegardée au fil de l'eau (fermer l'appli ne perd rien).
         private bool _saveActive;
@@ -289,8 +290,19 @@ namespace LevelUp.Core
                 if (_mainMenu != null) _mainMenu.Hide(Launch);
                 else Launch();
             }
-            ConfirmReplaceSave(HideAndLaunch, null);
+            void Play() => ConfirmReplaceSave(HideAndLaunch, null);
+
+            // Fenêtre de la donne : résultat du jour, série, calendrier, partage.
+            if (_dailyPanel == null && _mainMenu?.Root != null)
+            {
+                _dailyPanel = gameObject.AddComponent<DailyPanel>();
+                _dailyPanel.Setup(_mainMenu.Root);
+            }
+            if (_dailyPanel != null) _dailyPanel.Show(Play);
+            else Play();
         }
+
+        private DailyPanel? _dailyPanel;
 
         private void StartSoloGame(List<PlayerSetup> setups, int seed, MatchRules rules, int difficulty,
             int mode, int dailyKey)
@@ -383,9 +395,12 @@ namespace LevelUp.Core
             {
                 setups.Add(new PlayerSetup($"Joueur {i + 1}", false));
             }
-            for (int i = 0; i < _aiPlayerCount; i++)
+            // Adversaires à personnalité : un prénom, et le tempérament qui va avec.
+            List<string> taken = new();
+            foreach (PlayerSetup s in setups) taken.Add(s.Name);
+            foreach (string botName in BotPersonas.Names(_aiPlayerCount, taken))
             {
-                setups.Add(new PlayerSetup($"Bot {i + 1}", true));
+                setups.Add(new PlayerSetup(botName, true));
             }
             return setups;
         }
@@ -516,6 +531,10 @@ namespace LevelUp.Core
 
             // Sauvegarde solo : chaque commande réussie est ajoutée au fichier.
             _gameManager.CommandExecuted += OnCommandExecuted;
+
+            // Conseil à la demande (aide optionnelle) : un bot Expert regarde la main du joueur.
+            _coach = new CoachAdvisor(_gameManager);
+            GameScreenLayout.Coach = _coach.Advise;
 
             EventBus.Subscribe<RoundStartedEvent>(OnRoundStarted);
             EventBus.Subscribe<RoundEndedEvent>(OnRoundEndedStats);
@@ -972,6 +991,8 @@ namespace LevelUp.Core
             EventBus.Unsubscribe<GameOverEvent>(OnGameOver);
             if (_gameManager != null) _gameManager.CommandExecuted -= OnCommandExecuted;
             CardOrigins.Provider = null;
+            GameScreenLayout.Coach = null;
+            _coach?.Dispose();
             _onlineSession?.Leave();
 
             foreach (AIPlayer ai in _aiPlayers)

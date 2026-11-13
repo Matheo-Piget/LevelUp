@@ -1,0 +1,56 @@
+# Tests EditMode à chaque push / pull request.
+#
+# Nécessite trois secrets du dépôt (Settings > Secrets and variables > Actions) :
+#   UNITY_LICENSE, UNITY_EMAIL, UNITY_PASSWORD  (licence Unity Personal, voir https://game.ci/docs/github/activation)
+# Tant qu'ils ne sont pas définis, le job s'arrête proprement sans échouer.
+name: Tests EditMode
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  editmode:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
+    steps:
+      - name: Licence Unity présente ?
+        id: license
+        run: |
+          if [ -z "$UNITY_LICENSE" ]; then
+            echo "::notice::Secrets Unity absents : tests non lancés."
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/checkout@v4
+        if: steps.license.outputs.ready == 'true'
+
+      - uses: actions/cache@v4
+        if: steps.license.outputs.ready == 'true'
+        with:
+          path: LevelUp/Library
+          key: Library-${{ hashFiles('LevelUp/Assets/**', 'LevelUp/Packages/**', 'LevelUp/ProjectSettings/**') }}
+          restore-keys: Library-
+
+      - uses: game-ci/unity-test-runner@v4
+        if: steps.license.outputs.ready == 'true'
+        env:
+          UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
+          UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
+        with:
+          projectPath: LevelUp
+          unityVersion: 2022.3.62f3
+          testMode: editmode
+          githubToken: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: actions/upload-artifact@v4
+        if: always() && steps.license.outputs.ready == 'true'
+        with:
+          name: resultats-tests
+          path: artifacts

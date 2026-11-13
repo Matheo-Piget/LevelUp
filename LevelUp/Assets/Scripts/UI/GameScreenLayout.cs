@@ -120,6 +120,7 @@ namespace LevelUp.UI
             ApplyFelt();
             RefreshContract();
             RefreshPhaseHint();
+            RefreshCoachButton();
         }
 
         private void ApplyFelt()
@@ -640,6 +641,7 @@ namespace LevelUp.UI
                          && GameSession.IsLocalHuman(_gameManager.Players[playerIndex]);
             RefreshPhaseHint();
             RefreshSkipStep();
+            RefreshCoachButton();
         }
 
         private void SetStep(TurnPhase phase, bool active)
@@ -716,6 +718,36 @@ namespace LevelUp.UI
             });
             _prepareButton = prep.gameObject;
             _prepareButton.SetActive(false);
+
+            // « Conseil » (aide optionnelle) : affiche ce que jouerait un bot Expert.
+            Image coach = UISkin.Rect(card.transform, "BtnCoach", UISkin.Glass, 12f, raycast: true);
+            UISkin.Size(coach.gameObject, 260f, 44f);
+            UISkin.Outline(coach.rectTransform, 12f, 1f, UISkin.LineStrong);
+            TextMeshProUGUI coachLabel = UISkin.Text(coach.transform, "Label", "Conseil", 15f,
+                UISkin.TextColor, TextWeight.SemiBold, TextAlignmentOptions.Center);
+            UISkin.Stretch(coachLabel.rectTransform);
+            Button coachBtn = coach.gameObject.AddComponent<Button>();
+            coachBtn.targetGraphic = coach;
+            coachBtn.onClick.AddListener(() =>
+            {
+                string? advice = Coach?.Invoke();
+                if (!string.IsNullOrEmpty(advice)) ShowHint(advice!);
+            });
+            _coachButton = coach.gameObject;
+            _coachButton.SetActive(false);
+        }
+
+        /// <summary>Source du conseil (branchée par le bootstrapper : l'UI ne dépend pas de l'IA).</summary>
+        public static System.Func<string?>? Coach { get; set; }
+
+        private GameObject? _coachButton;
+
+        private void RefreshCoachButton()
+        {
+            if (_coachButton == null) return;
+            bool show = GameSettings.HintCoach && Coach != null && _localTurn
+                        && _gameManager != null && _gameManager.State == GameState.PlayerTurn;
+            if (_coachButton.activeSelf != show) _coachButton.SetActive(show);
         }
 
         /// <summary>Branche le contrôleur d'input (bouton "Préparer la pose").</summary>
@@ -923,6 +955,7 @@ namespace LevelUp.UI
             _localTurn = false;
             SetStep(TurnPhase.Draw, active: false);
             if (_phaseHint != null) _phaseHint.text = "";
+            RefreshCoachButton();
             RefreshSkipStep();
         }
 

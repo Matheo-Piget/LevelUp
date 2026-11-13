@@ -103,7 +103,10 @@ namespace LevelUp.UI
             Switch(right.transform, "QuickDiscard", "Défausse en un toucher",
                 "Sinon : toucher pour soulever, toucher encore pour jeter",
                 () => GameSettings.QuickDiscard, v => GameSettings.QuickDiscard = v);
-            Switch(right.transform, "Haptics", "Vibrations",
+            Switch(right.transform, "HintCoach", "Bouton « Conseil »",
+                "Ce que jouerait un bot Expert à ta place, sur demande",
+                () => GameSettings.HintCoach, v => GameSettings.HintCoach = v);
+            Switch(left.transform, "Haptics", "Vibrations",
                 "Retour tactile sur les actions (téléphone)",
                 () => GameSettings.Haptics, v => GameSettings.Haptics = v);
             Switch(right.transform, "Motion", "Animations réduites",

@@ -64,6 +64,12 @@ namespace LevelUp.Core
             Click("BtnCloseRules");
             yield return new WaitForSecondsRealtime(0.6f);
 
+            Click("BtnDaily");
+            yield return new WaitForSecondsRealtime(0.8f);
+            yield return Shot("01d_daily");
+            Click("BtnDailyClose");
+            yield return new WaitForSecondsRealtime(0.6f);
+
             // Fenêtre de pseudo (rien n'est enregistré : on annule)
             Click("ProfileChip");
             yield return new WaitForSecondsRealtime(0.8f);

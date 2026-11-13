@@ -57,8 +57,9 @@ namespace LevelUp.AI
             _delayFactor = Mathf.Clamp(delayFactor, 0.2f, 3f);
             // Graine imposée (donne du jour) : les bots jouent pareil pour tout le monde.
             int baseSeed = seed ?? System.Environment.TickCount;
+            string botName = playerIndex >= 0 && playerIndex < gameManager.Players.Count ? gameManager.Players[playerIndex].Name : "";
             _brain = new BotBrain(gameManager, playerIndex, difficulty,
-                unchecked(baseSeed * 31 + playerIndex * 7919));
+                unchecked(baseSeed * 31 + playerIndex * 7919), BotPersonas.For(botName));
         }
 
         private void OnEnable()

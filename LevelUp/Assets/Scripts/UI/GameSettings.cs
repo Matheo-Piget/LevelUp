@@ -317,6 +317,16 @@ namespace LevelUp.UI
             return PlayerProfile.GamesWon >= CosmeticUnlockWins[variant];
         }
 
+        /// <summary>
+        /// Bouton « Conseil » pendant son tour : ce que jouerait un bot Expert.
+        /// Donne une information de jeu, donc coupé par défaut.
+        /// </summary>
+        public static bool HintCoach
+        {
+            get => PlayerPrefs.GetInt("levelup.hint.coach", 0) == 1;
+            set { PlayerPrefs.SetInt("levelup.hint.coach", value ? 1 : 0); Notify(); }
+        }
+
         // ─── Variantes de règles (toutes coupées par défaut : jeu classique) ───
 
         /// <summary>Tours par joueur quand la variante « limite de tours » est active.</summary>

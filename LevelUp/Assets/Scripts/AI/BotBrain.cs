@@ -56,11 +56,14 @@ namespace LevelUp.AI
         private int _unseenWilds;
         private int[] _perm = new int[4];
 
-        public BotBrain(GameManager gameManager, int seat, AIDifficulty difficulty, int seed)
+        private readonly BotStyle _style;
+
+        public BotBrain(GameManager gameManager, int seat, AIDifficulty difficulty, int seed, BotStyle? style = null)
         {
             _gm = gameManager;
             _seat = seat;
             _difficulty = difficulty;
+            _style = style ?? BotStyle.Balanced;
             _rng = new System.Random(seed);
 
             GameConfig? config = gameManager.Config;
@@ -430,7 +433,7 @@ namespace LevelUp.AI
         private float ActionDiscardBonus(bool urgent)
         {
             if (urgent && _difficulty != AIDifficulty.Easy) return 400f;
-            return _difficulty == AIDifficulty.Hard ? -8f : 20f;
+            return (_difficulty == AIDifficulty.Hard ? -8f : 20f) + _style.ActionBonus;
         }
 
         /// <summary>
@@ -486,7 +489,7 @@ namespace LevelUp.AI
                 }
             }
 
-            return danger;
+            return danger * _style.DangerFactor;
         }
 
         // ═══════════════════════════════════════════════════════════
