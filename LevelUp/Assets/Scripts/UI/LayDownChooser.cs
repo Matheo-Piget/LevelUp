@@ -48,6 +48,7 @@ namespace LevelUp.UI
 
             Image panel = UISkin.Rect(_root, "Panel", UISkin.Surface, 28f, raycast: true);
             RectTransform prt = panel.rectTransform;
+            PortraitFit.Wrap(prt);
             UISkin.Place(prt, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), Vector2.zero,
                 new Vector2(1040f, 0f));
             UISkin.Outline(prt, 28f, 1f, UISkin.Line).gameObject.AddComponent<LayoutElement>().ignoreLayout = true;

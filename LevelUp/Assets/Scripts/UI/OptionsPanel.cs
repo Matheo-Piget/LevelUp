@@ -18,6 +18,7 @@ namespace LevelUp.UI
     public class OptionsPanel : MonoBehaviour
     {
         private const float PanelWidth = 1120f;
+        private GameObject? _columns;
         private const float Inner = PanelWidth - 88f;
         private const float ColumnWidth = (Inner - 40f) / 2f;
         private const float LabelWidth = 150f;
@@ -46,6 +47,7 @@ namespace LevelUp.UI
 
             Image panel = UISkin.Rect(_veil.transform, "OptionsPanel", UISkin.Surface, 28f, raycast: true);
             _panel = panel.rectTransform;
+            PortraitFit.Wrap(_panel);
             UISkin.Place(_panel, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), Vector2.zero,
                 new Vector2(PanelWidth, 0f));
             UISkin.Outline(_panel, 28f, 1f, new Color(1f, 1f, 1f, 0.08f))
@@ -64,6 +66,7 @@ namespace LevelUp.UI
             GameScreenLayout.IconButton(header.transform, "BtnX", UIIcon.Close, 20f, "Fermer", Hide);
 
             GameObject columns = UIControls.Row(panel.transform, "Columns", Inner, -1f, 40f);
+            _columns = columns;
             columns.GetComponent<HorizontalLayoutGroup>().childAlignment = TextAnchor.UpperLeft;
             LayoutElement cle = columns.GetComponent<LayoutElement>();
             cle.minHeight = -1f;
@@ -318,6 +321,8 @@ namespace LevelUp.UI
             if (_panel == null || _panelCanvasGroup == null || _veil == null) return;
             if (_isVisible) return;
             _isVisible = true;
+            // Portrait : les deux colonnes l'une sous l'autre.
+            if (_columns != null) PortraitStack.Apply(_panel, _columns, PanelWidth, 600f);
             UIBackStack.Push(this, Hide);
             foreach (Action refresh in _refreshers) refresh();
 

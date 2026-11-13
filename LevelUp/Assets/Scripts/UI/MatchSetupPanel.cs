@@ -18,6 +18,8 @@ namespace LevelUp.UI
     public class MatchSetupPanel : MonoBehaviour
     {
         private const float PanelWidth = 1080f;
+        private GameObject? _columns;
+        private GameObject? _variantsLabel;
         private const float ColumnWidth = 476f;
         private const float LabelWidth = 150f;
         private const float ControlWidth = ColumnWidth - LabelWidth - 16f;
@@ -53,6 +55,7 @@ namespace LevelUp.UI
 
             Image panel = UISkin.Rect(_veil.transform, "MatchSetupPanel", UISkin.Surface, 28f, raycast: true);
             _panel = panel.rectTransform;
+            PortraitFit.Wrap(_panel);
             UISkin.Place(_panel, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), Vector2.zero,
                 new Vector2(PanelWidth, 0f));
             UISkin.Outline(_panel, 28f, 1f, new Color(1f, 1f, 1f, 0.08f))
@@ -74,6 +77,7 @@ namespace LevelUp.UI
 
             // Deux colonnes : la table | les règles
             GameObject columns = UIControls.Row(panel.transform, "Columns", inner, -1f, 40f);
+            _columns = columns;
             HorizontalLayoutGroup ch = columns.GetComponent<HorizontalLayoutGroup>();
             ch.childAlignment = TextAnchor.UpperLeft;
             LayoutElement cle = columns.GetComponent<LayoutElement>();
@@ -126,7 +130,7 @@ namespace LevelUp.UI
 
             // Variantes (coupées par défaut : jeu classique), une pastille chacune.
             GameObject variants = UIControls.Row(panel.transform, "Variants", inner, 44f, 10f);
-            UIControls.RowLabel(variants.transform, "Variantes", 110f);
+            _variantsLabel = UIControls.RowLabel(variants.transform, "Variantes", 110f).gameObject;
             VariantChip(variants.transform, "VarBonus", "Sortie : +1 niveau",
                 () => GameSettings.VariantSingleBonus, v => GameSettings.VariantSingleBonus = v);
             VariantChip(variants.transform, "VarFinal", "Dernier niveau obligatoire",
@@ -291,6 +295,15 @@ namespace LevelUp.UI
         {
             if (_veil == null || _panel == null || _cg == null) return;
             _onConfirm = onConfirm;
+            // Portrait : colonnes empilées, fenêtre étroite ; l'étiquette « Variantes » laisse la place aux pastilles.
+            if (_columns != null)
+            {
+                PortraitStack.Apply(_panel, _columns, PanelWidth, 780f);
+                bool portrait = GameScreenLayout.IsPortrait;
+                if (_variantsLabel != null) _variantsLabel.SetActive(!portrait);
+                if (_specialCaption != null)
+                    UISkin.Size(_specialCaption.gameObject, (portrait ? 780f : PanelWidth) - 88f - 36f - 14f - 36f);
+            }
             _applyOnClose = applyOnClose;
             if (_cancelButton != null) _cancelButton.SetActive(!applyOnClose);
             if (_title != null) _title.text = title;

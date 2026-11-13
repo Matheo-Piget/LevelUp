@@ -40,6 +40,7 @@ namespace LevelUp.UI
 
             Image panel = UISkin.Rect(_veil.transform, "ProfilePanel", UISkin.Surface, 28f, raycast: true);
             _panel = panel.rectTransform;
+            PortraitFit.Wrap(_panel);
             UISkin.Place(_panel, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), new Vector2(0f, 60f),
                 new Vector2(PanelWidth, 0f));
             UISkin.Outline(_panel, 28f, 1f, new Color(1f, 1f, 1f, 0.08f))

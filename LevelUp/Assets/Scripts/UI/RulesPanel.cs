@@ -39,6 +39,7 @@ namespace LevelUp.UI
 
             Image panel = UISkin.Rect(_veil.transform, "RulesPanel", UISkin.Surface, 28f, raycast: true);
             _panel = panel.rectTransform;
+            PortraitFit.Wrap(_panel);
             _panel.anchorMin = new Vector2(0.5f, 0f);
             _panel.anchorMax = new Vector2(0.5f, 1f);
             _panel.pivot = new Vector2(0.5f, 0.5f);

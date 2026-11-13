@@ -452,6 +452,10 @@ namespace LevelUp.UI
             for (int i = 0; i < _floatingCards.Count; i++)
             {
                 if (_floatingCards[i] == null) continue;
+                // Portrait : les cartes décoratives (placées pour le paysage) chevaucheraient le menu.
+                bool visible = !GameScreenLayout.IsPortrait;
+                if (_floatingCards[i].gameObject.activeSelf != visible) _floatingCards[i].gameObject.SetActive(visible);
+                if (!visible) continue;
                 float phase = _cardPhases[i] + _time * _cardSpeeds[i];
                 float dx = Mathf.Sin(phase) * _cardAmplitudes[i].x;
                 float dy = Mathf.Cos(phase * 0.85f) * _cardAmplitudes[i].y;

@@ -61,6 +61,7 @@ namespace LevelUp.UI
             UISkin.EnsureFonts();
 
             Image card = UISkin.Rect(parent, "RoundSummary", UISkin.WithAlpha(UISkin.Surface, 0.98f), 26f, raycast: true);
+            PortraitFit.Wrap(card.rectTransform);
             _root = card.rectTransform;
             UISkin.Place(_root, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), new Vector2(0f, 60f),
                 new Vector2(Width, 0f));

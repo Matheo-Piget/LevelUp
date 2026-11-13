@@ -137,7 +137,7 @@ namespace LevelUp.Core
                 Button skip = UIFactory.CreateButton(_screenLayout.Root, "BtnReplaySkip", "PASSER LA RELECTURE",
                     new Vector2(300f, 52f), () => _replaySkip = true);
                 UISkin.Place((RectTransform)skip.transform, new Vector2(1f, 0f), new Vector2(1f, 0f),
-                    new Vector2(-40f, 142f), new Vector2(300f, 52f));
+                    new Vector2(-40f, GameScreenLayout.IsPortrait ? 384f : 142f), new Vector2(300f, 52f));
                 skip.gameObject.AddComponent<UIInputBlocker>();
                 _replaySkipButton = skip.gameObject;
             }

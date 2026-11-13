@@ -67,7 +67,13 @@ namespace LevelUp.Core
             _gm.CommandExecuted += OnExecuted;
             EventBus.Subscribe<LevelLaidDownEvent>(OnLaidDown);
             EventBus.Subscribe<RoundSummaryEvent>(OnRoundSummary);
-            if (_banner != null) _banner.SetActive(true);
+            if (_banner != null)
+            {
+                _banner.SetActive(true);
+                // Portrait : au-dessus des étapes (la carte contrat occupe le coin bas-gauche).
+                ((RectTransform)_banner.transform).anchoredPosition =
+                    GameScreenLayout.IsPortrait ? new Vector2(16f, 566f) : new Vector2(40f, 196f);
+            }
             RefreshBanner();
         }
 

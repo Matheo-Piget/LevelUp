@@ -146,6 +146,7 @@ namespace LevelUp.UI
             // Panneau (maquette : #161B22 radius 28 + liseré)
             Image panel = UISkin.Rect(_root, "GOPanel", UISkin.Surface, 28f, raycast: true);
             _panel = panel.rectTransform;
+            PortraitFit.Wrap(_panel);
             UISkin.Place(_panel, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), Vector2.zero,
                 new Vector2(640f, 400f + rowsHeight + (ranking.Count > 0 ? 40f : 0f)));
             UISkin.Outline(_panel, 28f, 1f, new Color(1f, 1f, 1f, 0.08f));

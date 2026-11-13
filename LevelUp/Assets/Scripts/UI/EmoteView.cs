@@ -34,7 +34,7 @@ namespace LevelUp.UI
 
             Image button = UISkin.Rect(root, "BtnEmote", UISkin.Surface, 16f, raycast: true);
             button.gameObject.AddComponent<UIInputBlocker>();
-            UISkin.Place(button.rectTransform, new Vector2(1f, 0f), new Vector2(1f, 0f), new Vector2(-40f, 142f),
+            UISkin.Place(button.rectTransform, new Vector2(1f, 0f), new Vector2(1f, 0f), new Vector2(-40f, GameScreenLayout.IsPortrait ? 384f : 142f),
                 new Vector2(132f, 48f));
             UISkin.Outline(button.rectTransform, 16f, 1f, UISkin.Line);
             TextMeshProUGUI label = UISkin.Text(button.transform, "Label", "Réagir", 15f, UISkin.TextColor,
