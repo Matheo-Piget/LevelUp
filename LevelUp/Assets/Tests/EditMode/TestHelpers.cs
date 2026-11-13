@@ -13,6 +13,9 @@ namespace LevelUp.Tests
 
         public static void Reset() => _nextId = 0;
 
+        /// <summary>Repart d'un id donné (évite les collisions avec les ids 0..N du vrai paquet).</summary>
+        public static void ResetTo(int firstId) => _nextId = firstId;
+
         public static CardModel Normal(int value, CardColor color)
             => new(_nextId++, value, color);
 

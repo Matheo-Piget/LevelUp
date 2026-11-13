@@ -45,6 +45,30 @@ namespace LevelUp.Core
         /// <summary>Compat : indique si le joueur sera sauté au moins une fois.</summary>
         public bool IsSkipped => SkipCount > 0;
 
+        /// <summary>
+        /// Points de pénalité cumulés sur la partie : valeur des cartes restées en
+        /// main à chaque fin de manche (cf. <see cref="PenaltyFor"/>). Ne décide pas
+        /// du vainqueur (ce sont les niveaux) : départage le classement à niveau
+        /// égal et donne un enjeu aux joueurs distancés — moins c'est mieux.
+        /// </summary>
+        public int PenaltyPoints { get; internal set; }
+
+        /// <summary>Pénalité d'une carte restée en main : 5 (1–9), 10 (10–18), 15 (Passe / +2), 25 (joker).</summary>
+        public static int PenaltyFor(CardModel card)
+        {
+            if (card.IsWild) return 25;
+            if (card.IsAction) return 15;
+            return card.Value >= 10 ? 10 : 5;
+        }
+
+        /// <summary>Pénalité totale de la main actuelle.</summary>
+        public int HandPenalty()
+        {
+            int total = 0;
+            foreach (CardModel card in _hand) total += PenaltyFor(card);
+            return total;
+        }
+
         /// <summary>La main du joueur (lecture seule).</summary>
         public IReadOnlyList<CardModel> Hand => _hand;
 
@@ -112,6 +136,23 @@ namespace LevelUp.Core
 
         /// <summary>Vérifie si la main contient une carte donnée.</summary>
         public bool HandContains(CardModel card) => _hand.Contains(card);
+
+        /// <summary>
+        /// Retrouve dans la main la carte portant cet identifiant — la vraie,
+        /// avec sa valeur et sa couleur d'origine. L'exécuteur s'en sert pour ne
+        /// jamais se fier aux champs d'une carte reçue du réseau.
+        /// </summary>
+        public bool TryGetHandCard(int cardId, out CardModel card)
+        {
+            for (int i = 0; i < _hand.Count; i++)
+            {
+                if (_hand[i].Id != cardId) continue;
+                card = _hand[i];
+                return true;
+            }
+            card = default;
+            return false;
+        }
 
         /// <summary>Retourne une combinaison posée par index.</summary>
         public Meld GetMeld(int index) => _laidMelds[index];
@@ -214,6 +255,26 @@ namespace LevelUp.Core
                 SortRunCards(Cards);
             }
             return true;
+        }
+
+        /// <summary>
+        /// Ordre d'affichage d'une combinaison : suite rangée avec les jokers dans
+        /// les trous (comme sur la table du modèle), série / couleur par valeur
+        /// croissante avec les jokers à la fin.
+        /// </summary>
+        public static void ArrangeForDisplay(List<CardModel> cards, MeldType type)
+        {
+            if (type == MeldType.Run && CardExtensions.IsValidRun(cards))
+            {
+                SortRunCards(cards);
+                return;
+            }
+            cards.Sort((a, b) =>
+            {
+                if (a.IsWild != b.IsWild) return a.IsWild ? 1 : -1;
+                int v = a.Value.CompareTo(b.Value);
+                return v != 0 ? v : a.Id.CompareTo(b.Id);
+            });
         }
 
         /// <summary>

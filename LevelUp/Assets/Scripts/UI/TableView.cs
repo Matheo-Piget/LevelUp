@@ -114,6 +114,13 @@ namespace LevelUp.UI
       _leftMargin = 0f;
       _maxContentWidth = 0f;
       _meldHitPadding = 25f;
+
+      // Canvas imbriqué : une combinaison qui s'illumine ou une carte qui
+      // arrive ne redessine que la table, pas tout l'écran de jeu.
+      if (_tableContainer != null && _tableContainer.GetComponent<Canvas>() == null)
+      {
+        _tableContainer.gameObject.AddComponent<Canvas>();
+      }
     }
 
     // L'en-tête "COMBINAISONS POSÉES" est visible dès le début (table vide comprise).
@@ -131,25 +138,42 @@ namespace LevelUp.UI
         _ownerOrder.Add(evt.PlayerIndex);
       }
 
-      foreach (List<CardModel> meldCards in evt.Melds)
+      // Origines AVANT de créer les groupes : les cartes sont encore dans la main.
+      List<MeldGroupView> created = new();
+      for (int m = 0; m < evt.Melds.Count; m++)
       {
-        CreateMeldGroup(evt.PlayerIndex, meldCards);
+        List<CardModel> meldCards = evt.Melds[m];
+        MeldType type = evt.MeldTypes != null && m < evt.MeldTypes.Count
+            ? evt.MeldTypes[m]
+            : ClassifyMeld(meldCards);
+        MeldGroupView? group = CreateMeldGroup(evt.PlayerIndex, meldCards, type, animateFrom: evt.PlayerIndex);
+        if (group != null) created.Add(group);
       }
       LayoutTable();
+      foreach (MeldGroupView g in created) g.PlayArrivals();
+      if (evt.PlayerIndex != _localIndex)
+      {
+        foreach (MeldGroupView g in created) g.Flash();
+      }
     }
 
     private void OnCardAddedToMeld(CardAddedToMeldEvent evt)
     {
       if (!_playerMeldGroups.TryGetValue(evt.MeldOwnerIndex, out List<MeldGroupView>? groups)) return;
       if (evt.MeldIndex < 0 || evt.MeldIndex >= groups.Count) return;
-      groups[evt.MeldIndex].TryAddCard(evt.Card, _cardPrefab);
+      MeldGroupView group = groups[evt.MeldIndex];
+      group.TryAddCard(evt.Card, _cardPrefab, CardOrigins.Of(evt.PlayerIndex, evt.Card));
       LayoutTable();
+      group.PlayArrivals();
+      // Coup d'un adversaire : la combinaison complétée s'illumine un instant.
+      if (evt.PlayerIndex != _localIndex) group.Flash();
     }
 
-    private void CreateMeldGroup(int playerIndex, List<CardModel> cards)
+    private MeldGroupView? CreateMeldGroup(int playerIndex, List<CardModel> cards, MeldType type,
+        int animateFrom = -1)
     {
       EnsureContent();
-      if (_content == null || _cardPrefab == null) return;
+      if (_content == null || _cardPrefab == null) return null;
 
       GameObject groupObj = new($"Meld_P{playerIndex}", typeof(RectTransform), typeof(Image));
       groupObj.transform.SetParent(_content, false);
@@ -159,13 +183,15 @@ namespace LevelUp.UI
       grt.pivot = new Vector2(0f, 1f);
 
       MeldGroupView groupView = groupObj.AddComponent<MeldGroupView>();
-      groupView.Initialize(playerIndex, OwnerName(playerIndex), ClassifyMeld(cards), _cardInMeldSpacing);
+      groupView.Initialize(playerIndex, OwnerName(playerIndex), type, _cardInMeldSpacing);
 
       foreach (CardModel card in cards)
       {
-        groupView.TryAddCard(card, _cardPrefab);
+        CardOrigin? origin = animateFrom >= 0 ? CardOrigins.Of(animateFrom, card) : null;
+        groupView.TryAddCard(card, _cardPrefab, origin);
       }
       _playerMeldGroups[playerIndex].Add(groupView);
+      return groupView;
     }
 
     private static MeldType ClassifyMeld(List<CardModel> cards)
@@ -254,7 +280,8 @@ namespace LevelUp.UI
     /// 0 si dedans) — snap magnétique du drag.
     /// </summary>
     public bool TryGetNearestMeld(Vector2 screenPosition, float maxDistance,
-        out int ownerIndex, out int meldIndex, out Vector2 meldScreenCenter)
+        out int ownerIndex, out int meldIndex, out Vector2 meldScreenCenter,
+        System.Func<int, int, bool>? accepts = null)
     {
       ownerIndex = -1;
       meldIndex = -1;
@@ -266,6 +293,9 @@ namespace LevelUp.UI
       {
         for (int i = 0; i < kvp.Value.Count; i++)
         {
+          // Seules les combinaisons qui acceptent la carte attirent (sinon la
+          // pastille « Relâche pour poser » promettrait un dépôt refusé).
+          if (accepts != null && !accepts(kvp.Key, i)) continue;
           RectTransform rt = (RectTransform)kvp.Value[i].transform;
           if (!RectTransformUtility.ScreenPointToLocalPointInRectangle(rt, screenPosition, null, out Vector2 local))
             continue;
@@ -325,7 +355,7 @@ namespace LevelUp.UI
         _ownerOrder.Add(player.Index);
         foreach (Meld meld in player.LaidMelds)
         {
-          CreateMeldGroup(player.Index, new List<CardModel>(meld.Cards));
+          CreateMeldGroup(player.Index, new List<CardModel>(meld.Cards), meld.Type);
         }
       }
       LayoutTable();
@@ -438,7 +468,7 @@ namespace LevelUp.UI
       _header.text = $"{_ownerName} · <color=#A7A198>{type}</color>";
     }
 
-    public bool TryAddCard(CardModel card, GameObject? cardPrefab)
+    public bool TryAddCard(CardModel card, GameObject? cardPrefab, CardOrigin? origin = null)
     {
       if (cardPrefab == null || _cardsRoot == null) return false;
 
@@ -455,10 +485,110 @@ namespace LevelUp.UI
       rt.localRotation = Quaternion.identity;
 
       _cards.Add(cardView);
-      _cards.Sort((a, b) => a.CardModel.Value.CompareTo(b.CardModel.Value));
+      ArrangeCards();
       LayoutCards();
       UpdateHeader();
+      if (origin.HasValue) _pendingArrivals.Add((cardView, origin.Value));
       return true;
+    }
+
+    // Cartes qui doivent glisser depuis leur origine (main, pastille joueur)
+    // une fois la table mise en page (positions finales connues).
+    private readonly List<(CardView View, CardOrigin From)> _pendingArrivals = new();
+    private Coroutine? _flash;
+
+    /// <summary>Lance les trajets des cartes ajoutées (après la mise en page de la table).</summary>
+    public void PlayArrivals()
+    {
+      if (_pendingArrivals.Count == 0) return;
+      if (!isActiveAndEnabled)
+      {
+        _pendingArrivals.Clear();
+        return;
+      }
+      foreach ((CardView view, CardOrigin from) in _pendingArrivals)
+      {
+        if (view != null) StartCoroutine(Arrive(view, from));
+      }
+      _pendingArrivals.Clear();
+    }
+
+    private System.Collections.IEnumerator Arrive(CardView view, CardOrigin from)
+    {
+      RectTransform rt = view.RectTransform;
+      Vector2 target = rt.anchoredPosition;
+      Transform parent = rt.parent;
+      Vector3 local = parent.InverseTransformPoint(from.Position);
+      Vector2 start = new(local.x, local.y);
+      float parentScale = Mathf.Max(0.0001f, parent.lossyScale.x);
+      float startScale = from.Scale / parentScale;
+      const float duration = 0.34f;
+
+      rt.SetAsLastSibling();
+      float elapsed = 0f;
+      while (elapsed < duration)
+      {
+        if (view == null) yield break;
+        elapsed += Time.deltaTime;
+        float k = UITween.EaseInOutCubic(Mathf.Clamp01(elapsed / duration));
+        rt.anchoredPosition = Vector2.Lerp(start, target, k);
+        rt.localScale = Vector3.one * Mathf.Lerp(startScale, CardScale, k);
+        yield return null;
+      }
+      if (view == null) yield break;
+      rt.anchoredPosition = target;
+      rt.localScale = Vector3.one * CardScale;
+      LayoutCards(); // ordre de superposition d'origine
+    }
+
+    /// <summary>Illumine brièvement la combinaison (coup d'un adversaire).</summary>
+    public void Flash()
+    {
+      if (!isActiveAndEnabled || _ring == null) return;
+      if (_flash != null) StopCoroutine(_flash);
+      _flash = StartCoroutine(FlashRoutine());
+    }
+
+    private System.Collections.IEnumerator FlashRoutine()
+    {
+      const float duration = 1.6f;
+      float elapsed = 0f;
+      UISkin.SetStroke(_ring!, 20f, 2f);
+      while (elapsed < duration)
+      {
+        elapsed += Time.deltaTime;
+        float k = Mathf.Clamp01(elapsed / duration);
+        float a = 1f - k * k;
+        _ring!.color = Color.Lerp(UISkin.Line, UISkin.AccentLight, a);
+        if (_bg != null) _bg.color = Color.Lerp(UISkin.Glass, UISkin.WithAlpha(UISkin.Accent, 0.14f), a);
+        yield return null;
+      }
+      SetHover(false);
+      _flash = null;
+    }
+
+    /// <summary>Ordre d'affichage du modèle : jokers à leur place dans une suite, à la fin sinon.</summary>
+    private void ArrangeCards()
+    {
+      List<CardModel> models = new(_cards.Count);
+      foreach (CardView cv in _cards) models.Add(cv.CardModel);
+      Meld.ArrangeForDisplay(models, _meldType);
+
+      List<CardView> ordered = new(_cards.Count);
+      foreach (CardModel m in models)
+      {
+        foreach (CardView cv in _cards)
+        {
+          if (cv.CardModel.Id == m.Id && !ordered.Contains(cv))
+          {
+            ordered.Add(cv);
+            break;
+          }
+        }
+      }
+      if (ordered.Count != _cards.Count) return;
+      _cards.Clear();
+      _cards.AddRange(ordered);
     }
 
     private float Spacing()

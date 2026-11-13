@@ -10,7 +10,8 @@ namespace LevelUp.Core
 {
     /// <summary>
     /// Point d'entrée de la scène de jeu.
-    /// Câble tous les systèmes, applique le style visuel Balatro, et lance la partie.
+    /// Câble tous les systèmes, applique le style visuel, et lance les parties :
+    /// solo (nouvelle, reprise de sauvegarde, donne du jour) et en ligne.
     /// </summary>
     public class GameBootstrapper : MonoBehaviour
     {
@@ -26,7 +27,6 @@ namespace LevelUp.Core
         [SerializeField] private GameInputController? _inputController;
         [SerializeField] private BalatroEffects? _balatroEffects;
         [SerializeField] private DiscardPileView? _discardPileView;
-        [SerializeField] private TurnBannerView? _turnBannerView;
 
         [Header("Visual")]
         [SerializeField] private Canvas? _mainCanvas;
@@ -49,68 +49,80 @@ namespace LevelUp.Core
         private bool _syncingViews;
         private ConnectionOverlay? _connectionOverlay;
         private GameScreenLayout? _screenLayout;
+        private RoundSummaryView? _roundSummary;
+        private TurnTimer? _turnTimer;
+        private AppLifecycle? _lifecycle;
+        private CardFlights? _flights;
+        private ConfirmDialog? _confirm;
+
+        // Partie solo sauvegardée au fil de l'eau (fermer l'appli ne perd rien).
+        private bool _saveActive;
+        private int _soloMode;      // 0 = libre, 1 = donne du jour
+        private int _dailyKey;
+        private int _soloDifficulty;
 
         private void Start()
         {
-            ApplyDeviceSettings();
+            Screen.sleepTimeout = SleepTimeout.NeverSleep;
             GameSettings.Initialize();
+
+            // Jeu réel : la manche suivante attend la fin du récap (StartNextRoundCommand).
+            // Identique sur tous les appareils d'une partie en ligne.
+            if (_gameManager != null) _gameManager.AutoStartNextRound = false;
+
             InitializeVisuals();
+
+            gameObject.AddComponent<AudioManager>().Initialize(_gameManager);
+            _lifecycle = gameObject.AddComponent<AppLifecycle>();
+            _lifecycle.Initialize(() => _gameStarted && (_mainMenu == null || !_mainMenu.IsVisible));
+
             ShowMainMenu();
         }
 
-        /// <summary>
-        /// Réglages device : demande 120 fps — sur Android, Swappy transmet la
-        /// cible à l'OS qui bascule l'écran sur son mode le plus rapide (120 Hz
-        /// sur Galaxy S25). Ne PAS lire Screen.currentResolution au démarrage :
-        /// elle rapporte le mode courant (souvent 60 Hz tant qu'aucune app n'a
-        /// demandé plus), pas le maximum de la dalle. Si l'écran est limité à
-        /// 60 Hz, vsync plafonne sans autre effet. Empêche aussi la mise en
-        /// veille pendant qu'on lit sa main.
-        /// </summary>
-        private static void ApplyDeviceSettings()
-        {
-            Application.targetFrameRate = 120;
-            Screen.sleepTimeout = SleepTimeout.NeverSleep;
-        }
+        // ────────────────────────────────────────────────────
+        //  MENU
+        // ────────────────────────────────────────────────────
 
-        /// <summary>
-        /// Affiche le menu principal. La partie démarre quand le joueur clique sur JOUER.
-        /// </summary>
+        /// <summary>Affiche le menu principal (REPRENDRE si une partie est sauvegardée).</summary>
         private void ShowMainMenu()
         {
             if (_mainCanvas == null)
             {
                 // Fallback : démarre direct si pas de canvas
-                InitializeGame();
+                StartNewSoloGame();
                 return;
             }
 
             if (_mainMenu == null)
             {
                 _mainMenu = gameObject.AddComponent<MainMenuController>();
-                _mainMenu.OnPlayClicked += HandleMenuPlay;
+                _mainMenu.OnPlayClicked += RequestNewSoloGame;
                 _mainMenu.OnOnlineClicked += HandleMenuOnline;
+                _mainMenu.OnResumeClicked += HandleResumeSolo;
+                _mainMenu.OnDailyClicked += HandleDaily;
                 _mainMenu.Setup(_mainCanvas);
             }
             else
             {
                 _mainMenu.Show();
             }
+            RefreshMenuStatus();
         }
 
-        private void HandleMenuPlay()
+        private void RefreshMenuStatus()
         {
-            if (_gameStarted)
+            if (_mainMenu == null) return;
+            SavedGame? saved = SaveGame.Load();
+            if (saved == null)
             {
-                // Reprise depuis pause → rien à initialiser, juste masquer menu
-                _pauseMenu?.SetPauseButtonVisible(true);
-                return;
+                _mainMenu.SetResume(null);
             }
-            InitializeGame();
-            InitializePauseAndGameOver();
-            // Le bouton pause a pu être masqué par un précédent retour au menu.
-            _pauseMenu?.SetPauseButtonVisible(true);
-            _gameStarted = true;
+            else
+            {
+                string what = saved.Mode == 1 ? "donne du jour" : "partie";
+                _mainMenu.SetResume($"{what} · manche {RoundOf(saved)}");
+            }
+            _mainMenu.SetDailyStatus(DailyDeal.Status());
         }
 
         private void InitializePauseAndGameOver()
@@ -123,6 +135,7 @@ namespace LevelUp.Core
                 _pauseMenu.OnMainMenuRequested += HandleReturnToMainMenu;
                 _pauseMenu.Setup(_mainCanvas);
                 _screenLayout?.BindPauseMenu(_pauseMenu);
+                _lifecycle?.BindPause(_pauseMenu);
             }
 
             if (_gameOverCelebration == null)
@@ -135,25 +148,30 @@ namespace LevelUp.Core
                 {
                     List<string> names = new();
                     foreach (PlayerModel p in _gameManager.Players) names.Add(p.Name);
-                    _gameOverCelebration.PlayerNames = names;
+                    BindGameOverScreen(names);
                 }
             }
         }
 
+        /// <summary>
+        /// Retour au menu : la partie est ABANDONNÉE (plus rien ne tourne derrière
+        /// le menu : ni bots, ni minuteur, ni input). Une partie solo reste
+        /// sauvegardée et se reprend avec REPRENDRE.
+        /// </summary>
         private void HandleReturnToMainMenu()
         {
-            // Réinitialise le temps et la partie, puis réaffiche le menu
             Time.timeScale = 1f;
             _pauseMenu?.SetPauseButtonVisible(false);
 
-            // Quitter proprement la session en ligne le cas échéant
             if (GameSession.IsOnline)
             {
                 _onlineSession?.Leave();
                 GameSession.Reset();
             }
 
-            RestartGame();
+            CleanupAIPlayers();
+            _gameManager?.AbandonGame();
+            _saveActive = false;
             _gameStarted = false;
             ShowMainMenu();
         }
@@ -177,7 +195,7 @@ namespace LevelUp.Core
                 return;
             }
 
-            RestartGame();
+            StartNewSoloGame();
         }
 
         private void CleanupAIPlayers()
@@ -189,51 +207,182 @@ namespace LevelUp.Core
             _aiPlayers.Clear();
         }
 
-        private void RestartGame()
-        {
-            CleanupAIPlayers();
-
-            // Relance une partie SOLO (post-replay ou retour de session en ligne)
-            if (_gameManager != null)
-            {
-                _handView?.SetPlayerIndex(0);
-                ApplyMatchSettings();
-                _gameManager.StartGame(_humanPlayerCount, _aiPlayerCount, GameSettings.RandomContracts);
-                CreateAIPlayers();
-
-                // Le nombre de joueurs a pu changer dans les options entre
-                // deux parties : les vues indexées par joueur sont reconstruites.
-                RefreshPlayerViews();
-
-                if (_handView != null)
-                {
-                    StartCoroutine(FirstDealCascade());
-                }
-            }
-        }
+        // ────────────────────────────────────────────────────
+        //  PARTIES SOLO
+        // ────────────────────────────────────────────────────
 
         /// <summary>
-        /// Applique les réglages de partie choisis dans les options
-        /// (nombre de joueurs total → nombre de bots).
+        /// JOUER depuis le menu : si une partie est sauvegardée, on demande avant
+        /// de l'écraser (annuler ramène au menu, la partie reste à reprendre).
         /// </summary>
-        private void ApplyMatchSettings()
+        private void RequestNewSoloGame()
         {
-            _aiPlayerCount = Mathf.Max(1, GameSettings.PlayerCount - _humanPlayerCount);
+            ConfirmReplaceSave(StartNewSoloGame, ShowMainMenu);
         }
 
-        private void CreateAIPlayers()
+        private void ConfirmReplaceSave(System.Action proceed, System.Action? cancel)
+        {
+            SavedGame? saved = SaveGame.Load();
+            if (saved == null || _mainCanvas == null)
+            {
+                proceed();
+                return;
+            }
+
+            if (_confirm == null)
+            {
+                _confirm = gameObject.AddComponent<ConfirmDialog>();
+                _confirm.Setup(_mainCanvas.transform);
+            }
+            string what = saved.Mode == 1 ? "La donne du jour" : "Une partie";
+            _confirm.Show("Partie en cours",
+                $"{what} est sauvegardée (manche {RoundOf(saved)}). La nouvelle partie la remplacera.",
+                "REMPLACER", proceed, cancel);
+        }
+
+        private static int RoundOf(SavedGame saved)
+        {
+            int round = 1;
+            foreach (IGameCommand c in saved.History)
+            {
+                if (c is StartNextRoundCommand) round++;
+            }
+            return round;
+        }
+
+        /// <summary>Nouvelle partie solo avec les réglages de "Nouvelle partie".</summary>
+        private void StartNewSoloGame()
+        {
+            _aiPlayerCount = Mathf.Max(1, GameSettings.PlayerCount - _humanPlayerCount);
+            StartSoloGame(BuildSoloSetups(), System.Environment.TickCount, GameSettings.BuildMatchRules(),
+                GameSettings.Difficulty, mode: 0, dailyKey: 0);
+        }
+
+        /// <summary>Donne du jour : même partie pour tout le monde aujourd'hui.</summary>
+        private void HandleDaily()
+        {
+            int key = DailyDeal.TodayKey;
+            void Launch()
+            {
+                StartSoloGame(DailyDeal.Seats(), DailyDeal.SeedFor(key), DailyDeal.Rules, DailyDeal.Difficulty,
+                    mode: 1, dailyKey: key);
+            }
+            void HideAndLaunch()
+            {
+                if (_mainMenu != null) _mainMenu.Hide(Launch);
+                else Launch();
+            }
+            ConfirmReplaceSave(HideAndLaunch, null);
+        }
+
+        private void StartSoloGame(List<PlayerSetup> setups, int seed, MatchRules rules, int difficulty,
+            int mode, int dailyKey)
+        {
+            if (_gameManager == null)
+            {
+                Debug.LogError("GameManager is not assigned to GameBootstrapper!");
+                return;
+            }
+
+            GameSession.Reset();
+            EnsureGameSystems();
+            CleanupAIPlayers();
+            _handView?.SetPlayerIndex(0);
+
+            _soloMode = mode;
+            _dailyKey = dailyKey;
+            _soloDifficulty = difficulty;
+            _gameManager.StartGame(setups, seed, rules);
+            _saveActive = SaveGame.Begin(setups, seed, rules, difficulty, mode, dailyKey);
+
+            CreateAIPlayers(difficulty, mode == 1 ? seed : (int?)null);
+            RefreshPlayerViews();
+            InitializePauseAndGameOver();
+            _pauseMenu?.SetPauseButtonVisible(true);
+            _gameStarted = true;
+
+            if (_handView != null) StartCoroutine(FirstDealCascade());
+        }
+
+        /// <summary>REPRENDRE : reconstruit la partie sauvegardée en rejouant ses commandes.</summary>
+        private void HandleResumeSolo()
+        {
+            if (_gameManager == null) return;
+            SavedGame? saved = SaveGame.Load();
+            if (saved == null)
+            {
+                RefreshMenuStatus();
+                return;
+            }
+
+            void Resume()
+            {
+                GameSession.Reset();
+                EnsureGameSystems();
+                CleanupAIPlayers();
+                _handView?.SetPlayerIndex(0);
+
+                bool ok = _gameManager.RebuildFromHistory(saved.Players, saved.Seed, saved.Rules, saved.History);
+                if (!ok || _gameManager.State == GameState.GameOver || _gameManager.State == GameState.Setup)
+                {
+                    Debug.LogWarning("[Save] Sauvegarde incohérente : nouvelle partie");
+                    SaveGame.Delete();
+                    StartNewSoloGame();
+                    _hudView?.ShowStatus("Sauvegarde illisible : nouvelle partie");
+                    return;
+                }
+
+                _soloMode = saved.Mode;
+                _dailyKey = saved.DailyKey;
+                _soloDifficulty = saved.BotDifficulty;
+                _saveActive = true;
+
+                RefreshPlayerViews();
+                InitializePauseAndGameOver();
+                _pauseMenu?.SetPauseButtonVisible(true);
+                _gameStarted = true;
+                SyncViewsFromModel();
+
+                CreateAIPlayers(saved.BotDifficulty, saved.Mode == 1 ? saved.Seed : (int?)null);
+
+                // Sauvegardée pendant un récap : on enchaîne directement sur la manche suivante.
+                if (_gameManager.State == GameState.EndRound)
+                {
+                    _gameManager.ExecuteCommand(new StartNextRoundCommand(0, _gameManager.RoundNumber));
+                }
+                foreach (AIPlayer ai in _aiPlayers) ai.PlayTurnIfCurrent();
+                _hudView?.ShowStatus($"Reprise · manche {_gameManager.RoundNumber}");
+            }
+
+            if (_mainMenu != null) _mainMenu.Hide(Resume);
+            else Resume();
+        }
+
+        /// <summary>Sièges d'une partie solo : le joueur (son pseudo) puis les bots.</summary>
+        private List<PlayerSetup> BuildSoloSetups()
+        {
+            List<PlayerSetup> setups = new() { new PlayerSetup(PlayerProfile.Name, false) };
+            for (int i = 1; i < _humanPlayerCount; i++)
+            {
+                setups.Add(new PlayerSetup($"Joueur {i + 1}", false));
+            }
+            for (int i = 0; i < _aiPlayerCount; i++)
+            {
+                setups.Add(new PlayerSetup($"Bot {i + 1}", true));
+            }
+            return setups;
+        }
+
+        private void CreateAIPlayers(int difficulty, int? seed = null)
         {
             if (_gameManager == null) return;
 
-            AIDifficulty difficulty = (AIDifficulty)GameSettings.Difficulty;
             for (int i = 0; i < _gameManager.Players.Count; i++)
             {
-                if (_gameManager.Players[i].IsAI)
-                {
-                    AIPlayer ai = gameObject.AddComponent<AIPlayer>();
-                    ai.Initialize(_gameManager, i, difficulty);
-                    _aiPlayers.Add(ai);
-                }
+                if (!_gameManager.Players[i].IsAI) continue;
+                AIPlayer ai = gameObject.AddComponent<AIPlayer>();
+                ai.Initialize(_gameManager, i, (AIDifficulty)difficulty, GameSettings.BotDelayFactor, seed);
+                _aiPlayers.Add(ai);
             }
         }
 
@@ -254,13 +403,23 @@ namespace LevelUp.Core
             _levelProgressView?.BindPlayers(_gameManager.Players);
             _hudView?.SetPlayerNames(names);
             _tableView?.SetPlayerNames(names, GameSession.LocalPlayerIndex);
-            if (_gameOverCelebration != null) _gameOverCelebration.PlayerNames = names;
+            BindGameOverScreen(names);
+            _roundSummary?.Bind(_gameManager.Players);
             _discardPileView?.Initialize(
                 _gameManager.Players.Count, names, _gameManager.DeckManager);
         }
 
+        private void BindGameOverScreen(List<string> names)
+        {
+            if (_gameOverCelebration == null || _gameManager == null) return;
+            GameManager gm = _gameManager;
+            _gameOverCelebration.PlayerNames = names;
+            _gameOverCelebration.Players = gm.Players;
+            _gameOverCelebration.RoundsPlayed = () => gm.RoundNumber;
+        }
+
         /// <summary>
-        /// Applique le style visuel Balatro : caméra sombre + fond animé + glow joueur.
+        /// Style visuel : caméra sombre, mise en page, récap de manche, fond, cartes en vol.
         /// </summary>
         private void InitializeVisuals()
         {
@@ -271,23 +430,29 @@ namespace LevelUp.Core
 
             if (_mainCanvas != null)
             {
-                // Polices de la DA (Inter / Space Grotesk) avant toute création d'UI.
+                // Polices de la DA (Inter / DM Serif Display) avant toute création d'UI.
                 UISkin.EnsureFonts();
 
                 // L'UI gameplay posée en scène passe sous un conteneur calé sur
-                // la safe area (punch-hole du S25, barre de gestes). Le fond et
-                // les menus créés ensuite restent full bleed sur tout l'écran.
+                // la safe area (punch-hole, barre de gestes). Le fond et les menus
+                // créés ensuite restent full bleed sur tout l'écran.
                 RectTransform safeRoot = SafeAreaFitter.Wrap(_mainCanvas);
 
-                // Mise en page de la maquette : top bar, joueurs, tapis, étapes,
-                // contrat, tri — autour des vues posées en scène.
                 _screenLayout = gameObject.AddComponent<GameScreenLayout>();
                 _screenLayout.Build(_mainCanvas, safeRoot, _gameManager);
                 _screenLayout.BindInput(_inputController);
 
-                // Fond uni
+                // Récap de fin de manche, au centre du tapis.
+                _roundSummary = gameObject.AddComponent<RoundSummaryView>();
+                _roundSummary.Setup(safeRoot);
+                _roundSummary.ContinueRequested += HandleContinue;
+
                 AnimatedBackground animBg = gameObject.AddComponent<AnimatedBackground>();
                 animBg.Setup(_mainCanvas);
+
+                // Cartes "en vol" (pioches adverses), au-dessus du jeu, sous les menus.
+                _flights = gameObject.AddComponent<CardFlights>();
+                _flights.Setup(_mainCanvas, _handView != null ? _handView.CardPrefab : null);
             }
         }
 
@@ -310,48 +475,82 @@ namespace LevelUp.Core
                 _networkManager.Initialize(_gameManager, _humanPlayerCount);
             }
 
-            // Indicateur de validité de sélection en temps réel
+            _discardPileView?.BindGame(_gameManager);
+
+            // Indicateur de validité de sélection + bouton POSER
             if (_handView != null && _mainCanvas != null)
             {
                 SelectionStatusView statusView = gameObject.AddComponent<SelectionStatusView>();
-                statusView.Setup(_mainCanvas, _gameManager, _handView);
+                statusView.Setup(_mainCanvas, _gameManager, _handView, _inputController);
             }
 
-            // Écouter le début de round pour le deal cascade
+            // Minuteur de tour (règle de partie, inactif sans minuteur)
+            _turnTimer = gameObject.AddComponent<TurnTimer>();
+            _turnTimer.Initialize(_gameManager, _inputController, _levelProgressView, _hudView);
+
+            // D'où partent les cartes : la main (joueur local) ou la pastille du joueur.
+            CardOrigins.Provider = CardOriginOf;
+            if (_flights != null && _mainCanvas != null)
+            {
+                OpponentMovesView moves = gameObject.AddComponent<OpponentMovesView>();
+                moves.Initialize(_gameManager, _flights, GameScreenLayout.Find(_mainCanvas.transform, "DeckArea"),
+                    _discardPileView, _levelProgressView);
+            }
+
+            // Sauvegarde solo : chaque commande réussie est ajoutée au fichier.
+            _gameManager.CommandExecuted += OnCommandExecuted;
+
             EventBus.Subscribe<RoundStartedEvent>(OnRoundStarted);
+            EventBus.Subscribe<RoundEndedEvent>(OnRoundEndedStats);
+            EventBus.Subscribe<GameOverEvent>(OnGameOver);
         }
 
-        /// <summary>
-        /// Initialise tous les systèmes et démarre une partie SOLO (vs bots).
-        /// </summary>
-        private void InitializeGame()
+        private CardOrigin? CardOriginOf(int playerIndex, CardModel card)
         {
-            if (_gameManager == null)
+            if (_gameManager == null || playerIndex < 0 || playerIndex >= _gameManager.Players.Count) return null;
+            if (GameSession.IsLocalHuman(_gameManager.Players[playerIndex])
+                && _handView != null && _handView.TryGetCardOrigin(card.Id, out CardOrigin fromHand))
             {
-                Debug.LogError("GameManager is not assigned to GameBootstrapper!");
-                return;
+                return fromHand;
             }
-
-            GameSession.Reset();
-            EnsureGameSystems();
-
-            if (_handView != null)
+            if (_levelProgressView != null && _levelProgressView.TryGetPillOrigin(playerIndex, out CardOrigin pill))
             {
-                _handView.SetPlayerIndex(0);
+                return pill;
             }
+            return null;
+        }
 
-            // Démarrer la partie avec les réglages choisis dans les options
-            ApplyMatchSettings();
-            _gameManager.StartGame(_humanPlayerCount, _aiPlayerCount, GameSettings.RandomContracts);
-            CreateAIPlayers();
+        private void OnCommandExecuted(IGameCommand command, CommandResult result)
+        {
+            if (_saveActive && !GameSession.IsOnline) SaveGame.Append(command);
+        }
 
-            // Vues indexées par joueur (progression, HUD, piles de défausse)
-            RefreshPlayerViews();
+        /// <summary>CONTINUER sur le récap (ou suite automatique) : manche suivante.</summary>
+        private void HandleContinue(int finishedRound)
+        {
+            if (_gameManager == null || _gameManager.State != GameState.EndRound) return;
+            if (GameSession.IsOnline && !GameSession.IsHost) return;
+            int seat = GameSession.IsOnline ? GameSession.LocalPlayerIndex : 0;
+            _gameManager.ExecuteCommand(new StartNextRoundCommand(seat, finishedRound));
+        }
 
-            // Lancer le deal cascade pour le premier round
-            if (_handView != null)
+        private void OnRoundEndedStats(RoundEndedEvent evt)
+        {
+            PlayerModel? local = GameSession.GetLocalPlayer(_gameManager);
+            if (local != null && local.Index == evt.WinnerIndex) PlayerProfile.RecordRoundWon();
+        }
+
+        private void OnGameOver(GameOverEvent evt)
+        {
+            PlayerModel? local = GameSession.GetLocalPlayer(_gameManager);
+            bool won = local != null && local.Index == evt.WinnerIndex;
+            if (local != null) PlayerProfile.RecordGame(won);
+
+            if (!GameSession.IsOnline)
             {
-                StartCoroutine(FirstDealCascade());
+                if (_soloMode == 1 && _gameManager != null) DailyDeal.Record(_dailyKey, won, _gameManager.RoundNumber);
+                if (_saveActive) SaveGame.Delete();
+                _saveActive = false;
             }
         }
 
@@ -368,6 +567,7 @@ namespace LevelUp.Core
             PlayerModel? player = GameSession.GetLocalPlayer(_gameManager);
             if (player != null && _handView != null)
             {
+                _inputController?.ApplyPreferredSort(player);
                 _handView.RefreshHand(player.Hand, dealAnimation: true);
             }
         }
@@ -378,7 +578,7 @@ namespace LevelUp.Core
         private void OnRoundStarted(RoundStartedEvent evt)
         {
             if (evt.RoundNumber <= 1) return; // Premier round géré par FirstDealCascade
-            if (_syncingViews) return;        // Reprise en ligne : main posée sans cascade
+            if (_syncingViews) return;        // Reprise : main posée sans cascade
 
             if (_handView != null && _gameManager != null)
             {
@@ -393,6 +593,7 @@ namespace LevelUp.Core
         private IEnumerator DealAfterDelay(PlayerModel player)
         {
             yield return null; // Attendre que les cartes soient distribuées
+            _inputController?.ApplyPreferredSort(player);
             _handView?.RefreshHand(player.Hand, dealAnimation: true);
         }
 
@@ -412,6 +613,7 @@ namespace LevelUp.Core
                 _onlinePanel.CreateRequested += HandleOnlineCreate;
                 _onlinePanel.JoinRequested += HandleOnlineJoin;
                 _onlinePanel.LaunchRequested += HandleOnlineLaunch;
+                _onlinePanel.SettingsRequested += HandleOnlineSettings;
                 _onlinePanel.Closed += HandleOnlineClosed;
             }
 
@@ -425,8 +627,12 @@ namespace LevelUp.Core
             if (_onlineSession != null) return;
 
             _onlineSession = gameObject.AddComponent<OnlineSession>();
-            _onlineSession.LobbyCountChanged += count => _onlinePanel?.SetLobbyCount(count);
-            _onlineSession.ConnectedToHost += () => _onlinePanel?.ShowClientWaiting();
+            _onlineSession.LobbyChanged += HandleLobbyChanged;
+            _onlineSession.ConnectedToHost += () =>
+            {
+                _onlinePanel?.ShowClientWaiting();
+                if (_onlineSession?.CurrentLobby != null) HandleLobbyChanged(_onlineSession.CurrentLobby);
+            };
             _onlineSession.MatchStartReceived += LaunchOnlineMatch;
             _onlineSession.PlayerReplacedByAI += HandlePlayerReplacedByAI;
             _onlineSession.SessionEnded += HandleSessionEnded;
@@ -458,7 +664,9 @@ namespace LevelUp.Core
             try
             {
                 string code = await _onlineSession.HostAsync();
-                _onlinePanel.ShowHostLobby(code, _onlineSession.LobbyHumanCount);
+                _onlineSession.SetLobbySettings(GameSettings.PlayerCount, GameSettings.BuildMatchRules(),
+                    GameSettings.Difficulty);
+                _onlinePanel.ShowHostLobby(code);
             }
             catch (System.Exception e)
             {
@@ -487,6 +695,35 @@ namespace LevelUp.Core
             }
         }
 
+        /// <summary>Salon mis à jour (hôte ou client) : liste des joueurs + règles.</summary>
+        private void HandleLobbyChanged(LobbyInfo info)
+        {
+            if (_onlinePanel == null) return;
+            LobbyViewModel view = new()
+            {
+                Seats = info.Seats,
+                BotDifficulty = info.BotDifficulty,
+                Rules = info.Rules
+            };
+            foreach (LobbyMember m in info.Members)
+            {
+                view.Members.Add(new LobbySeatView(m.Name, m.IsHost, m.ClientId == info.LocalClientId));
+            }
+            _onlinePanel.UpdateLobby(view);
+        }
+
+        /// <summary>Hôte : réglages de la partie (même panneau qu'en solo), diffusés au salon.</summary>
+        private void HandleOnlineSettings()
+        {
+            MatchSetupPanel? setup = _mainMenu?.MatchSetup;
+            if (setup == null || _onlineSession == null) return;
+            setup.ShowOnlineHost(() =>
+            {
+                _onlineSession?.SetLobbySettings(GameSettings.PlayerCount, GameSettings.BuildMatchRules(),
+                    GameSettings.Difficulty);
+            });
+        }
+
         /// <summary>Hôte : fige les sièges et lance la partie partout.</summary>
         private void HandleOnlineLaunch()
         {
@@ -496,7 +733,7 @@ namespace LevelUp.Core
             {
                 OnlineStartData data =
                     _onlineSession.BuildAndBroadcastStart(GameSettings.PlayerCount,
-                        GameSettings.RandomContracts);
+                        GameSettings.BuildMatchRules());
                 LaunchOnlineMatch(data);
             }
             catch (System.Exception e)
@@ -526,6 +763,7 @@ namespace LevelUp.Core
             GameSession.IsOnline = true;
             GameSession.IsHost = _onlineSession.IsSessionHost;
             GameSession.LocalPlayerIndex = data.LocalSeat;
+            _saveActive = false; // une partie en ligne ne remplace pas la sauvegarde solo
 
             _onlinePanel?.HideSilent();
             _mainMenu?.Hide();
@@ -535,13 +773,13 @@ namespace LevelUp.Core
             CleanupAIPlayers();
 
             _handView?.SetPlayerIndex(data.LocalSeat);
-            _gameManager.StartGame(data.Players, data.Seed, data.RandomContracts);
+            _gameManager.StartGame(data.Players, data.Seed, data.Rules ?? MatchRules.Classic);
             _onlineSession.BindGameManager(_gameManager);
 
             // Les bots ne tournent QUE chez l'hôte ; leurs commandes sont relayées
             if (GameSession.IsHost)
             {
-                CreateAIPlayers();
+                CreateAIPlayers(GameSettings.Difficulty);
             }
 
             RefreshPlayerViews();
@@ -569,9 +807,8 @@ namespace LevelUp.Core
 
             if (GameSession.IsOnline && GameSession.IsHost)
             {
-                AIDifficulty difficulty = (AIDifficulty)GameSettings.Difficulty;
                 AIPlayer ai = gameObject.AddComponent<AIPlayer>();
-                ai.Initialize(_gameManager, seat, difficulty);
+                ai.Initialize(_gameManager, seat, (AIDifficulty)GameSettings.Difficulty, GameSettings.BotDelayFactor);
                 _aiPlayers.Add(ai);
                 ai.PlayTurnIfCurrent();
             }
@@ -607,6 +844,7 @@ namespace LevelUp.Core
             GameSession.IsOnline = true;
             GameSession.IsHost = false;
             GameSession.LocalPlayerIndex = data.Start.LocalSeat;
+            _saveActive = false;
 
             _onlinePanel?.HideSilent();
             _mainMenu?.Hide();
@@ -616,12 +854,12 @@ namespace LevelUp.Core
             _handView?.SetPlayerIndex(data.Start.LocalSeat);
 
             bool ok = _gameManager.RebuildFromHistory(data.Start.Players, data.Start.Seed,
-                data.Start.RandomContracts, data.History);
+                data.Start.Rules ?? MatchRules.Classic, data.History);
             int hash = _gameManager.ComputeStateHash();
             if (!ok || hash != data.ExpectedHash)
             {
                 Debug.LogError($"[Online] Reprise incohérente (ok={ok}, hash {hash} ≠ {data.ExpectedHash})");
-                _hudView?.ShowStatus("Reprise imparfaite — si ça bloque, relance la partie");
+                _hudView?.ShowError("Reprise imparfaite — si ça bloque, relance la partie");
             }
 
             _onlineSession.BindGameManager(_gameManager);
@@ -660,22 +898,29 @@ namespace LevelUp.Core
 
                 EventBus.Publish(new DeckChangedEvent { CardsRemaining = deck.DrawPileCount });
 
-                PlayerModel current = tm.CurrentPlayer;
-                EventBus.Publish(new TurnStartedEvent
+                if (_gameManager.State == GameState.PlayerTurn)
                 {
-                    PlayerIndex = current.Index,
-                    Phase = tm.CurrentPhase,
-                    PlayerLevel = current.CurrentLevel,
-                    HasLaidDown = current.HasLaidDownThisRound
-                });
-                EventBus.Publish(new TurnPhaseChangedEvent
-                {
-                    PlayerIndex = current.Index,
-                    NewPhase = tm.CurrentPhase
-                });
+                    PlayerModel current = tm.CurrentPlayer;
+                    EventBus.Publish(new TurnStartedEvent
+                    {
+                        PlayerIndex = current.Index,
+                        Phase = tm.CurrentPhase,
+                        PlayerLevel = current.CurrentLevel,
+                        HasLaidDown = current.HasLaidDownThisRound
+                    });
+                    EventBus.Publish(new TurnPhaseChangedEvent
+                    {
+                        PlayerIndex = current.Index,
+                        NewPhase = tm.CurrentPhase
+                    });
+                }
 
                 PlayerModel? local = GameSession.GetLocalPlayer(_gameManager);
-                if (local != null) _handView?.RefreshHand(local.Hand, dealAnimation: false);
+                if (local != null)
+                {
+                    _inputController?.ApplyPreferredSort(local);
+                    _handView?.RefreshHand(local.Hand, dealAnimation: false);
+                }
             }
             finally
             {
@@ -706,6 +951,10 @@ namespace LevelUp.Core
         private void OnDestroy()
         {
             EventBus.Unsubscribe<RoundStartedEvent>(OnRoundStarted);
+            EventBus.Unsubscribe<RoundEndedEvent>(OnRoundEndedStats);
+            EventBus.Unsubscribe<GameOverEvent>(OnGameOver);
+            if (_gameManager != null) _gameManager.CommandExecuted -= OnCommandExecuted;
+            CardOrigins.Provider = null;
             _onlineSession?.Leave();
 
             foreach (AIPlayer ai in _aiPlayers)

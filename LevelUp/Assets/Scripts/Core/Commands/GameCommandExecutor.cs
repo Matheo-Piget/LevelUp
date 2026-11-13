@@ -49,6 +49,7 @@ namespace LevelUp.Core
                 AddToMeldCommand cmd => ExecuteAddToMeld(cmd.Card, cmd.MeldOwnerIndex, cmd.MeldIndex),
                 SkipPhaseCommand cmd => ExecuteSkipPhase(cmd.PhaseToSkip),
                 DiscardCommand cmd => ExecuteDiscard(cmd.Card, cmd.TargetPlayerIndex),
+                // StartNextRoundCommand est traitée par GameManager (hors tour).
                 _ => CommandResult.Failure("Commande inconnue")
             };
         }
@@ -163,7 +164,31 @@ namespace LevelUp.Core
             if (melds == null || melds.Count == 0)
                 return CommandResult.Failure("Aucune combinaison fournie");
 
-            // 1. Chaque meld doit être structurellement valide.
+            // 1. Toutes les cartes doivent être en main, une seule fois chacune.
+            //    On repart des VRAIES cartes de la main (retrouvées par identifiant) :
+            //    la valeur et la couleur annoncées par la commande ne font pas foi.
+            List<CardModel> allCards = new();
+            List<Meld> proposed = melds;
+            melds = new List<Meld>(proposed.Count);
+            foreach (Meld meld in proposed)
+            {
+                if (meld == null || meld.Cards == null)
+                    return CommandResult.Failure("Combinaison invalide");
+
+                List<CardModel> realCards = new(meld.Cards.Count);
+                foreach (CardModel announced in meld.Cards)
+                {
+                    if (!player.TryGetHandCard(announced.Id, out CardModel card))
+                        return CommandResult.Failure("Carte introuvable dans la main");
+                    if (allCards.Contains(card))
+                        return CommandResult.Failure("Une carte ne peut pas être utilisée deux fois");
+                    allCards.Add(card);
+                    realCards.Add(card);
+                }
+                melds.Add(new Meld(meld.Type, realCards, player.Index));
+            }
+
+            // 2. Chaque meld doit être structurellement valide.
             foreach (Meld meld in melds)
             {
                 bool structurallyValid = meld.Type switch
@@ -175,20 +200,6 @@ namespace LevelUp.Core
                 };
                 if (!structurallyValid)
                     return CommandResult.Failure("Combinaison invalide");
-            }
-
-            // 2. Aucune carte ne peut apparaître deux fois et toutes doivent être en main.
-            List<CardModel> allCards = new();
-            foreach (Meld meld in melds)
-            {
-                foreach (CardModel card in meld.Cards)
-                {
-                    if (!player.HandContains(card))
-                        return CommandResult.Failure("Carte introuvable dans la main");
-                    if (allCards.Contains(card))
-                        return CommandResult.Failure("Une carte ne peut pas être utilisée deux fois");
-                    allCards.Add(card);
-                }
             }
 
             // 3. La structure des melds doit correspondre aux exigences du niveau.
@@ -206,18 +217,29 @@ namespace LevelUp.Core
             player.HasLaidDownThisRound = true;
 
             List<List<CardModel>> meldCards = new();
+            List<MeldType> meldTypes = new();
             foreach (Meld m in melds)
+            {
                 meldCards.Add(m.Cards);
+                meldTypes.Add(m.Type);
+            }
 
             EventBus.Publish(new LevelLaidDownEvent
             {
                 PlayerIndex = _turnManager.CurrentPlayerIndex,
                 Level = player.CurrentLevel,
-                Melds = meldCards
+                Melds = meldCards,
+                MeldTypes = meldTypes
             });
 
             PublishHandChanged(player);
             _turnManager.AdvanceToPhase(TurnPhase.AddToMelds);
+
+            // Contrat qui utilise toute la main (ex. main de 8 + contrat de 9
+            // cartes) : le joueur sort sans défausser. Sans ça il resterait en
+            // phase Compléter sans carte, et le tour ne passerait plus jamais.
+            if (player.IsHandEmpty)
+                return CommandResult.RoundComplete("Main vide");
 
             return CommandResult.Ok($"Niveau {player.CurrentLevel} posé !");
         }
@@ -242,7 +264,8 @@ namespace LevelUp.Core
             if (meldIndex < 0 || meldIndex >= meldOwner.LaidMelds.Count)
                 return CommandResult.Failure("Combinaison invalide");
 
-            if (!player.HandContains(card))
+            // La vraie carte de la main (l'identifiant fait foi, pas les champs reçus).
+            if (!player.TryGetHandCard(card.Id, out card))
                 return CommandResult.Failure("Carte introuvable dans la main");
 
             Meld meld = meldOwner.GetMeld(meldIndex);
@@ -260,6 +283,12 @@ namespace LevelUp.Core
             });
 
             PublishHandChanged(player);
+
+            // Dernière carte posée sur la table : le joueur sort sans défausser
+            // (sinon il resterait bloqué en phase Défausse, main vide).
+            if (player.IsHandEmpty)
+                return CommandResult.RoundComplete("Main vide");
+
             return CommandResult.Ok();
         }
 
@@ -269,6 +298,12 @@ namespace LevelUp.Core
 
         private CommandResult ExecuteSkipPhase(TurnPhase phaseToSkip)
         {
+            // Seules « Poser » et « Compléter » se passent : la pioche et la
+            // défausse sont obligatoires (sinon un client modifié pourrait
+            // vider sa main sans jamais piocher).
+            if (phaseToSkip != TurnPhase.LayDown && phaseToSkip != TurnPhase.AddToMelds)
+                return CommandResult.Failure("Cette phase ne se passe pas");
+
             if (_turnManager.CurrentPhase != phaseToSkip)
                 return CommandResult.Failure("Phase incorrecte");
 
@@ -286,7 +321,7 @@ namespace LevelUp.Core
                 return CommandResult.Failure("Phase incorrecte pour défausser");
 
             PlayerModel player = _turnManager.CurrentPlayer;
-            if (!player.HandContains(card))
+            if (!player.TryGetHandCard(card.Id, out card))
                 return CommandResult.Failure("Carte introuvable dans la main");
 
             player.RemoveFromHand(card);

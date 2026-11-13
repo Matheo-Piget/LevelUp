@@ -4,6 +4,7 @@
     "references": [
         "LevelUp.Core",
         "LevelUp.Utils",
+        "LevelUp.AI",
         "UnityEngine.TestRunner",
         "UnityEditor.TestRunner"
     ],

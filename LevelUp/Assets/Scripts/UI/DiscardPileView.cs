@@ -9,16 +9,14 @@ using LevelUp.Utils;
 namespace LevelUp.UI
 {
   /// <summary>
-  /// Affiche les piles de défausse de tous les joueurs.
+  /// Piles de défausse de tous les joueurs (une par joueur), sur le tapis.
   ///
-  /// Direction visuelle : minimaliste, beaucoup d'air. Chaque pile a :
-  ///   - un fin liseré coloré (3px) en haut → identité du joueur, sans crier
-  ///   - la carte du dessus (face visible) flottant au centre
-  ///   - sous la pile : nom du joueur + compteur "· N" en typo discrète
-  ///   - pile vide : pas de fond plein, juste un contour pointillé très léger
-  ///
-  /// Le joueur actif est signalé par un halo accent très doux derrière la pile
-  /// + son nom passe en blanc — cohérent avec la sidebar.
+  /// Chaque pile : la carte du dessus (face visible), et dessous "Nom · N".
+  /// L'anneau champagne suit la phase du joueur actif :
+  ///   - Piocher (tour local) : anneau doux sur les piles qu'on peut ramasser ;
+  ///   - autres phases : anneau sur la pile du joueur actif (où ira sa défausse).
+  /// Une carte défaussée glisse depuis la main (joueur local) ou la pastille
+  /// du joueur. Une seule CardView par pile, réutilisée (aucune création en jeu).
   /// </summary>
   public class DiscardPileView : MonoBehaviour
   {
@@ -38,32 +36,19 @@ namespace LevelUp.UI
     }
 
     private readonly List<PileSlot> _pileSlots = new();
-    private int _playerCount;
     private int _activePlayerIndex = -1;
+    private TurnPhase _phase = TurnPhase.Draw;
     private DeckManager? _deckManager;
-
-    // Couleurs joueur saturées : utilisées UNIQUEMENT pour le liseré du dessus,
-    // jamais en aplat. Cohérent avec la sidebar où on les utilise pour l'avatar.
-    private static readonly Color[] PlayerAccentColors =
-    {
-            Constants.CardBlue,
-            Constants.CardRed,
-            Constants.CardGreen,
-            Constants.CardPurple,
-            Constants.CardOrange,
-            Constants.CardYellow
-        };
-
-    // Sprite de contour pointillé pour les piles vides — généré une fois, partagé.
-    private static Sprite? _dashedBorderSprite;
+    private GameManager? _gameManager;
 
     private void OnEnable()
     {
       EventBus.Subscribe<CardDiscardedEvent>(OnCardDiscarded);
       EventBus.Subscribe<CardDrawnEvent>(OnCardDrawn);
       EventBus.Subscribe<RoundStartedEvent>(OnRoundStarted);
-      EventBus.Subscribe<GameStartedEvent>(OnGameStarted);
       EventBus.Subscribe<TurnStartedEvent>(OnTurnStarted);
+      EventBus.Subscribe<TurnPhaseChangedEvent>(OnPhaseChanged);
+      EventBus.Subscribe<RoundSummaryEvent>(OnRoundSummary);
     }
 
     private void OnDisable()
@@ -71,57 +56,17 @@ namespace LevelUp.UI
       EventBus.Unsubscribe<CardDiscardedEvent>(OnCardDiscarded);
       EventBus.Unsubscribe<CardDrawnEvent>(OnCardDrawn);
       EventBus.Unsubscribe<RoundStartedEvent>(OnRoundStarted);
-      EventBus.Unsubscribe<GameStartedEvent>(OnGameStarted);
       EventBus.Unsubscribe<TurnStartedEvent>(OnTurnStarted);
+      EventBus.Unsubscribe<TurnPhaseChangedEvent>(OnPhaseChanged);
+      EventBus.Unsubscribe<RoundSummaryEvent>(OnRoundSummary);
     }
 
-    private void OnCardDrawn(CardDrawnEvent evt)
-    {
-      if (!evt.FromDiscard) return;
-      if (evt.DiscardPileIndex < 0 || evt.DiscardPileIndex >= _pileSlots.Count) return;
-
-      PileSlot slot = _pileSlots[evt.DiscardPileIndex];
-
-      if (slot.TopCardView != null)
-      {
-        Destroy(slot.TopCardView.gameObject);
-        slot.TopCardView = null;
-      }
-
-      slot.CardCount = Mathf.Max(0, slot.CardCount - 1);
-      UpdateCountLabel(slot);
-      UpdateEmptyState(slot);
-
-      if (_deckManager == null || _cardPrefab == null) return;
-
-      CardModel? newTop = _deckManager.PeekDiscard(evt.DiscardPileIndex);
-      if (!newTop.HasValue) return;
-
-      GameObject cardObj = Instantiate(_cardPrefab, slot.CardAnchor.transform);
-      CardView cardView = cardObj.GetComponent<CardView>();
-      if (cardView == null) return;
-
-      cardView.Setup(newTop.Value, true);
-      cardView.SetInteractable(true);
-      cardView.RectTransform.localScale = Vector3.one * PileCardScale;
-      cardView.RectTransform.anchoredPosition = Vector2.zero;
-      slot.TopCardView = cardView;
-    }
-
-    private void OnGameStarted(GameStartedEvent evt)
-    {
-      _playerCount = evt.PlayerCount;
-    }
-
-    private void OnTurnStarted(TurnStartedEvent evt)
-    {
-      SetActivePlayer(evt.PlayerIndex);
-    }
+    /// <summary>Lie la partie (joueur local, pour l'anneau d'invite).</summary>
+    public void BindGame(GameManager gameManager) => _gameManager = gameManager;
 
     public void Initialize(int playerCount, List<string> playerNames, DeckManager? deckManager = null)
     {
       ClearSlots();
-      _playerCount = playerCount;
       _deckManager = deckManager;
 
       if (_container == null) return;
@@ -131,28 +76,24 @@ namespace LevelUp.UI
 
       for (int i = 0; i < playerCount; i++)
       {
-        PileSlot slot = CreatePileSlot(i, playerNames[i], startX + i * _pileSpacing);
-        _pileSlots.Add(slot);
+        _pileSlots.Add(CreatePileSlot(i, playerNames[i], startX + i * _pileSpacing));
       }
 
+      _phase = TurnPhase.Draw;
       SetActivePlayer(0);
     }
 
     private PileSlot CreatePileSlot(int playerIndex, string playerName, float xPos)
     {
-      // ─── Conteneur du slot ─────────────────────────────────────────────
       GameObject slotObj = new($"DiscardSlot_P{playerIndex}", typeof(RectTransform));
       slotObj.transform.SetParent(_container, false);
-
       RectTransform slotRt = slotObj.GetComponent<RectTransform>();
       slotRt.anchoredPosition = new Vector2(xPos, 0);
       slotRt.sizeDelta = new Vector2(132f, 200f);
 
-      // ─── Zone "carte" (hit-test pour le drop, et ancrage de la carte) ─
-      // Taille d'une carte de pile (108×162), label 14px en dessous.
+      // Zone "carte" (hit-test et ancrage de la carte), 108×162.
       GameObject cardZone = new("CardZone", typeof(RectTransform), typeof(Image));
       cardZone.transform.SetParent(slotObj.transform, false);
-
       RectTransform zoneRt = cardZone.GetComponent<RectTransform>();
       zoneRt.sizeDelta = new Vector2(108f, 162f);
       zoneRt.anchoredPosition = new Vector2(0f, 16f);
@@ -163,11 +104,9 @@ namespace LevelUp.UI
       zoneImg.color = new Color(1f, 1f, 1f, 0.03f);
       zoneImg.raycastTarget = true;
 
-      // ─── Anneau "joueur actif" : c'est ici que sa défausse arrivera ───
-      Image glowImg = UISkin.Outline(zoneRt, 15f, 2f, new Color(0f, 0f, 0f, 0f), "ActiveRing");
-      UISkin.Stretch(glowImg.rectTransform, -5f);
+      Image ring = UISkin.Outline(zoneRt, 15f, 2f, new Color(0f, 0f, 0f, 0f), "ActiveRing");
+      UISkin.Stretch(ring.rectTransform, -5f);
 
-      // ─── Ancrage des cartes (au centre de la zone carte) ──────────────
       GameObject cardAnchor = new("CardAnchor", typeof(RectTransform));
       cardAnchor.transform.SetParent(cardZone.transform, false);
       RectTransform anchorRt = cardAnchor.GetComponent<RectTransform>();
@@ -175,38 +114,35 @@ namespace LevelUp.UI
       anchorRt.anchorMax = new Vector2(0.5f, 0.5f);
       anchorRt.sizeDelta = Vector2.zero;
       anchorRt.anchoredPosition = Vector2.zero;
+      // Le ring passe devant la carte
+      ring.transform.SetAsLastSibling();
 
-      // ─── Label sous la pile : "Bot 1 · 3" (13px semibold) ────────────
       TextMeshProUGUI labelText = UISkin.Text(slotObj.transform, "Label", "", 13f, UISkin.TextMuted,
           TextWeight.SemiBold, TextAlignmentOptions.Center);
       RectTransform labelRt = labelText.rectTransform;
       labelRt.sizeDelta = new Vector2(150f, 18f);
       labelRt.anchoredPosition = new Vector2(0f, -86f);
       labelText.richText = true;
+      labelText.overflowMode = TextOverflowModes.Ellipsis;
 
       PileSlot slot = new()
       {
         PlayerIndex = playerIndex,
         PlayerName = playerName,
         Root = slotObj,
-        SlotRect = slotRt,
         CardZoneRect = zoneRt,
         EmptyStateImage = zoneImg,
-        ActiveGlow = glowImg,
+        Ring = ring,
         LabelText = labelText,
-        CardAnchor = cardAnchor,
-        TopCardView = null,
-        CardCount = 0
+        CardAnchor = cardAnchor
       };
 
       UpdateCountLabel(slot);
       return slot;
     }
 
-    /// <summary>
-    /// Met à jour le label "Nom · N" sous la pile. Le compteur s'estompe à 0
-    /// pour ne pas distraire d'une pile vide.
-    /// </summary>
+    // ─── État affiché ────────────────────────────────────────────────
+
     private void UpdateCountLabel(PileSlot slot)
     {
       string nameColor = slot.PlayerIndex == _activePlayerIndex ? "#EEE9E0" : "#A7A198";
@@ -215,33 +151,85 @@ namespace LevelUp.UI
           : $"<color={nameColor}>{slot.PlayerName}</color>";
     }
 
-    /// <summary>Affiche / cache le contour pointillé selon que la pile est vide ou non.</summary>
     private static void UpdateEmptyState(PileSlot slot)
     {
       if (slot.EmptyStateImage == null) return;
-      // On laisse toujours le hit-test actif (raycastTarget) mais on cache visuellement
-      // le contour quand une carte couvre la zone.
-      float a = slot.CardCount > 0 ? 0f : 0.03f;
       Color c = slot.EmptyStateImage.color;
-      slot.EmptyStateImage.color = new Color(c.r, c.g, c.b, a);
+      slot.EmptyStateImage.color = new Color(c.r, c.g, c.b, slot.CardCount > 0 ? 0f : 0.03f);
     }
 
     public void SetActivePlayer(int playerIndex)
     {
       _activePlayerIndex = playerIndex;
-      for (int i = 0; i < _pileSlots.Count; i++)
-      {
-        PileSlot slot = _pileSlots[i];
-        bool active = i == playerIndex;
+      RefreshRings();
+    }
 
-        if (slot.ActiveGlow != null)
+    private bool LocalDrawPhase()
+    {
+      if (_phase != TurnPhase.Draw || _gameManager?.TurnManager == null) return false;
+      if (_gameManager.State != GameState.PlayerTurn) return false;
+      return GameSession.IsLocalHuman(_gameManager.TurnManager.CurrentPlayer);
+    }
+
+    private void RefreshRings()
+    {
+      bool localDraw = LocalDrawPhase();
+      foreach (PileSlot slot in _pileSlots)
+      {
+        Color ring;
+        if (localDraw)
         {
-          slot.ActiveGlow.color = active
+          // On peut ramasser n'importe quelle carte visible : invitation discrète.
+          ring = slot.TopCardView != null && slot.TopCardView.gameObject.activeSelf
+              ? UISkin.WithAlpha(UISkin.AccentLight, 0.45f)
+              : new Color(0f, 0f, 0f, 0f);
+        }
+        else
+        {
+          // Ailleurs : la pile où le joueur actif défaussera.
+          ring = slot.PlayerIndex == _activePlayerIndex && _phase != TurnPhase.Draw
               ? UISkin.WithAlpha(UISkin.AccentLight, 0.7f)
               : new Color(0f, 0f, 0f, 0f);
         }
+        if (slot.Ring != null) slot.Ring.color = ring;
         UpdateCountLabel(slot);
       }
+    }
+
+    // ─── Événements ──────────────────────────────────────────────────
+
+    private void OnTurnStarted(TurnStartedEvent evt)
+    {
+      _phase = evt.Phase;
+      SetActivePlayer(evt.PlayerIndex);
+    }
+
+    private void OnPhaseChanged(TurnPhaseChangedEvent evt)
+    {
+      _phase = evt.NewPhase;
+      RefreshRings();
+    }
+
+    private void OnRoundSummary(RoundSummaryEvent evt)
+    {
+      _activePlayerIndex = -1;
+      _phase = TurnPhase.Draw;
+      RefreshRings();
+    }
+
+    private void OnCardDrawn(CardDrawnEvent evt)
+    {
+      if (!evt.FromDiscard) return;
+      if (evt.DiscardPileIndex < 0 || evt.DiscardPileIndex >= _pileSlots.Count) return;
+
+      PileSlot slot = _pileSlots[evt.DiscardPileIndex];
+      slot.CardCount = Mathf.Max(0, slot.CardCount - 1);
+
+      CardModel? newTop = _deckManager?.PeekDiscard(evt.DiscardPileIndex);
+      ShowTop(slot, newTop);
+      UpdateCountLabel(slot);
+      UpdateEmptyState(slot);
+      RefreshRings();
     }
 
     private void OnCardDiscarded(CardDiscardedEvent evt)
@@ -250,125 +238,114 @@ namespace LevelUp.UI
 
       PileSlot slot = _pileSlots[evt.PlayerIndex];
       slot.CardCount++;
-
-      if (slot.TopCardView != null)
-      {
-        Destroy(slot.TopCardView.gameObject);
-        slot.TopCardView = null;
-      }
-
-      if (_cardPrefab == null) return;
-
-      GameObject cardObj = Instantiate(_cardPrefab, slot.CardAnchor.transform);
-      CardView cardView = cardObj.GetComponent<CardView>();
-      if (cardView != null)
-      {
-        cardView.Setup(evt.Card, true);
-        cardView.SetInteractable(true);
-        cardView.RectTransform.localScale = Vector3.one * PileCardScale;
-        slot.TopCardView = cardView;
-
-        StartCoroutine(AnimateCardArrival(cardView, slot));
-      }
+      CardView? view = ShowTop(slot, evt.Card);
+      if (view != null) StartCoroutine(AnimateCardArrival(view, CardOrigins.Of(evt.PlayerIndex, evt.Card)));
 
       UpdateCountLabel(slot);
       UpdateEmptyState(slot);
+      RefreshRings();
     }
 
-    private IEnumerator AnimateCardArrival(CardView card, PileSlot slot)
+    /// <summary>Affiche la carte du dessus (même CardView réutilisée) ou rien si la pile est vide.</summary>
+    private CardView? ShowTop(PileSlot slot, CardModel? card)
+    {
+      if (!card.HasValue)
+      {
+        if (slot.TopCardView != null) slot.TopCardView.gameObject.SetActive(false);
+        return null;
+      }
+
+      if (slot.TopCardView == null)
+      {
+        if (_cardPrefab == null) return null;
+        GameObject cardObj = Instantiate(_cardPrefab, slot.CardAnchor.transform);
+        slot.TopCardView = cardObj.GetComponent<CardView>();
+        if (slot.TopCardView == null) return null;
+        slot.TopCardView.SetInteractable(true);
+      }
+
+      CardView view = slot.TopCardView;
+      view.gameObject.SetActive(true);
+      view.Setup(card.Value, true);
+      view.SetAlpha(1f);
+      RectTransform rt = view.RectTransform;
+      rt.anchoredPosition = Vector2.zero;
+      rt.localScale = Vector3.one * PileCardScale;
+      rt.localRotation = Quaternion.identity;
+      return view;
+    }
+
+    private IEnumerator AnimateCardArrival(CardView card, CardOrigin? origin)
     {
       if (card == null) yield break;
       RectTransform rt = card.RectTransform;
-      CanvasGroup cg = card.GetComponent<CanvasGroup>();
-      if (rt == null) yield break;
+      Transform parent = rt.parent;
 
       Vector2 targetPos = Vector2.zero;
-      rt.anchoredPosition = targetPos + Vector2.up * 100f;
-      rt.localRotation = Quaternion.Euler(0, 0, Random.Range(-8f, 8f));
+      Vector3 targetScale = Vector3.one * PileCardScale;
+      Vector2 startPos;
+      Vector3 startScale;
+      if (origin.HasValue)
+      {
+        Vector3 local = parent.InverseTransformPoint(origin.Value.Position);
+        startPos = new Vector2(local.x, local.y);
+        startScale = Vector3.one * (origin.Value.Scale / Mathf.Max(0.0001f, parent.lossyScale.x));
+      }
+      else
+      {
+        startPos = Vector2.up * 100f;
+        startScale = targetScale * 1.3f;
+      }
 
-      Vector3 startScale = rt.localScale * 1.3f;
-      Vector3 targetScale = rt.localScale;
+      float startRot = Random.Range(-10f, 10f);
+      rt.anchoredPosition = startPos;
       rt.localScale = startScale;
+      rt.localRotation = Quaternion.Euler(0, 0, startRot);
 
-      if (cg != null) cg.alpha = 0f;
-
+      float duration = GameSettings.ReducedMotion ? 0.12f : origin.HasValue ? 0.32f : 0.25f;
       float elapsed = 0f;
-      float duration = 0.25f;
-
       while (elapsed < duration)
       {
         if (card == null || rt == null) yield break;
         elapsed += Time.deltaTime;
         float t = Mathf.Clamp01(elapsed / duration);
-        float eased = t < 0.7f
-            ? Mathf.Lerp(0f, 1.08f, t / 0.7f)
-            : Mathf.Lerp(1.08f, 1f, (t - 0.7f) / 0.3f);
-
-        rt.anchoredPosition = Vector2.Lerp(targetPos + Vector2.up * 100f, targetPos, eased);
+        float eased = UITween.EaseOutCubic(t);
+        rt.anchoredPosition = Vector2.LerpUnclamped(startPos, targetPos, eased);
         rt.localScale = Vector3.Lerp(startScale, targetScale, eased);
-
-        if (cg != null) cg.alpha = Mathf.Min(1f, t * 3f);
-
+        rt.localRotation = Quaternion.Euler(0, 0, Mathf.Lerp(startRot, 0f, eased));
         yield return null;
       }
 
       if (card == null || rt == null) yield break;
       rt.anchoredPosition = targetPos;
       rt.localScale = targetScale;
-      if (cg != null) cg.alpha = 1f;
-
-      if (_animController != null && rt != null && card != null)
-      {
-        _animController.AnimatePulse(rt);
-      }
+      rt.localRotation = Quaternion.identity;
+      if (_animController != null) _animController.AnimatePulse(rt);
     }
 
     /// <summary>
     /// Recale toutes les piles sur le modèle (compteurs + carte du dessus),
-    /// sans animation — reprise d'une partie en ligne après reconnexion / resync.
+    /// sans animation — reprise d'une partie (en ligne ou sauvegardée).
     /// </summary>
     public void SyncFromModel()
     {
       if (_deckManager == null) return;
-
       for (int i = 0; i < _pileSlots.Count; i++)
       {
         PileSlot slot = _pileSlots[i];
-        if (slot.TopCardView != null)
-        {
-          Destroy(slot.TopCardView.gameObject);
-          slot.TopCardView = null;
-        }
-
         slot.CardCount = _deckManager.GetDiscardCount(i);
-        CardModel? top = _deckManager.PeekDiscard(i);
-        if (top.HasValue && _cardPrefab != null)
-        {
-          GameObject cardObj = Instantiate(_cardPrefab, slot.CardAnchor.transform);
-          CardView cardView = cardObj.GetComponent<CardView>();
-          if (cardView != null)
-          {
-            cardView.Setup(top.Value, true);
-            cardView.SetInteractable(true);
-            cardView.RectTransform.localScale = Vector3.one * PileCardScale;
-            cardView.RectTransform.anchoredPosition = Vector2.zero;
-            slot.TopCardView = cardView;
-          }
-        }
+        ShowTop(slot, _deckManager.PeekDiscard(i));
         UpdateCountLabel(slot);
         UpdateEmptyState(slot);
       }
+      RefreshRings();
     }
 
     private void OnRoundStarted(RoundStartedEvent evt)
     {
       foreach (PileSlot slot in _pileSlots)
       {
-        if (slot.TopCardView != null)
-        {
-          Destroy(slot.TopCardView.gameObject);
-          slot.TopCardView = null;
-        }
+        ShowTop(slot, null);
         slot.CardCount = 0;
         UpdateCountLabel(slot);
         UpdateEmptyState(slot);
@@ -401,81 +378,7 @@ namespace LevelUp.UI
     public bool IsInsideDiscardArea(Vector2 screenPosition)
     {
       if (_container == null) return false;
-      return RectTransformUtility.RectangleContainsScreenPoint(
-          _container, screenPosition, null);
-    }
-
-    public int GetNearestPileIndex(Vector2 screenPosition)
-    {
-      if (_pileSlots.Count == 0) return -1;
-      int best = 0;
-      float bestDist = float.MaxValue;
-      for (int i = 0; i < _pileSlots.Count; i++)
-      {
-        Vector3 world = _pileSlots[i].CardZoneRect.position;
-        Vector2 screen = RectTransformUtility.WorldToScreenPoint(null, world);
-        float d = Vector2.SqrMagnitude(screen - screenPosition);
-        if (d < bestDist) { bestDist = d; best = i; }
-      }
-      return best;
-    }
-
-    // ─── Sprite de contour pointillé partagé ──────────────────────────────
-    private static Sprite GetDashedBorderSprite()
-    {
-      if (_dashedBorderSprite != null) return _dashedBorderSprite;
-
-      // Texture 64×64 avec un cadre pointillé : segments de 4px tous les 8px.
-      // Sliced 9-slice avec border de 8px pour préserver les coins.
-      const int size = 64;
-      const int border = 8;
-      const int dashLen = 4;
-      const int dashGap = 4;
-
-      Texture2D tex = new(size, size, TextureFormat.RGBA32, false)
-      {
-        wrapMode = TextureWrapMode.Clamp,
-        filterMode = FilterMode.Bilinear
-      };
-
-      Color[] pixels = new Color[size * size];
-      Color transparent = new(1f, 1f, 1f, 0f);
-      Color line = Color.white;
-
-      for (int y = 0; y < size; y++)
-      {
-        for (int x = 0; x < size; x++)
-        {
-          bool onTop = y >= size - 2;
-          bool onBottom = y < 2;
-          bool onLeft = x < 2;
-          bool onRight = x >= size - 2;
-
-          if (!(onTop || onBottom || onLeft || onRight))
-          {
-            pixels[y * size + x] = transparent;
-            continue;
-          }
-
-          // Pour les bords haut/bas → on alterne dashes selon x
-          // Pour les bords gauche/droite → selon y
-          int t = (onTop || onBottom) ? x : y;
-          bool inDash = (t % (dashLen + dashGap)) < dashLen;
-
-          pixels[y * size + x] = inDash ? line : transparent;
-        }
-      }
-
-      tex.SetPixels(pixels);
-      tex.Apply();
-
-      _dashedBorderSprite = Sprite.Create(tex,
-          new Rect(0, 0, size, size),
-          new Vector2(0.5f, 0.5f),
-          100f, 0, SpriteMeshType.FullRect,
-          new Vector4(border, border, border, border));
-
-      return _dashedBorderSprite;
+      return RectTransformUtility.RectangleContainsScreenPoint(_container, screenPosition, null);
     }
 
     private void ClearSlots()
@@ -492,10 +395,9 @@ namespace LevelUp.UI
       public int PlayerIndex;
       public string PlayerName = "";
       public GameObject Root = null!;
-      public RectTransform SlotRect = null!;
       public RectTransform CardZoneRect = null!;
       public Image? EmptyStateImage;
-      public Image? ActiveGlow;
+      public Image? Ring;
       public TextMeshProUGUI LabelText = null!;
       public GameObject CardAnchor = null!;
       public CardView? TopCardView;

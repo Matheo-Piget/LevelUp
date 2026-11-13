@@ -66,8 +66,10 @@ namespace LevelUp.Core
         {
             if (targetIndex >= 0 && targetIndex < _players.Count && targetIndex != playerIndex)
             {
+                // Pas de PlayerSkippedEvent ici : la carte est annoncée par
+                // ActionCardPlayedEvent, et PlayerSkippedEvent signifie « ce
+                // joueur est sauté MAINTENANT » (publié par GetNextPlayer).
                 _players[targetIndex].SkipCount++;
-                EventBus.Publish(new PlayerSkippedEvent { PlayerIndex = targetIndex });
             }
         }
 
@@ -100,20 +102,33 @@ namespace LevelUp.Core
         {
             PlayerModel player = _players[playerIndex];
 
+            int drawnCount = 0;
             for (int i = 0; i < count; i++)
             {
                 CardModel? drawn = _deckManager.DrawFromPile();
                 if (drawn.HasValue)
                 {
                     player.AddToHand(drawn.Value);
+                    drawnCount++;
                 }
             }
 
             EventBus.Publish(new ForcedDrawEvent
             {
                 PlayerIndex = playerIndex,
-                CardCount = count
+                CardCount = drawnCount
             });
+
+            // La main ciblée a changé hors de son tour : sans cet événement, la
+            // main affichée du joueur visé ne montrerait pas ses nouvelles cartes.
+            if (drawnCount > 0)
+            {
+                EventBus.Publish(new HandChangedEvent
+                {
+                    PlayerIndex = playerIndex,
+                    NewHand = new List<CardModel>(player.Hand)
+                });
+            }
         }
 
         /// <summary>

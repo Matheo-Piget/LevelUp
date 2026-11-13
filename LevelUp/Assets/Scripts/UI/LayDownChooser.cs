@@ -95,6 +95,7 @@ namespace LevelUp.UI
             _root.gameObject.SetActive(true);
             _root.SetAsLastSibling();
             IsOpen = true;
+            UIBackStack.Push(this, Hide);
             _cg.alpha = 0f;
             UITween.FadeTo(_root.gameObject, _cg, 1f, 0.16f);
         }
@@ -103,6 +104,7 @@ namespace LevelUp.UI
         {
             if (_root == null || _cg == null || !IsOpen) return;
             IsOpen = false;
+            UIBackStack.Remove(this);
             _onPick = null;
             UITween.FadeTo(_root.gameObject, _cg, 0f, 0.12f, () =>
             {
@@ -182,8 +184,8 @@ namespace LevelUp.UI
             string label = card.Type switch
             {
                 CardType.Normal => card.Value.ToString(),
-                CardType.Wild => "W",
-                CardType.WildDraw2 => "W+2",
+                CardType.Wild => "J",
+                CardType.WildDraw2 => "J+2",
                 _ => "?"
             };
             TextMeshProUGUI value = UISkin.Text(bg.transform, "Value", label, normal ? 22f : 15f, ink,

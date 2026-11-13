@@ -95,9 +95,19 @@ namespace LevelUp.UI
         private void OnEnable() => GameSettings.SettingsChanged += OnSettingsChanged;
         private void OnDisable() => GameSettings.SettingsChanged -= OnSettingsChanged;
 
+        // Réglages qui changent l'apparence d'une carte : seul un vrai changement
+        // redessine (déplacer un curseur de volume ne touche plus aux cartes).
+        private bool _builtColorblind;
+        private int _builtBack;
+
         private void OnSettingsChanged()
         {
-            if (_modelAssigned) UpdateVisuals();
+            if (_cardBack != null && _builtBack != GameSettings.CardBack)
+            {
+                _builtBack = GameSettings.CardBack;
+                UISkin.BuildCardBack((RectTransform)_cardBack.transform, Radius, _builtBack);
+            }
+            if (_modelAssigned && _builtColorblind != GameSettings.ColorblindMode) UpdateVisuals();
         }
 
         private void Update()
@@ -155,7 +165,8 @@ namespace LevelUp.UI
             // Dos
             if (_cardBack != null)
             {
-                UISkin.BuildCardBack((RectTransform)_cardBack.transform, Radius);
+                _builtBack = GameSettings.CardBack;
+                UISkin.BuildCardBack((RectTransform)_cardBack.transform, Radius, _builtBack);
             }
 
             if (_cardFront == null) return;
@@ -364,7 +375,8 @@ namespace LevelUp.UI
                 {
                     _watermark.sprite = UISkin.Suit(_cardModel.Color);
                     // Mode daltonisme : filigrane renforcé.
-                    float a = GameSettings.ColorblindMode ? 0.30f : 0.16f;
+                    _builtColorblind = GameSettings.ColorblindMode;
+                    float a = _builtColorblind ? 0.30f : 0.16f;
                     _watermark.color = UISkin.WithAlpha(_ink, a);
                 }
             }
@@ -412,18 +424,18 @@ namespace LevelUp.UI
             _actionGlyph.text = _cardModel.Type switch
             {
                 CardType.Draw2 => "+2",
-                CardType.Wild => "W",
-                CardType.WildDraw2 => "W+2",
+                CardType.Wild => "J",
+                CardType.WildDraw2 => "J+2",
                 _ => ""
             };
-            _actionGlyph.fontSize = _cardModel.Type == CardType.WildDraw2 ? 19f : 24f;
+            _actionGlyph.fontSize = _cardModel.Type == CardType.WildDraw2 ? 19f : _cardModel.Type == CardType.Wild ? 30f : 24f;
 
             _actionLabel.text = _cardModel.Type switch
             {
-                CardType.Skip => "Skip",
-                CardType.Draw2 => "Draw +2",
-                CardType.Wild => "Wild",
-                CardType.WildDraw2 => "Wild +2",
+                CardType.Skip => "Passe",
+                CardType.Draw2 => "Pioche 2",
+                CardType.Wild => "Joker",
+                CardType.WildDraw2 => "Joker +2",
                 _ => ""
             };
         }

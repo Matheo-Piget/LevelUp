@@ -54,11 +54,14 @@ namespace LevelUp.Core
 
             if (requirementSets.Count == 0) return false;
 
-            // Essayer chaque set d'exigences (normalement un seul)
+            // Essayer chaque set d'exigences (normalement un seul). Recherche bornée :
+            // avec beaucoup de jokers et aucune solution, l'exploration exhaustive
+            // pouvait coûter cher (appelée par les aides à chaque changement de main).
             foreach (List<LevelRequirement> requirements in requirementSets)
             {
                 List<Meld> melds = new();
-                if (TryFindMelds(new List<CardModel>(hand), requirements, 0, melds))
+                int budget = MaxSearchNodes;
+                if (TryFindMelds(new List<CardModel>(hand), requirements, 0, melds, ref budget))
                 {
                     foundMelds = melds;
                     return true;
@@ -125,9 +128,10 @@ namespace LevelUp.Core
         /// Utilise le backtracking pour explorer toutes les possibilités.
         /// </summary>
         private static bool TryFindMelds(List<CardModel> availableCards,
-            List<LevelRequirement> requirements, int reqIndex, List<Meld> foundMelds)
+            List<LevelRequirement> requirements, int reqIndex, List<Meld> foundMelds, ref int budget)
         {
             if (reqIndex >= requirements.Count) return true;
+            if (budget-- <= 0) return false;
 
             LevelRequirement req = requirements[reqIndex];
 
@@ -145,12 +149,13 @@ namespace LevelUp.Core
                 Meld meld = new(req.Type, candidate, -1);
                 foundMelds.Add(meld);
 
-                if (TryFindMelds(remaining, requirements, reqIndex + 1, foundMelds))
+                if (TryFindMelds(remaining, requirements, reqIndex + 1, foundMelds, ref budget))
                 {
                     return true;
                 }
 
                 foundMelds.RemoveAt(foundMelds.Count - 1);
+                if (budget <= 0) return false;
             }
 
             return false;

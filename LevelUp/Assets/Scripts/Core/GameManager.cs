@@ -39,9 +39,34 @@ namespace LevelUp.Core
         private int _roundNumber;
         private int _roundStarterIndex;
         private bool _rebuilding;
+        private MatchRules _rules = MatchRules.Classic;
+
+        /// <summary>
+        /// Version des règles : à incrémenter dès qu'une règle ou le format d'une
+        /// commande change. Deux appareils (en ligne) ou une sauvegarde d'une autre
+        /// version ne produiraient pas la même partie en rejouant les commandes.
+        /// v5 : fin de manche explicite (StartNextRoundCommand), sortie par pose,
+        /// phases Piocher/Défausser non passables, points de pénalité.
+        /// </summary>
+        public const int RulesVersion = 5;
+
+        /// <summary>
+        /// Vrai (défaut, tests et simulations) : la manche suivante démarre dans la
+        /// foulée de la fin de manche. Faux (le jeu réel) : la partie attend une
+        /// <see cref="StartNextRoundCommand"/> en <see cref="GameState.EndRound"/>,
+        /// le temps d'afficher le récap. Doit être identique sur tous les appareils
+        /// d'une partie en ligne (réglé une fois par le bootstrapper).
+        /// </summary>
+        public bool AutoStartNextRound { get; set; } = true;
 
         /// <summary>État actuel de la partie.</summary>
         public GameState State => _state;
+
+        /// <summary>Règles de la partie en cours (immuables jusqu'à la prochaine partie).</summary>
+        public MatchRules Rules => _rules;
+
+        /// <summary>Gagnant de la dernière manche terminée (-1 avant la première).</summary>
+        public int LastRoundWinner { get; private set; } = -1;
 
         /// <summary>Liste des joueurs.</summary>
         public IReadOnlyList<PlayerModel> Players => _players;
@@ -76,22 +101,30 @@ namespace LevelUp.Core
             List<PlayerSetup> setups = new();
             for (int i = 0; i < humanPlayers; i++)
             {
-                setups.Add(new PlayerSetup($"Player {i + 1}", false));
+                setups.Add(new PlayerSetup($"Joueur {i + 1}", false));
             }
             for (int i = 0; i < aiPlayers; i++)
             {
                 setups.Add(new PlayerSetup($"Bot {i + 1}", true));
             }
 
-            StartGame(setups, System.Environment.TickCount, randomContracts);
+            StartGame(setups, System.Environment.TickCount, new MatchRules(randomContracts));
         }
 
         /// <summary>
-        /// Initialise et démarre une partie avec une liste de sièges explicite et
-        /// un seed de mélange. Même (setups, seed, mode de contrats) ⇒ même partie
-        /// sur tous les appareils : c'est le point d'entrée du multijoueur en ligne.
+        /// Compat : partie aux règles classiques, contrats fixes ou variés.
         /// </summary>
         public void StartGame(IReadOnlyList<PlayerSetup> setups, int seed, bool randomContracts = false)
+        {
+            StartGame(setups, seed, new MatchRules(randomContracts));
+        }
+
+        /// <summary>
+        /// Initialise et démarre une partie avec une liste de sièges explicite, un
+        /// seed de mélange et des règles. Même (setups, seed, règles) ⇒ même partie
+        /// sur tous les appareils : c'est le point d'entrée du multijoueur en ligne.
+        /// </summary>
+        public void StartGame(IReadOnlyList<PlayerSetup> setups, int seed, MatchRules rules)
         {
             if (_config == null)
             {
@@ -102,7 +135,10 @@ namespace LevelUp.Core
             _state = GameState.Setup;
             _players.Clear();
             _roundNumber = 0;
-            GameSession.Contracts = randomContracts
+            LastRoundWinner = -1;
+            _rules = rules ?? MatchRules.Classic;
+            GameSession.Rules = _rules;
+            GameSession.Contracts = _rules.RandomContracts
                 ? ContractPlan.CreateRandom(seed)
                 : ContractPlan.Classic;
 
@@ -112,7 +148,7 @@ namespace LevelUp.Core
                 _players.Add(new PlayerModel(i, setups[i].Name, setups[i].IsAI));
             }
 
-            _deckManager = new DeckManager(_config, seed);
+            _deckManager = new DeckManager(_config, seed, _rules);
             _actionHandler = new ActionCardHandler(_deckManager, _players);
             _turnManager = new TurnManager(_players, _actionHandler);
             _executor = new GameCommandExecutor(
@@ -158,11 +194,29 @@ namespace LevelUp.Core
         /// Appelé quand un joueur termine son tour en vidant sa main.
         /// Gère la fin du round et la progression des niveaux.
         /// </summary>
-        public void OnRoundEnd(int winnerIndex)
+        internal void OnRoundEnd(int winnerIndex, bool deckExhausted = false)
         {
             _state = GameState.EndRound;
+            LastRoundWinner = winnerIndex;
 
             PlayerModel winner = _players[winnerIndex];
+
+            // Instantané avant la montée des niveaux (récap) + points de pénalité :
+            // les cartes restées en main comptent contre leur joueur.
+            int count = _players.Count;
+            int[] levelsBefore = new int[count];
+            bool[] laidDown = new bool[count];
+            int[] cardsLeft = new int[count];
+            int[] roundPenalty = new int[count];
+            for (int i = 0; i < count; i++)
+            {
+                PlayerModel p = _players[i];
+                levelsBefore[i] = p.CurrentLevel;
+                laidDown[i] = p.HasLaidDownThisRound;
+                cardsLeft[i] = p.Hand.Count;
+                roundPenalty[i] = p.HandPenalty();
+                p.PenaltyPoints += roundPenalty[i];
+            }
 
             EventBus.Publish(new RoundEndedEvent { WinnerIndex = winnerIndex });
 
@@ -197,20 +251,65 @@ namespace LevelUp.Core
                 }
             }
 
-            // Vérifier si quelqu'un a gagné la partie
+            // Fin de partie : quelqu'un a dépassé le niveau final de la partie.
+            // Plusieurs dans le même cas : le plus avancé gagne, et à égalité
+            // le gagnant de la manche (c'est lui qui l'a terminée).
+            int champion = -1;
             foreach (PlayerModel player in _players)
             {
-                if (player.CurrentLevel > Constants.MaxLevel)
+                if (player.CurrentLevel <= _rules.LevelsToWin) continue;
+                if (champion < 0)
                 {
-                    _state = GameState.GameOver;
-                    EventBus.Publish(new GameOverEvent { WinnerIndex = player.Index });
-                    return;
+                    champion = player.Index;
+                    continue;
+                }
+                PlayerModel best = _players[champion];
+                if (player.CurrentLevel > best.CurrentLevel
+                    || (player.CurrentLevel == best.CurrentLevel && player.Index == winnerIndex))
+                {
+                    champion = player.Index;
                 }
             }
 
-            // Prochain round
+            int[] levelsAfter = new int[count];
+            for (int i = 0; i < count; i++) levelsAfter[i] = _players[i].CurrentLevel;
+
+            bool gameOver = champion >= 0;
+            EventBus.Publish(new RoundSummaryEvent
+            {
+                RoundNumber = _roundNumber,
+                WinnerIndex = winnerIndex,
+                DeckExhausted = deckExhausted,
+                AwaitingNextRound = !gameOver && !AutoStartNextRound,
+                GameOver = gameOver,
+                LevelsBefore = levelsBefore,
+                LevelsAfter = levelsAfter,
+                LaidDown = laidDown,
+                CardsLeft = cardsLeft,
+                RoundPenalty = roundPenalty
+            });
+
+            if (gameOver)
+            {
+                _state = GameState.GameOver;
+                EventBus.Publish(new GameOverEvent { WinnerIndex = champion });
+                return;
+            }
+
+            // Prochain round : tout de suite (tests, simulations) ou sur
+            // StartNextRoundCommand, une fois le récap lu (jeu réel).
             _roundStarterIndex = (winnerIndex + 1) % _players.Count;
-            StartNewRound();
+            if (AutoStartNextRound) StartNewRound();
+        }
+
+        /// <summary>
+        /// Abandonne la partie en cours (retour au menu) : plus aucune commande
+        /// n'est acceptée et rien ne tourne en arrière-plan (bots, minuteur,
+        /// input) jusqu'au prochain <see cref="StartGame(IReadOnlyList{PlayerSetup}, int, MatchRules)"/>.
+        /// </summary>
+        public void AbandonGame()
+        {
+            _state = GameState.Setup;
         }
 
         /// <summary>
@@ -223,6 +322,15 @@ namespace LevelUp.Core
             if (_executor == null)
                 return CommandResult.Failure("Game not initialized");
 
+            if (command is StartNextRoundCommand next)
+                return ExecuteStartNextRound(next);
+
+            // Hors manche (récap affiché, partie finie ou abandonnée) : rien ne
+            // se joue — une commande réseau tardive ne peut pas rejouer une fin
+            // de manche ni agir sur une partie terminée.
+            if (_state != GameState.PlayerTurn)
+                return CommandResult.Failure("Aucune manche en cours");
+
             CommandResult result = _executor.Execute(command);
 
             if (result.RoundEnded)
@@ -231,7 +339,7 @@ namespace LevelUp.Core
                 // après défausse). Si l'exécuteur fournit un override (deck épuisé),
                 // c'est lui qui prime.
                 int winner = result.WinnerOverride ?? _turnManager!.CurrentPlayerIndex;
-                OnRoundEnd(winner);
+                OnRoundEnd(winner, result.WinnerOverride.HasValue);
             }
 
             // Notifier APRÈS le traitement complet (fin de round comprise) : le
@@ -245,6 +353,26 @@ namespace LevelUp.Core
         }
 
         /// <summary>
+        /// Démarre la manche suivante après un récap. Refusée hors récap ou si
+        /// elle vise une manche déjà dépassée (commande en double).
+        /// </summary>
+        private CommandResult ExecuteStartNextRound(StartNextRoundCommand command)
+        {
+            if (_state != GameState.EndRound)
+                return CommandResult.Failure("Aucun récap en cours");
+            if (command.FinishedRound != _roundNumber)
+                return CommandResult.Failure("Manche déjà lancée");
+            if (command.PlayerIndex < 0 || command.PlayerIndex >= _players.Count)
+                return CommandResult.Failure("Joueur invalide");
+
+            StartNewRound();
+
+            CommandResult result = CommandResult.Ok();
+            if (!_rebuilding) CommandExecuted?.Invoke(command, result);
+            return result;
+        }
+
+        /// <summary>
         /// Reconstruit une partie en rejouant son historique complet (même sièges,
         /// même seed, mêmes commandes ⇒ même état, cf. simulation miroir).
         /// Silencieux : aucun événement publié, aucune commande relayée — l'appelant
@@ -253,12 +381,19 @@ namespace LevelUp.Core
         public bool RebuildFromHistory(IReadOnlyList<PlayerSetup> setups, int seed,
             bool randomContracts, IReadOnlyList<IGameCommand> history)
         {
+            return RebuildFromHistory(setups, seed, new MatchRules(randomContracts), history);
+        }
+
+        /// <inheritdoc cref="RebuildFromHistory(IReadOnlyList{PlayerSetup}, int, bool, IReadOnlyList{IGameCommand})"/>
+        public bool RebuildFromHistory(IReadOnlyList<PlayerSetup> setups, int seed,
+            MatchRules rules, IReadOnlyList<IGameCommand> history)
+        {
             bool wasMuted = EventBus.Muted;
             EventBus.Muted = true;
             _rebuilding = true;
             try
             {
-                StartGame(setups, seed, randomContracts);
+                StartGame(setups, seed, rules);
                 foreach (IGameCommand command in history)
                 {
                     if (!ExecuteCommand(command).Success) return false;
@@ -316,6 +451,7 @@ namespace LevelUp.Core
                     h = h * 31 + p.CurrentLevel;
                     h = h * 31 + (p.HasLaidDownThisRound ? 1 : 0);
                     h = h * 31 + p.SkipCount;
+                    h = h * 31 + p.PenaltyPoints;
 
                     // Somme commutative : l'ordre local de la main n'influe pas.
                     int handSum = 0;

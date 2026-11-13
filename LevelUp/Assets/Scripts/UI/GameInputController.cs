@@ -1,3 +1,4 @@
+using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.EventSystems;
@@ -80,8 +81,40 @@ namespace LevelUp.UI
         // "Choisis ta pose" (plusieurs répartitions valides du contrat)
         private LayDownChooser? _chooser;
 
+        // Cible d'une carte « Passe » / « +2 » (3 joueurs ou plus)
+        private TargetChooser? _targetChooser;
+
+        // Fin de tour automatique en cours (minuteur écoulé)
+        private bool _autoFinishing;
+
         // Indices "carte jouable" (phase Compléter) à recalculer
         private bool _hintsDirty = true;
+
+        // Carte saisie pendant un drag d'action (peut faire partie d'une sélection multiple).
+        private CardView? _actionCard;
+
+        // Combinaisons acceptant la carte saisie (calculées une fois au début du drag).
+        private readonly HashSet<(int Owner, int Meld)> _validTargets = new();
+        private System.Func<int, int, bool>? _acceptsTarget;
+
+        // Hors de son tour : seul le rangement de la main est permis.
+        private bool _reorderOnly;
+
+        // Pile touchée en phase Piocher (paquet = DeckPress, défausse = index), -1 sinon.
+        private const int DeckPress = -2;
+        private int _pressedPile = -1;
+
+        // Phase Défausser : la carte touchée était déjà soulevée (second toucher).
+        private bool _tapWasSelected;
+
+        // Contrat faisable avec la main locale (calculé une fois par état de main).
+        private int _contractKey = int.MinValue;
+        private bool _contractReady;
+
+        // Tri mémorisé à réappliquer (après une pioche, une donne, un +2…).
+        private bool _sortDirty;
+        private int _deckBackVariant = -1;
+        private RectTransform? _deckTop;
 
         /// <summary>
         /// Vrai pendant les animations de cartes (pioche, pose, défausse).
@@ -98,12 +131,17 @@ namespace LevelUp.UI
         {
             _gameManager = gameManager;
 
+            _acceptsTarget = (owner, meld) => _validTargets.Contains((owner, meld));
+
             if (_handView != null)
             {
                 _handView.OnCardsReordered += OnCardsReordered;
+                _handView.DrawAnimationFinished += MarkSortDirty;
+                _handView.SetSortMode(GameSettings.HandSort);
             }
 
             RestyleDeckPanel();
+            EventBus.Subscribe<HandChangedEvent>(OnLocalHandChanged);
 
             // Indices "jouable" : recalculés quand la phase, la main ou la table changent.
             EventBus.Subscribe<TurnPhaseChangedEvent>(MarkHintsDirty);
@@ -112,9 +150,61 @@ namespace LevelUp.UI
             EventBus.Subscribe<CardAddedToMeldEvent>(MarkHintsDirty);
             EventBus.Subscribe<LevelLaidDownEvent>(MarkHintsDirty);
             EventBus.Subscribe<RoundStartedEvent>(MarkHintsDirty);
+            GameSettings.SettingsChanged += OnSettingsChanged;
         }
 
         private void MarkHintsDirty<T>(T _) => _hintsDirty = true;
+
+        private void OnSettingsChanged()
+        {
+            _hintsDirty = true;
+            // Dos de carte changé dans les options : la pioche suit.
+            if (_deckTop != null && _deckBackVariant != GameSettings.CardBack)
+            {
+                _deckBackVariant = GameSettings.CardBack;
+                UISkin.BuildCardBack(_deckTop, 14f, _deckBackVariant);
+            }
+        }
+
+        private void MarkSortDirty() => _sortDirty = true;
+
+        private void OnLocalHandChanged(HandChangedEvent evt)
+        {
+            if (evt.PlayerIndex == GameSession.LocalPlayerIndex) _sortDirty = true;
+        }
+
+        /// <summary>
+        /// Trie la main du joueur local selon le tri mémorisé (avant une donne :
+        /// les cartes arrivent déjà rangées). Cosmétique, aucune règle touchée.
+        /// </summary>
+        public void ApplyPreferredSort(PlayerModel? player)
+        {
+            if (player == null) return;
+            System.Comparison<CardModel>? comparator = SortComparator();
+            if (comparator != null) player.SortHand(comparator);
+        }
+
+        private static System.Comparison<CardModel>? SortComparator() => GameSettings.HandSort switch
+        {
+            1 => PlayerModel.CompareByValue,
+            2 => PlayerModel.CompareByColor,
+            _ => null
+        };
+
+        /// <summary>Réapplique le tri mémorisé dès que la main est au repos (glissement animé).</summary>
+        private void ApplyPendingSort()
+        {
+            if (!_sortDirty || _handView == null) return;
+            if (_isDragging || _handView.IsReorderDragging || _handView.IsAnimatingDeal
+                || _handView.IsAnimatingDraw) return;
+            _sortDirty = false;
+
+            System.Comparison<CardModel>? comparator = SortComparator();
+            PlayerModel? player = GameSession.GetLocalPlayer(_gameManager);
+            if (comparator == null || player == null) return;
+            player.SortHand(comparator);
+            _handView.ApplySortedOrder(player.Hand);
+        }
 
         /// <summary>
         /// Habille le panneau de pioche posé en scène (rect brut) en dos de
@@ -143,7 +233,9 @@ namespace LevelUp.UI
             top.transform.SetParent(_deckHitArea, false);
             UISkin.Stretch((RectTransform)top.transform);
             top.GetComponent<Image>().raycastTarget = false;
-            UISkin.BuildCardBack((RectTransform)top.transform, 14f);
+            _deckTop = (RectTransform)top.transform;
+            _deckBackVariant = GameSettings.CardBack;
+            UISkin.BuildCardBack(_deckTop, 14f, _deckBackVariant);
 
             // Le panneau de scène reste la zone de clic, sans visuel propre.
             Image? img = _deckHitArea.GetComponent<Image>();
@@ -163,13 +255,16 @@ namespace LevelUp.UI
             if (_handView != null)
             {
                 _handView.OnCardsReordered -= OnCardsReordered;
+                _handView.DrawAnimationFinished -= MarkSortDirty;
             }
+            EventBus.Unsubscribe<HandChangedEvent>(OnLocalHandChanged);
             EventBus.Unsubscribe<TurnPhaseChangedEvent>(MarkHintsDirty);
             EventBus.Unsubscribe<TurnStartedEvent>(MarkHintsDirty);
             EventBus.Unsubscribe<HandChangedEvent>(MarkHintsDirty);
             EventBus.Unsubscribe<CardAddedToMeldEvent>(MarkHintsDirty);
             EventBus.Unsubscribe<LevelLaidDownEvent>(MarkHintsDirty);
             EventBus.Unsubscribe<RoundStartedEvent>(MarkHintsDirty);
+            GameSettings.SettingsChanged -= OnSettingsChanged;
         }
 
         /// <summary>
@@ -182,6 +277,13 @@ namespace LevelUp.UI
             // (cosmétique) s'applique à lui, jamais au joueur courant distant/IA.
             PlayerModel? player = GameSession.GetLocalPlayer(_gameManager);
             player?.ReorderHand(fromIndex, toIndex);
+
+            // Rangement à la main : le tri automatique s'efface (ordre libre).
+            if (GameSettings.HandSort != 0)
+            {
+                GameSettings.HandSort = 0;
+                _handView?.SetSortMode(0);
+            }
         }
 
         public void SetInputEnabled(bool enabled)
@@ -192,21 +294,28 @@ namespace LevelUp.UI
         private void Update()
         {
             if (!_inputEnabled || _gameManager == null) return;
-            if (_gameManager.State != GameState.PlayerTurn) return;
             if (_gameManager.TurnManager == null) return;
+            bool playing = _gameManager.State == GameState.PlayerTurn;
+            if (!playing && _gameManager.State != GameState.EndRound) return;
             // Seul le deal cascade (début de round) bloque tout l'input : les
             // positions de toutes les cartes sont pilotées par les coroutines.
             // Les autres animations ne verrouillent que les actions mutantes
             // (voir ActionsLocked) — sélection et reorder restent disponibles.
             if (_handView != null && _handView.IsAnimatingDeal) return;
 
-            // En ligne : cet appareil ne joue QUE son propre siège. Hors ligne,
-            // IsLocalHuman se réduit à !IsAI (comportement solo inchangé).
-            PlayerModel currentPlayer = _gameManager.TurnManager.CurrentPlayer;
-            if (!GameSession.IsLocalHuman(currentPlayer)) return;
+            // Choix de pose / de cible ouvert, ou fin de tour automatique : rien d'autre.
+            if (LayDownChooser.IsOpen || TargetChooser.IsOpen || _autoFinishing) return;
 
-            // Choix de pose ouvert : le panneau capte tout.
-            if (LayDownChooser.IsOpen) return;
+            // En ligne : cet appareil ne joue QUE son propre siège. Hors de son
+            // tour (ou pendant le récap), on peut quand même ranger sa main.
+            PlayerModel currentPlayer = _gameManager.TurnManager.CurrentPlayer;
+            bool myTurn = playing && GameSession.IsLocalHuman(currentPlayer);
+            if (!myTurn && GameSession.GetLocalPlayer(_gameManager) == null) return;
+
+            // Changement de mode en plein geste (le tour arrive) : on termine
+            // proprement le geste précédent avant de passer à l'autre mode.
+            if (_reorderOnly == myTurn && _isDragging) CancelGesture();
+            _reorderOnly = !myTurn;
 
             HandleInput();
         }
@@ -214,6 +323,29 @@ namespace LevelUp.UI
         private void LateUpdate()
         {
             if (_hintsDirty) RefreshPlayableHints();
+            ApplyPendingSort();
+        }
+
+        /// <summary>
+        /// « Défausser » (étapes) : passe la pose et les ajouts pour aller
+        /// directement à la défausse. La carte se choisit ensuite d'un toucher.
+        /// </summary>
+        public void SkipToDiscard()
+        {
+            if (_gameManager?.TurnManager == null || !IsLocalTurn || ActionsLocked) return;
+            if (_gameManager.State != GameState.PlayerTurn) return;
+            TurnPhase phase = _gameManager.TurnManager.CurrentPhase;
+            if (phase != TurnPhase.LayDown && phase != TurnPhase.AddToMelds) return;
+
+            CancelGesture();
+            _handView?.DeselectAll();
+            int safety = 3;
+            while (_gameManager.TurnManager.CurrentPhase != TurnPhase.Discard && safety-- > 0)
+            {
+                TurnPhase p = _gameManager.TurnManager.CurrentPhase;
+                if (p != TurnPhase.LayDown && p != TurnPhase.AddToMelds) break;
+                ExecuteSkipPhase(p);
+            }
         }
 
         /// <summary>
@@ -228,6 +360,8 @@ namespace LevelUp.UI
 
             TurnManager? tm = _gameManager?.TurnManager;
             bool active = tm != null
+                          && GameSettings.HintPlayable
+                          && _gameManager!.State == GameState.PlayerTurn
                           && tm.CurrentPhase == TurnPhase.AddToMelds
                           && GameSession.IsLocalHuman(tm.CurrentPlayer);
             if (!active || _gameManager == null)
@@ -325,19 +459,41 @@ namespace LevelUp.UI
         {
             if (_gameManager?.TurnManager == null) return;
             TurnPhase phase = _gameManager.TurnManager.CurrentPhase;
+            _actionCard = null;
+
+            // ── Hors de son tour : ranger sa main, rien d'autre ──
+            if (_reorderOnly)
+            {
+                int idx = _handView != null ? _handView.GetCardIndexAtPosition(pos) : -1;
+                if (idx >= 0)
+                {
+                    _dragStartPos = pos;
+                    _dragStartTime = Time.time;
+                    _dragCardIndex = idx;
+                    _isReorderCandidate = true;
+                    _isDragging = true;
+                }
+                return;
+            }
 
             // ── Phase DRAW ──
+            // La pioche se déclenche au RELÂCHEMENT, si le doigt est resté sur la
+            // même pile : un geste commencé à côté qui l'effleure ne pioche plus.
             if (phase == TurnPhase.Draw)
             {
                 if (HitsRect(_deckHitArea, pos))
                 {
-                    ExecuteDrawFromDeck();
+                    _pressedPile = DeckPress;
+                    _isDragging = true;
+                    _dragStartPos = pos;
                     return;
                 }
 
                 if (_discardPileView != null && _discardPileView.GetPileAtPosition(pos, out int pileIdx))
                 {
-                    ExecuteDrawFromDiscard(pileIdx);
+                    _pressedPile = pileIdx;
+                    _isDragging = true;
+                    _dragStartPos = pos;
                     return;
                 }
 
@@ -371,7 +527,10 @@ namespace LevelUp.UI
                     return;
                 }
 
-                if (HitsRect(_tableHitArea, pos) || IsAboveHand(pos))
+                // Toucher la table (et seulement la table) pose le niveau. Le bas
+                // de l'écran au-dessus de la main ne déclenche plus rien : un
+                // toucher égaré ne pose plus le contrat à la place du joueur.
+                if (HitsRect(_tableHitArea, pos))
                 {
                     ExecuteLayDown();
                     return;
@@ -390,6 +549,8 @@ namespace LevelUp.UI
                     _isReorderCandidate = false;
                     _dragCardIndex = idx;
                     _dragStartPos = pos;
+                    _actionCard = _handView.GetCardViewAt(idx);
+                    ComputeValidTargets(_actionCard != null ? _actionCard.CardModel : (CardModel?)null);
                     _handView.BeginDrag(idx, pos);
                     return;
                 }
@@ -402,12 +563,8 @@ namespace LevelUp.UI
                 int idx = _handView.GetCardIndexAtPosition(pos);
                 if (idx >= 0)
                 {
-                    if (_handView.IsDoubleClick(idx))
-                    {
-                        ExecuteDiscard(_handView.SelectedCard!.CardModel);
-                        return;
-                    }
-
+                    // Second toucher sur la carte déjà soulevée = défausse (au relâchement).
+                    _tapWasSelected = _handView.IsDoubleClick(idx);
                     _handView.SelectSingleCard(idx);
                     _isDragging = true;
                     _isReorderCandidate = true;
@@ -430,8 +587,8 @@ namespace LevelUp.UI
             TurnPhase phase = _gameManager?.TurnManager?.CurrentPhase ?? TurnPhase.Draw;
             float dragDist = Vector2.Distance(pos, _dragStartPos);
 
-            // Phase DRAW : reorder seulement
-            if (phase == TurnPhase.Draw && _isReorderCandidate)
+            // Phase DRAW (ou hors de son tour) : reorder seulement
+            if ((phase == TurnPhase.Draw || _reorderOnly) && _isReorderCandidate)
             {
                 if (dragDist > ReorderDragThreshold)
                 {
@@ -510,22 +667,42 @@ namespace LevelUp.UI
         private void PromoteToActionDrag(Vector2 pos, bool select)
         {
             _isReorderCandidate = false;
-            if (select) _handView!.SelectSingleCard(_dragCardIndex);
-            _handView!.BeginDrag(_dragCardIndex, _dragStartPos);
+            CardView? card = _handView!.GetCardViewAt(_dragCardIndex);
+            // En phase Poser, glisser une carte déjà sélectionnée garde toute la
+            // sélection (on emmène le contrat vers la table) ; sinon elle seule.
+            if (select && (card == null || !card.IsSelected)) _handView.SelectSingleCard(_dragCardIndex);
+            _actionCard = card;
+            _handView.BeginDrag(_dragCardIndex, _dragStartPos);
             _handView.ContinueDrag(pos);
+        }
+
+        /// <summary>Combinaisons de la table qui acceptent la carte (même test que la commande).</summary>
+        private void ComputeValidTargets(CardModel? card)
+        {
+            _validTargets.Clear();
+            if (!card.HasValue || _gameManager == null) return;
+            foreach (PlayerModel p in _gameManager.Players)
+            {
+                for (int m = 0; m < p.LaidMelds.Count; m++)
+                {
+                    if (p.LaidMelds[m].CanAddCard(card.Value)) _validTargets.Add((p.Index, m));
+                }
+            }
         }
 
         /// <summary>
         /// Snap magnétique : surligne le meld le plus proche du curseur (rayon
         /// généreux) et attire doucement la carte vers son centre. Au release,
         /// la cible mémorisée gagne même si on rate le rect de quelques pixels.
+        /// Seules les combinaisons qui acceptent la carte attirent.
         /// </summary>
         private Vector2 UpdateMeldMagnet(Vector2 pos)
         {
             if (_tableView == null) return pos;
 
             if (_tableView.TryGetNearestMeld(pos, MagnetRadius,
-                    out int owner, out int meld, out Vector2 center))
+                    out int owner, out int meld, out Vector2 center,
+                    GameSettings.HintPlayable ? _acceptsTarget : null))
             {
                 if (!_hasMagnetTarget || owner != _magnetOwner || meld != _magnetMeld)
                 {
@@ -575,6 +752,24 @@ namespace LevelUp.UI
 
             TurnPhase phase = _gameManager.TurnManager.CurrentPhase;
 
+            // Pioche : relâché sur la même pile qu'à l'appui.
+            if (_pressedPile != -1)
+            {
+                int pressed = _pressedPile;
+                _pressedPile = -1;
+                if (phase != TurnPhase.Draw || _reorderOnly) return;
+                if (pressed == DeckPress)
+                {
+                    if (HitsRect(_deckHitArea, pos)) ExecuteDrawFromDeck();
+                }
+                else if (_discardPileView != null && _discardPileView.GetPileAtPosition(pos, out int releasedPile)
+                         && releasedPile == pressed)
+                {
+                    ExecuteDrawFromDiscard(pressed);
+                }
+                return;
+            }
+
             // Reorder drag terminé
             if (_handView.IsReorderDragging)
             {
@@ -586,6 +781,13 @@ namespace LevelUp.UI
 
             float dragDist = Vector2.Distance(pos, _dragStartPos);
 
+            // Hors de son tour : un simple toucher ne fait rien.
+            if (_reorderOnly)
+            {
+                FinishDrag(pos);
+                return;
+            }
+
             // Phase LAY DOWN : simple clic = toggle selection
             if (phase == TurnPhase.LayDown && dragDist < ReorderDragThreshold)
             {
@@ -595,7 +797,8 @@ namespace LevelUp.UI
                 return;
             }
 
-            // Phase DISCARD : simple clic = défausse directe (zéro friction)
+            // Phase DISCARD : toucher = soulever la carte, second toucher = défausser
+            // (ou défausse directe si l'option « Défausse en un toucher » est active).
             if (phase == TurnPhase.Discard && _isReorderCandidate && dragDist < ReorderDragThreshold)
             {
                 CardView? clicked = _dragCardIndex >= 0
@@ -604,15 +807,17 @@ namespace LevelUp.UI
                 _isReorderCandidate = false;
                 _dragCardIndex = -1;
 
-                if (clicked != null)
+                if (clicked != null && (GameSettings.QuickDiscard || _tapWasSelected))
                 {
                     _handView.DeselectAll();
                     ExecuteDiscard(clicked.CardModel);
                 }
+                _tapWasSelected = false;
                 return;
             }
 
-            CardView? dragged = _handView.SelectedCard;
+            CardView? dragged = _actionCard != null ? _actionCard : _handView.SelectedCard;
+            _actionCard = null;
             if (dragged == null)
             {
                 FinishDrag(pos);
@@ -621,7 +826,18 @@ namespace LevelUp.UI
 
             CardModel card = dragged.CardModel;
 
-            // Phase Discard : drop sur zone de défausse
+            // Phase AddToMelds : simple toucher sur une carte → posée directement
+            // si une seule combinaison l'accepte (sinon on indique quoi faire).
+            if (phase == TurnPhase.AddToMelds && dragDist < ReorderDragThreshold)
+            {
+                FinishDrag(pos);
+                // Sans l'aide « cartes jouables », le jeu ne dit pas où va la carte.
+                if (GameSettings.HintPlayable) TapToAddToMeld(card, dragged);
+                return;
+            }
+
+            // Phase Discard : drop sur zone de défausse (la seule action possible
+            // à cette étape : la bande au-dessus de la main compte aussi).
             if (phase == TurnPhase.Discard && IsDropOnDiscardZone(pos))
             {
                 _handView.EndDrag(pos);
@@ -630,15 +846,28 @@ namespace LevelUp.UI
                 return;
             }
 
-            // Phase LayDown : drop sur défausse → avance jusqu'à Discard puis défausse.
-            // Si le joueur a déjà posé son niveau ce round, LayDown avance vers
-            // AddToMelds (pas Discard) — on doit donc enchaîner les skips.
-            if (phase == TurnPhase.LayDown && IsDropOnDiscardZone(pos))
+            // Phase LayDown :
+            //  - drop sur une défausse → avance jusqu'à Discard puis défausse ;
+            //  - drop sur la table → pose (la carte glissée rejoint la sélection) ;
+            //  - ailleurs → retour en main. Plus de défausse « au-dessus de la
+            //    main » : glisser vers la table pour poser ne jette plus de carte.
+            if (phase == TurnPhase.LayDown)
             {
-                _handView.EndDrag(pos);
-                _handView.DeselectAll();
-                AdvanceToDiscardAndDiscard(card);
-                return;
+                if (IsDropOnDiscardPile(pos))
+                {
+                    _handView.EndDrag(pos);
+                    _handView.DeselectAll();
+                    AdvanceToDiscardAndDiscard(card);
+                    return;
+                }
+                if (HitsRect(_tableHitArea, pos))
+                {
+                    _handView.EndDrag(pos);
+                    // Une seule carte glissée : on cherche le contrat dans toute la main.
+                    if (_handView.SelectedCards.Count <= 1) _handView.DeselectAll();
+                    ExecuteLayDown();
+                    return;
+                }
             }
 
             // Phase AddToMelds :
@@ -716,18 +945,61 @@ namespace LevelUp.UI
             // skipperait des phases sans pouvoir défausser derrière.
             if (ActionsLocked) return;
 
+            // Carte « Passe » / « +2 » : la cible se choisit AVANT de quitter
+            // l'étape — annuler le choix ne doit rien avoir changé au tour.
+            if (card.IsAction && !card.IsWild && _gameManager.Players.Count > 2)
+            {
+                TargetChooser? chooser = GetTargetChooser();
+                if (chooser != null)
+                {
+                    int player = CurrentPlayerIndex;
+                    int round = _gameManager.RoundNumber;
+                    chooser.Show(card.Type, _gameManager.Players, player, target =>
+                    {
+                        if (_gameManager?.TurnManager == null || !IsLocalTurn) return;
+                        if (CurrentPlayerIndex != player || _gameManager.RoundNumber != round) return;
+                        if (SkipUntilDiscard()) DiscardTo(card, target);
+                    });
+                    return;
+                }
+            }
+
+            if (SkipUntilDiscard()) ExecuteDiscard(card);
+        }
+
+        /// <summary>Passe « Poser » et « Compléter » jusqu'à la défausse ; vrai si on y est.</summary>
+        private bool SkipUntilDiscard()
+        {
+            if (_gameManager?.TurnManager == null) return false;
             int safety = 4;
             while (_gameManager.TurnManager.CurrentPhase != TurnPhase.Discard && safety-- > 0)
             {
                 TurnPhase p = _gameManager.TurnManager.CurrentPhase;
-                if (p == TurnPhase.Draw) return; // impossible normalement, abandon
+                if (p != TurnPhase.LayDown && p != TurnPhase.AddToMelds) return false;
                 ExecuteSkipPhase(p);
             }
+            return _gameManager.TurnManager.CurrentPhase == TurnPhase.Discard;
+        }
 
-            if (_gameManager.TurnManager.CurrentPhase == TurnPhase.Discard)
+        /// <summary>
+        /// Phase Compléter, simple toucher sur une carte : posée tout de suite si
+        /// une seule combinaison l'accepte ; sinon on dit quoi faire.
+        /// </summary>
+        private void TapToAddToMeld(CardModel card, CardView view)
+        {
+            if (_validTargets.Count == 1)
             {
-                ExecuteDiscard(card);
+                foreach ((int owner, int meld) in _validTargets)
+                {
+                    _handView?.DeselectAll();
+                    ExecuteAddToMeld(card, owner, meld, view);
+                    return;
+                }
             }
+
+            _hudView?.ShowStatus(_validTargets.Count > 1
+                ? "Plusieurs combinaisons possibles : glisse la carte sur celle de ton choix"
+                : "Cette carte ne complète aucune combinaison — glisse-la sur ta défausse pour finir");
         }
 
         private bool IsDropOnDiscardZone(Vector2 pos)
@@ -749,6 +1021,8 @@ namespace LevelUp.UI
         private void FinishDrag(Vector2 pos)
         {
             ClearMagnet();
+            _actionCard = null;
+            _pressedPile = -1;
             if (_handView != null)
             {
                 if (_handView.IsReorderDragging)
@@ -786,7 +1060,7 @@ namespace LevelUp.UI
             else
             {
                 _handView.SetAnimatingDraw(false);
-                _hudView?.ShowStatus(result.Message);
+                _hudView?.ShowError(result.Message);
             }
         }
 
@@ -797,20 +1071,26 @@ namespace LevelUp.UI
 
             _handView.SetAnimatingDraw(true);
 
+            RectTransform? pile = _discardPileView != null ? _discardPileView.GetPileRect(pileIndex) : null;
+            Vector3? from = pile != null ? pile.position : (Vector3?)null;
+
             CommandResult result = _gameManager.ExecuteCommand(
                 new DrawFromDiscardCommand(CurrentPlayerIndex, pileIndex));
 
             if (result.Success && result.DrawnCard.HasValue)
             {
-                _handView.AddCardWithAnimation(result.DrawnCard.Value);
+                // La carte part de la défausse ramassée, pas du paquet.
+                _handView.AddCardWithAnimation(result.DrawnCard.Value, from);
             }
             else
             {
                 _handView.SetAnimatingDraw(false);
-                _hudView?.ShowStatus(result.Message);
-                if (_animController != null && _deckHitArea != null)
+                _hudView?.ShowError(result.Message == "Défausse vide"
+                    ? "Cette défausse est vide : touche la pioche"
+                    : result.Message);
+                if (_animController != null && pile != null)
                 {
-                    _animController.AnimateShake(_deckHitArea);
+                    _animController.AnimateShake(pile);
                 }
                 EventBus.Publish(new InvalidActionEvent());
             }
@@ -823,6 +1103,14 @@ namespace LevelUp.UI
 
             PlayerModel player = _gameManager.TurnManager!.CurrentPlayer;
             List<CardModel> selected = _handView.GetSelectedCardModels();
+
+            // Sans l'aide « détection du contrat », le jeu ne cherche pas le
+            // contrat dans la main : c'est au joueur de sélectionner ses cartes.
+            if (selected.Count == 0 && !GameSettings.HintContract)
+            {
+                _hudView?.ShowStatus("Sélectionne les cartes de ton contrat, puis « Poser »");
+                return;
+            }
 
             // Sélection explicite ou auto-détection sur toute la main
             IReadOnlyList<CardModel> source = selected.Count > 0
@@ -861,9 +1149,9 @@ namespace LevelUp.UI
             }
             else
             {
-                _hudView?.ShowStatus(isAutoMode
-                    ? "Aucune combinaison valide dans la main"
-                    : "Combinaison invalide !");
+                _hudView?.ShowError(isAutoMode
+                    ? "Ta main ne remplit pas encore le contrat"
+                    : "Ces cartes ne forment pas le contrat");
 
                 if (_animController != null && !isAutoMode)
                 {
@@ -894,7 +1182,8 @@ namespace LevelUp.UI
             CommandResult result = _gameManager.ExecuteCommand(
                 new LayDownLevelCommand(CurrentPlayerIndex, playerMelds));
 
-            _hudView?.ShowStatus(result.Success ? $"Niveau {player.CurrentLevel} posé !" : result.Message);
+            // Succès : annoncé par le HUD (LevelLaidDownEvent), pas de toast en double.
+            if (!result.Success) _hudView?.ShowError(result.Message);
         }
 
         private LayDownChooser? GetChooser()
@@ -934,11 +1223,35 @@ namespace LevelUp.UI
         /// <summary>Vrai si le joueur local peut poser son contrat avec sa main actuelle.</summary>
         public bool CanLocalPlayerLayDown()
         {
+            if (!GameSettings.HintContract) return false;
             if (_gameManager?.TurnManager == null) return false;
             if (!IsLocalTurn || _gameManager.TurnManager.CurrentPhase != TurnPhase.LayDown) return false;
             PlayerModel player = _gameManager.TurnManager.CurrentPlayer;
             if (player.HasLaidDownThisRound) return false;
-            return LevelValidator.IsLevelComplete(player.Hand, player.CurrentLevel, _gameManager.Config, out _);
+            return LocalHandMeetsContract(player);
+        }
+
+        /// <summary>
+        /// La main du joueur remplit-elle son contrat ? Calculé une seule fois par
+        /// état de main (le contrat, la carte contrat et le panneau de sélection
+        /// le demandent tous à chaque changement) — aucune aide affichée ici.
+        /// </summary>
+        public bool LocalHandMeetsContract(PlayerModel player)
+        {
+            if (_gameManager == null) return false;
+            int key;
+            unchecked
+            {
+                key = _gameManager.RoundNumber * 7919 + player.CurrentLevel * 131 + player.Hand.Count;
+                foreach (CardModel c in player.Hand) key += (c.Id + 1) * -1640531535;
+            }
+            if (key != _contractKey)
+            {
+                _contractKey = key;
+                _contractReady = LevelValidator.IsLevelComplete(player.Hand, player.CurrentLevel,
+                    _gameManager.Config, out _);
+            }
+            return _contractReady;
         }
 
         private void ExecuteAddToMeld(CardModel card, int ownerIdx, int meldIdx, CardView cardView)
@@ -951,10 +1264,10 @@ namespace LevelUp.UI
 
             if (!result.Success)
             {
-                _hudView?.ShowStatus(result.Message);
+                _hudView?.ShowError(result.Message);
                 if (_animController != null)
                 {
-                    _animController.AnimateShake(cardView.RectTransform);
+                    _animController.AnimatePulse(cardView.RectTransform);
                 }
                 EventBus.Publish(new InvalidActionEvent());
             }
@@ -966,20 +1279,133 @@ namespace LevelUp.UI
                 new SkipPhaseCommand(CurrentPlayerIndex, phaseToSkip));
         }
 
+        /// <summary>
+        /// Défausse une carte. Carte « Passe » / « +2 » : il faut une cible —
+        /// l'adversaire à deux joueurs, sinon le joueur la choisit (panneau).
+        /// Un joker défaussé n'a pas d'effet (aucune cible).
+        /// </summary>
         private void ExecuteDiscard(CardModel card)
         {
             if (_gameManager == null) return;
             if (ActionsLocked) return;
 
-            int targetIndex = -1;
-            if (card.IsAction)
+            int player = CurrentPlayerIndex;
+            if (card.IsAction && !card.IsWild)
             {
-                targetIndex = (CurrentPlayerIndex + 1) % _gameManager.Players.Count;
+                if (_gameManager.Players.Count > 2)
+                {
+                    TargetChooser? chooser = GetTargetChooser();
+                    if (chooser != null)
+                    {
+                        chooser.Show(card.Type, _gameManager.Players, player, target =>
+                        {
+                            // Le tour a pu changer pendant le choix (en ligne / minuteur).
+                            if (_gameManager?.TurnManager == null) return;
+                            if (CurrentPlayerIndex != player || !IsLocalTurn) return;
+                            if (_gameManager.TurnManager.CurrentPhase != TurnPhase.Discard) return;
+                            DiscardTo(card, target);
+                        });
+                        return;
+                    }
+                }
+                DiscardTo(card, TurnAutoPlay.DefaultTarget(player, _gameManager.Players));
+                return;
             }
+
+            DiscardTo(card, -1);
+        }
+
+        private void DiscardTo(CardModel card, int targetIndex)
+        {
+            if (_gameManager == null) return;
+            if (ActionsLocked) return;
 
             // ExecuteCommand gère automatiquement OnRoundEnd si la main est vide
             _gameManager.ExecuteCommand(
                 new DiscardCommand(CurrentPlayerIndex, card, targetIndex));
+        }
+
+        private TargetChooser? GetTargetChooser()
+        {
+            if (_targetChooser != null) return _targetChooser;
+            Canvas? canvas = _handView != null ? _handView.GetComponentInParent<Canvas>() : null;
+            if (canvas == null) return null;
+            _targetChooser = gameObject.AddComponent<TargetChooser>();
+            _targetChooser.Setup(canvas.rootCanvas);
+            return _targetChooser;
+        }
+
+        // ──────────────────────────────────────────────
+        //  FIN DE TOUR AUTOMATIQUE (minuteur)
+        // ──────────────────────────────────────────────
+
+        /// <summary>
+        /// Minuteur écoulé : termine le tour du joueur local le plus simplement
+        /// possible (pioche, passe la pose et les ajouts, défausse la carte la
+        /// moins utile). Chaque étape est une commande normale (relayée en ligne).
+        /// </summary>
+        public void AutoFinishTurn()
+        {
+            if (_gameManager?.TurnManager == null || !IsLocalTurn || _autoFinishing) return;
+            StartCoroutine(AutoFinishRoutine());
+        }
+
+        private IEnumerator AutoFinishRoutine()
+        {
+            _autoFinishing = true;
+            CancelGesture();
+            if (_chooser != null) _chooser.Hide();
+            if (_targetChooser != null) _targetChooser.Hide();
+
+            int round = _gameManager!.RoundNumber;
+            int player = CurrentPlayerIndex;
+
+            for (int step = 0; step < 8; step++)
+            {
+                // Laisser finir les animations qui verrouillent les actions.
+                float waited = 0f;
+                while ((ActionsLocked || (_handView != null && _handView.IsAnimatingDeal)) && waited < 2.5f)
+                {
+                    waited += Time.unscaledDeltaTime;
+                    yield return null;
+                }
+
+                if (_gameManager?.TurnManager == null || _gameManager.State != GameState.PlayerTurn) break;
+                if (_gameManager.RoundNumber != round || CurrentPlayerIndex != player || !IsLocalTurn) break;
+
+                IGameCommand? command = TurnAutoPlay.NextCommand(_gameManager);
+                if (command == null) break;
+
+                if (command is DrawFromDeckCommand)
+                {
+                    ExecuteDrawFromDeck();
+                }
+                else if (command is DiscardCommand discard)
+                {
+                    _handView?.DeselectAll();
+                    DiscardTo(discard.Card, discard.TargetPlayerIndex);
+                }
+                else
+                {
+                    _handView?.DeselectAll();
+                    _gameManager.ExecuteCommand(command);
+                }
+                yield return null;
+            }
+
+            _autoFinishing = false;
+        }
+
+        /// <summary>Abandonne le geste en cours (drag, reorder) : la carte revient dans la main.</summary>
+        private void CancelGesture()
+        {
+            if (_isDragging || (_handView != null && _handView.IsReorderDragging))
+            {
+                _isDragging = false;
+                FinishDrag(_dragStartPos);
+            }
+            ClearMagnet();
+            _gestureBlocked = false;
         }
 
         // ──────────────────────────────────────────────
@@ -1047,16 +1473,22 @@ namespace LevelUp.UI
             ExecuteSkipPhase(TurnPhase.AddToMelds);
         }
 
-        /// <summary>Tri de la main par valeur croissante (actions en fin).</summary>
+        /// <summary>Tri de la main par valeur croissante (actions en fin), mémorisé.</summary>
         public void OnSortByValueButton()
         {
-            if (SortCurrentPlayerHand(PlayerModel.CompareByValue)) _handView?.SetActiveSort(byValue: true);
+            if (!SortCurrentPlayerHand(PlayerModel.CompareByValue)) return;
+            GameSettings.HandSort = 1;
+            _handView?.SetSortMode(1);
+            AudioManager.Instance?.PlayClick();
         }
 
-        /// <summary>Tri de la main par couleur (tiebreak par valeur).</summary>
+        /// <summary>Tri de la main par couleur (tiebreak par valeur), mémorisé.</summary>
         public void OnSortByColorButton()
         {
-            if (SortCurrentPlayerHand(PlayerModel.CompareByColor)) _handView?.SetActiveSort(byValue: false);
+            if (!SortCurrentPlayerHand(PlayerModel.CompareByColor)) return;
+            GameSettings.HandSort = 2;
+            _handView?.SetSortMode(2);
+            AudioManager.Instance?.PlayClick();
         }
 
         private bool SortCurrentPlayerHand(System.Comparison<CardModel> comparator)

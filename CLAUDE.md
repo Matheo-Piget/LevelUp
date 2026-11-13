@@ -97,11 +97,88 @@ Pour chaque demande d'implementation, Claude doit repondre dans cet ordre:
 4. Accessibilite de base integree des le debut, pas en fin de projet.
 
 ## 9) Prochaines taches recommandees (ordre d'execution)
-1. Auto-pass sans bouton + feedback "Fin de tour".
-2. Snap magnetique + snap-back sur drag invalide.
-3. Tri valeur/couleur anime dans `HandView` + sync modele.
-4. Pack accessibilite daltonisme (icones/motifs par couleur).
-5. Ecran options (audio + qualite).
+Deja livres : snap magnetique + snap-back, tri valeur/couleur anime, daltonisme (symboles), options,
+pseudo + salon en ligne, ecran "Nouvelle partie", minuteur, recap de manche, classement final, bots v2,
+audio procedural + vibrations, fin de manche explicite, sauvegarde/reprise solo, donne du jour, "Comment jouer",
+interface "grande" (telephones), cosmetiques (tapis / dos), points de penalite, bouton Retour Android.
+1. Mise en page telephone dediee (au-dela du facteur 1.3 de `GameSettings.UiScaleFactor`) : cibles >= 7 mm.
+2. Pass-and-play local (plusieurs humains sur un appareil) : `NetworkManager` n'est qu'un stub.
+3. Tutoriel jouable (donne scriptee) ; decoupage de `GameInputController` (etat par phase) et d'`OnlineSession`.
+4. `InputSystemUIInputModule` a la place de `StandaloneInputModule` (a verifier sur appareil).
+
+## 10) Carte du code (a lire AVANT d'explorer : evite de tout relire)
+
+### Ce qui tourne vraiment
+- Scene `Assets/Scenes/Game.unity` (seule scene) : `GameBootstrapper`, `GameManager`, `HandView`, `TableView`,
+  `HUDView`, `LevelProgressView`, `DiscardPileView`, `GameInputController`, `AnimationController`, `BalatroEffects`,
+  `NetworkManager` (stub pass-and-play, inactif). `CardView` est dans `Assets/Prefab/Card.prefab`.
+- Crees au runtime par `GameBootstrapper` (AddComponent) : `MainMenuController`, `PauseMenuController`,
+  `GameOverCelebration`, `GameScreenLayout`, `AnimatedBackground`, `SelectionStatusView` (+ bouton POSER),
+  `RoundSummaryView`, `TurnTimer`, `AIPlayer` (un par bot), `OnlineSession`, `OnlinePanel`, `ConnectionOverlay`,
+  `AudioManager` (sons synthetises au demarrage, aucun fichier audio), `AppLifecycle` (Retour/Echap, sauvegarde
+  des reglages en pause), `CardFlights` + `OpponentMovesView` (cartes en vol des adversaires).
+  Crees par d'autres vues : `OptionsPanel`, `MatchSetupPanel`, `ProfileDialog`, `RulesPanel` (menu / pause) ;
+  `LayDownChooser`, `TargetChooser` (input).
+- Fenetres : chacune s'inscrit dans `UIBackStack` (Push a l'ouverture, Remove a la fermeture) pour le bouton Retour.
+- Trajets de cartes : `CardOrigins.Provider` (main du joueur local, sinon pastille du joueur) ; `ReducedMotion` coupe.
+- Aides de jeu = interrupteurs separes (`GameSettings`) : `HintSteps` (consigne d'etape, ON), `HintContract`
+  (progression du contrat, "contrat pret", pose auto sans selection, OFF), `HintPlayable` (cartes "+", aimant
+  cible, pose d'un toucher, OFF), `QuickDiscard` (OFF = toucher pour soulever, retoucher pour defausser).
+  Toute nouvelle aide qui revele une information de jeu doit etre derriere un de ces reglages, coupee par defaut.
+- `BalatroEffects` : textes flottants et particules d'ambiance desactives (consts `FloatingTexts`/`AmbientParticles`).
+
+### Regles (Core)
+- Toute action = commande -> `GameManager.ExecuteCommand` -> `GameCommandExecutor`. IA, UI, minuteur et reseau
+  passent tous par la. Fin de manche : main vide apres defausse, apres ajout de la derniere carte OU apres une
+  pose qui vide la main. Commandes refusees hors `GameState.PlayerTurn` ; Piocher/Defausser non passables ;
+  les cartes d'une commande sont retrouvees dans la main par Id (les autres champs ne font pas foi).
+- Fin de manche explicite : `GameManager.AutoStartNextRound` (vrai dans les tests, FAUX en jeu) -> la partie
+  reste en `EndRound` (table et mains intactes), `RoundSummaryEvent` porte le bilan, `StartNextRoundCommand`
+  lance la manche suivante (en ligne : seul l'hote). Penalites : `PlayerModel.PenaltyPoints` (cartes restees).
+- `GameManager.RulesVersion` : a INCREMENTER si une regle ou le format d'une commande change (sauvegarde + reseau).
+- Serialisation : `GameCommandCodec` (Core, BinaryWriter, lecture bornee et sure) pour le reseau ET `SaveGame`
+  (partie solo sauvegardee commande par commande dans persistentDataPath, reprise par `RebuildFromHistory`).
+- `MatchRules` (immuable, par partie) : contrats fixes/varies, cartes speciales (aucune par defaut / jokers /
+  jokers + Passe + +2), taille de main, niveau final, minuteur. `GameSession` (statique) expose `Rules`,
+  `Contracts`, `IsOnline`, `LocalPlayerIndex`. Paquet : `DeckManager.BuildComposition` = 6 couleurs x 1..18
+  (chaque couple valeur/couleur existe UNE fois) + speciales si l'option est active.
+- Contrats : `ContractCatalog` (variantes par niveau) + `LevelValidator` (recherche exhaustive des poses).
+- Fin de partie : depasser `Rules.LevelsToWin` ; egalite -> le gagnant de la manche.
+- `PlayerProfile` (Core, PlayerPrefs) : pseudo nettoye (`Sanitize`, max 14 car., pas de `| < >`) + stats.
+
+### IA (`Scripts/AI`)
+- `BotBrain` (pur C#, teste) : manque de cartes pour le contrat (glouton sur toutes les permutations) + "outs"
+  (cartes invisibles utiles) ; danger d'une defausse (carte jouable sur la table quand un adversaire a pose,
+  ramassages adverses en Expert). `AIPlayer` = pilote (delais, garde "toujours mon tour").
+- Difficulte = `AIDifficulty` Easy/Normal/Hard (UI : FACILE/NORMAL/EXPERT). Le bot ne voit que l'info publique.
+
+### En ligne (`Scripts/Network`)
+- Simulation miroir : meme seed + memes sieges + memes `MatchRules` => meme partie ; chaque commande validee est
+  relayee. L'hote = siege 0, les bots ne tournent QUE chez l'hote. `ProtocolVersion` (OnlineSession) a
+  INCREMENTER des qu'un format de message change (v5 = GameCommandCodec + fin de manche explicite) ; le tag de
+  version inclut aussi `GameManager.RulesVersion`. Les messages hote -> clients sont ignores s'ils ne viennent
+  pas du serveur (`IsFromHost`), toutes les tailles lues sont bornees.
+- Connexion : payload `LU|version|jeton|pseudo`. Salon : message `LU_LOBBY` (membres + places + regles) diffuse
+  par l'hote, `OnlinePanel` ne depend pas du reseau (le bootstrapper convertit `LobbyInfo` -> `LobbyViewModel`).
+
+### UI / DA "Salon"
+- 100 % procedural (aucun prefab hors Card). Jetons et helpers : `UISkin` (couleurs, polices Inter + DM Serif
+  Display, sprites arrondis, icones rasterisees), `UIControls` (lignes, segmente, interrupteur), `UIInputs`
+  (champs TMP), `UIFactory.CreateButton` (primaire champagne / secondaire / discret).
+- Reference 1920x1080 divisee par `GameSettings.UiScaleFactor` (1.3 en interface "grande", defaut sur ecran
+  < 8 pouces) (`GameScreenLayout.ConfigureScaler`), UI de jeu sous la safe area (`SafeAreaFitter.Wrap`) ;
+  `GameScreenLayout` replace/restyle les objets de scene (les valeurs serialisees en scene sont ecrasees en code).
+- Reglages : `GameSettings` (UI, PlayerPrefs `levelup.*`) = preferences appareil + reglages de la prochaine partie
+  (`BuildMatchRules()`). Options = appareil seulement ; "Nouvelle partie" = regles.
+
+### Verifier sans appareil (editeur Unity FERME, sinon le batchmode echoue)
+- Compiler + tests EditMode : `Unity.exe -batchmode -projectPath <repo>\LevelUp -runTests -testPlatform EditMode
+  -testResults <xml> -logFile <log>` (Unity 2022.3.62f3, chemin dans la memoire `levelup-tooling`).
+- Visuel : build Windows (`-executeMethod LevelUp.EditorTools.AndroidBuilder.BuildWindows -quit`) puis
+  `LevelUp.exe -screen-fullscreen 0 -screen-width 1600 -screen-height 720 -autoshot <dossier>`
+  (`DevAutoScreenshot` : menu, profil, options, en ligne, nouvelle partie, jeu, table, pose, cibles, recap,
+  pause, fin de partie). APK : `AndroidBuilder.BuildApk`.
+- Les `.meta` des nouveaux scripts sont generes par Unity : les commiter.
 
 ## graphify
 

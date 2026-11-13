@@ -19,6 +19,7 @@ namespace LevelUp.UI
         private CanvasGroup? _rootCanvasGroup;
         private RectTransform? _panel;
         private OptionsPanel? _optionsPanel;
+        private RulesPanel? _rulesPanel;
         private readonly List<GameObject> _pauseButtons = new();
         private bool _isPaused;
         // La pause n'a de sens qu'en jeu : verrouillée sur le menu principal.
@@ -56,7 +57,7 @@ namespace LevelUp.UI
             Image panel = UISkin.Rect(_root, "PausePanel", UISkin.Surface, 28f, raycast: true);
             _panel = panel.rectTransform;
             UISkin.Place(_panel, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), Vector2.zero,
-                new Vector2(480f, 440f));
+                new Vector2(480f, 514f));
             UISkin.Outline(_panel, 28f, 1f, new Color(1f, 1f, 1f, 0.08f));
 
             TextMeshProUGUI title = UISkin.Text(_panel, "Title", "PAUSE", 34f, UISkin.TextColor, TextWeight.Display,
@@ -72,7 +73,7 @@ namespace LevelUp.UI
             GameObject col = new("Buttons", typeof(RectTransform));
             col.transform.SetParent(_panel, false);
             UISkin.Place((RectTransform)col.transform, new Vector2(0.5f, 0f), new Vector2(0.5f, 0f),
-                new Vector2(0f, 44f), new Vector2(392f, 236f));
+                new Vector2(0f, 44f), new Vector2(392f, 310f));
             VerticalLayoutGroup vlg = col.AddComponent<VerticalLayoutGroup>();
             vlg.spacing = 14f;
             vlg.childAlignment = TextAnchor.LowerCenter;
@@ -82,6 +83,7 @@ namespace LevelUp.UI
             UIFactory.CreateButton(col.transform, "BtnResume", "REPRENDRE", new Vector2(392f, 64f), Hide,
                 primary: true);
             UIFactory.CreateButton(col.transform, "BtnOptions", "OPTIONS", new Vector2(392f, 60f), ShowOptions);
+            UIFactory.CreateButton(col.transform, "BtnRules", "COMMENT JOUER", new Vector2(392f, 60f), ShowRules);
             UIFactory.CreateButton(col.transform, "BtnMenu", "MENU PRINCIPAL", new Vector2(392f, 60f),
                 HandleMainMenu, subtle: true);
 
@@ -118,20 +120,25 @@ namespace LevelUp.UI
             _optionsPanel?.Show();
         }
 
+        /// <summary>Ouvre « Comment jouer » par-dessus la pause.</summary>
+        public void ShowRules()
+        {
+            if (_rulesPanel == null && _root != null)
+            {
+                _rulesPanel = _root.gameObject.AddComponent<RulesPanel>();
+                _rulesPanel.Setup(_root);
+            }
+            _rulesPanel?.Show();
+        }
+
+        /// <summary>Vrai si la pause peut s'ouvrir (en jeu).</summary>
+        public bool PauseAllowed => _pauseAllowed;
+
         private void HandleMainMenu()
         {
             // Hide() gère _isPaused et Time.timeScale — à faire avant l'événement.
             Hide();
             OnMainMenuRequested?.Invoke();
-        }
-
-        private void Update()
-        {
-            // ESC au clavier = bouton Retour sur Android.
-            if (Keyboard.current != null && Keyboard.current.escapeKey.wasPressedThisFrame)
-            {
-                Toggle();
-            }
         }
 
         public void Toggle()
@@ -145,6 +152,7 @@ namespace LevelUp.UI
             if (!_pauseAllowed || _isPaused || _root == null || _rootCanvasGroup == null || _panel == null) return;
 
             _isPaused = true;
+            UIBackStack.Push(this, Hide);
             // En ligne, le temps ne se fige pas : la partie continue chez les autres.
             if (!LevelUp.Core.GameSession.IsOnline)
             {
@@ -165,6 +173,7 @@ namespace LevelUp.UI
             if (!_isPaused || _root == null || _rootCanvasGroup == null || _panel == null) return;
 
             _isPaused = false;
+            UIBackStack.Remove(this);
             Time.timeScale = 1f;
             _rootCanvasGroup.blocksRaycasts = false;
 

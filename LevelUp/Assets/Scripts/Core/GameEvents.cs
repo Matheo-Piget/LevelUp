@@ -54,6 +54,8 @@ namespace LevelUp.Core
         public int PlayerIndex;
         public int Level;
         public List<List<CardModel>> Melds;
+        /// <summary>Type de chaque combinaison (même ordre que <see cref="Melds"/>) ; null = à déduire.</summary>
+        public List<MeldType>? MeldTypes;
     }
 
     /// <summary>Événement déclenché quand un joueur ajoute une carte à une combinaison.</summary>
@@ -76,6 +78,27 @@ namespace LevelUp.Core
     public struct RoundEndedEvent
     {
         public int WinnerIndex;
+    }
+
+    /// <summary>
+    /// Bilan d'une manche, publié après la montée des niveaux (et avant le
+    /// <see cref="GameOverEvent"/> éventuel). Tableaux indexés par joueur.
+    /// Quand <see cref="AwaitingNextRound"/> est vrai, la partie reste en
+    /// <see cref="GameState.EndRound"/> — mains et table intactes — jusqu'à une
+    /// <see cref="StartNextRoundCommand"/> : l'UI affiche le récap entre-temps.
+    /// </summary>
+    public struct RoundSummaryEvent
+    {
+        public int RoundNumber;
+        public int WinnerIndex;
+        public bool DeckExhausted;
+        public bool AwaitingNextRound;
+        public bool GameOver;
+        public int[] LevelsBefore;
+        public int[] LevelsAfter;
+        public bool[] LaidDown;
+        public int[] CardsLeft;
+        public int[] RoundPenalty;
     }
 
     /// <summary>Événement déclenché quand la partie est terminée.</summary>

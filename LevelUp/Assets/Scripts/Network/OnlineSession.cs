@@ -21,8 +21,44 @@ namespace LevelUp.Network
     {
         public int Seed;
         public int LocalSeat;
-        public bool RandomContracts;
+        public MatchRules Rules;
         public PlayerSetup[] Players;
+    }
+
+    /// <summary>Un joueur humain présent dans le salon (hôte compris).</summary>
+    public readonly struct LobbyMember
+    {
+        public readonly ulong ClientId;
+        public readonly string Name;
+        public readonly bool IsHost;
+
+        public LobbyMember(ulong clientId, string name, bool isHost)
+        {
+            ClientId = clientId;
+            Name = name;
+            IsHost = isHost;
+        }
+    }
+
+    /// <summary>
+    /// État du salon diffusé par l'hôte à chaque changement : qui est là (avec
+    /// son pseudo), combien de places au total, et les règles de la partie.
+    /// </summary>
+    public sealed class LobbyInfo
+    {
+        public readonly List<LobbyMember> Members = new();
+
+        /// <summary>Places totales de la partie (humains + bots), 2 à 4.</summary>
+        public int Seats;
+
+        /// <summary>Niveau des bots choisi par l'hôte (0 facile, 1 normal, 2 expert).</summary>
+        public int BotDifficulty;
+
+        /// <summary>Règles choisies par l'hôte.</summary>
+        public MatchRules Rules = MatchRules.Classic;
+
+        /// <summary>Identifiant réseau de CET appareil (pour marquer "Toi").</summary>
+        public ulong LocalClientId;
     }
 
     /// <summary>
@@ -68,14 +104,18 @@ namespace LevelUp.Network
         private const string MsgResumeBegin = "LU_RESUME_BEGIN";
         private const string MsgResumeChunk = "LU_RESUME_CHUNK";
         private const string MsgResumeEnd = "LU_RESUME_END";
+        private const string MsgLobby = "LU_LOBBY";
 
         private const int MaxPlayers = 4;
 
         /// <summary>
         /// Version du protocole réseau : à incrémenter dès que le format des
         /// messages OU les règles changent (deux versions différentes divergeraient).
+        /// v4 : pseudos dans la connexion, salon partagé, règles de partie (MatchRules).
+        /// v5 : sortie par pose (main vide), phases Piocher/Défausser non passables,
+        /// commandes refusées hors manche, points de pénalité dans l'empreinte.
         /// </summary>
-        private const int ProtocolVersion = 3;
+        private const int ProtocolVersion = 5;
 
         private const float ReconnectGraceSeconds = 45f;
         private const float ReconnectWindowSeconds = 90f;
@@ -92,16 +132,22 @@ namespace LevelUp.Network
         // Hôte : lobby et sièges
         private readonly List<ulong> _lobbyClients = new();               // ordre de connexion
         private readonly Dictionary<ulong, string> _tokenByClient = new();
+        private readonly Dictionary<ulong, string> _nameByClient = new();
         private readonly Dictionary<ulong, int> _seatByClient = new();
         private readonly Dictionary<int, string> _tokenBySeat = new();
         private readonly Dictionary<ulong, int> _pendingReconnectSeat = new();
         private readonly HashSet<int> _disconnectedSeats = new();
         private readonly HashSet<int> _seatsTakenByAI = new();
 
+        // Hôte : réglages du salon (modifiables jusqu'au lancement)
+        private int _lobbySeats = MaxPlayers;
+        private int _lobbyBotDifficulty = 1;
+        private MatchRules _lobbyRules = MatchRules.Classic;
+
         // Hôte : historique sérialisé de la partie (copie figée de chaque commande)
         private readonly List<byte[]> _history = new();
         private int _matchSeed;
-        private bool _matchRandomContracts;
+        private MatchRules _matchRules = MatchRules.Classic;
 
         // Client : reconnexion et reprise
         private string? _clientJoinCode;
@@ -129,8 +175,11 @@ namespace LevelUp.Network
         /// <summary>Dernier code rejoint sur cet appareil (pour revenir après un crash).</summary>
         public static string LastJoinCode => PlayerPrefs.GetString(PrefLastJoinCode, "");
 
-        /// <summary>Hôte : le nombre d'humains dans le lobby a changé.</summary>
-        public event Action<int>? LobbyCountChanged;
+        /// <summary>Dernier état connu du salon (hôte : construit ici ; client : reçu de l'hôte).</summary>
+        public LobbyInfo? CurrentLobby { get; private set; }
+
+        /// <summary>Le salon a changé : arrivée/départ d'un joueur, réglages de l'hôte (hôte et clients).</summary>
+        public event Action<LobbyInfo>? LobbyChanged;
 
         /// <summary>Client : connexion à l'hôte établie (en attente du lancement).</summary>
         public event Action? ConnectedToHost;
@@ -267,6 +316,7 @@ namespace LevelUp.Network
             _resumeBuffer.Clear();
             _connectAttempt?.TrySetResult(false);
             JoinCode = null;
+            CurrentLobby = null;
             Application.runInBackground = false;
             _leaving = false;
         }
@@ -275,6 +325,7 @@ namespace LevelUp.Network
         {
             _lobbyClients.Clear();
             _tokenByClient.Clear();
+            _nameByClient.Clear();
             _seatByClient.Clear();
             _tokenBySeat.Clear();
             _pendingReconnectSeat.Clear();
@@ -439,6 +490,7 @@ namespace LevelUp.Network
             msg.RegisterNamedMessageHandler(MsgResumeBegin, OnResumeBeginMessage);
             msg.RegisterNamedMessageHandler(MsgResumeChunk, OnResumeChunkMessage);
             msg.RegisterNamedMessageHandler(MsgResumeEnd, OnResumeEndMessage);
+            msg.RegisterNamedMessageHandler(MsgLobby, OnLobbyMessage);
         }
 
         private void UnregisterCallbacks(NgoManager ngo)
@@ -471,11 +523,33 @@ namespace LevelUp.Network
             }
         }
 
-        private static string VersionTag => $"{ProtocolVersion}/{Application.version}";
+        private static string VersionTag =>
+            $"{ProtocolVersion}.{GameManager.RulesVersion}/{Application.version}";
 
+        /// <summary>Sièges maximum acceptés dans un message (garde-fou de lecture).</summary>
+        private const int MaxSeatsInMessage = 8;
+
+        /// <summary>Commandes maximum acceptées dans une reprise (garde-fou de lecture).</summary>
+        private const int MaxResumeCommands = 100000;
+
+        /// <summary>
+        /// Vrai si ce message "hôte → clients" est recevable ici : jamais chez
+        /// l'hôte (un client ne peut pas lui dicter l'état de la partie), et
+        /// uniquement en provenance du serveur.
+        /// </summary>
+        private bool IsFromHost(ulong senderId)
+        {
+            return _ngo != null && !_ngo.IsHost && senderId == NgoManager.ServerClientId;
+        }
+
+        /// <summary>
+        /// "LU|version|jeton|pseudo" — le pseudo est déjà nettoyé (aucun '|'),
+        /// l'hôte le re-nettoie de toute façon : on ne fait pas confiance au client.
+        /// </summary>
         private static byte[] BuildConnectionPayload()
         {
-            return Encoding.UTF8.GetBytes($"LU|{VersionTag}|{DeviceToken}");
+            string name = PlayerProfile.Sanitize(PlayerProfile.Name);
+            return Encoding.UTF8.GetBytes($"LU|{VersionTag}|{DeviceToken}|{name}");
         }
 
         private void ApproveConnection(NgoManager.ConnectionApprovalRequest request,
@@ -493,9 +567,9 @@ namespace LevelUp.Network
                 ? Encoding.UTF8.GetString(request.Payload).Split('|')
                 : Array.Empty<string>();
 
-            if (parts.Length != 3 || parts[0] != "LU" || parts[1] != VersionTag)
+            if (parts.Length < 3 || parts[0] != "LU" || parts[1] != VersionTag)
             {
-                string theirs = parts.Length == 3 ? parts[1] : "?";
+                string theirs = parts.Length >= 2 ? parts[1] : "?";
                 response.Approved = false;
                 response.Reason =
                     $"Versions du jeu différentes (hôte {VersionTag}, toi {theirs}).\n" +
@@ -504,6 +578,7 @@ namespace LevelUp.Network
             }
 
             string token = parts[2];
+            string name = parts.Length >= 4 ? PlayerProfile.Sanitize(parts[3]) : "";
 
             if (_matchRunning)
             {
@@ -512,6 +587,10 @@ namespace LevelUp.Network
                 {
                     if (entry.Value != token) continue;
                     _pendingReconnectSeat[request.ClientNetworkId] = entry.Key;
+                    // Jeton + pseudo du nouvel identifiant réseau : sans eux, un
+                    // "Rejouer" après reconnexion perdrait le nom et le siège.
+                    _tokenByClient[request.ClientNetworkId] = token;
+                    _nameByClient[request.ClientNetworkId] = name;
                     response.Approved = true;
                     return;
                 }
@@ -528,6 +607,7 @@ namespace LevelUp.Network
             }
 
             _tokenByClient[request.ClientNetworkId] = token;
+            _nameByClient[request.ClientNetworkId] = name;
             response.Approved = true;
         }
 
@@ -561,7 +641,7 @@ namespace LevelUp.Network
                 {
                     _lobbyClients.Add(clientId);
                 }
-                LobbyCountChanged?.Invoke(LobbyHumanCount);
+                BroadcastLobby();
             }
             else if (clientId == _ngo.LocalClientId)
             {
@@ -601,7 +681,8 @@ namespace LevelUp.Network
                 }
                 else if (_lobbyClients.Remove(clientId))
                 {
-                    LobbyCountChanged?.Invoke(LobbyHumanCount);
+                    _nameByClient.Remove(clientId);
+                    BroadcastLobby();
                 }
             }
             else if (clientId == _ngo.LocalClientId || clientId == NgoManager.ServerClientId)
@@ -777,10 +858,11 @@ namespace LevelUp.Network
 
         /// <summary>
         /// Hôte : fige les sièges (hôte = 0, clients dans l'ordre de connexion,
-        /// bots en complément), envoie le message de départ à chaque client et
-        /// retourne les données de démarrage pour la partie locale de l'hôte.
+        /// bots en complément) avec les pseudos du salon, envoie le message de
+        /// départ (seed + règles) à chaque client et retourne les données de
+        /// démarrage pour la partie locale de l'hôte.
         /// </summary>
-        public OnlineStartData BuildAndBroadcastStart(int requestedSeats, bool randomContracts)
+        public OnlineStartData BuildAndBroadcastStart(int requestedSeats, MatchRules rules)
         {
             if (_ngo == null || !_ngo.IsHost)
                 throw new InvalidOperationException("Seul l'hôte peut lancer la partie");
@@ -800,8 +882,9 @@ namespace LevelUp.Network
             int totalSeats = Mathf.Clamp(Mathf.Max(requestedSeats, humans), 2, MaxPlayers);
             int seed = new System.Random().Next();
 
+            List<string> usedNames = new();
             PlayerSetup[] players = new PlayerSetup[totalSeats];
-            players[0] = new PlayerSetup("Joueur 1", false);
+            players[0] = new PlayerSetup(UniqueName(PlayerProfile.Name, 0, usedNames), false);
 
             Dictionary<ulong, string> tokens = new(_tokenByClient);
             _seatByClient.Clear();
@@ -817,16 +900,16 @@ namespace LevelUp.Network
                 _seatByClient[clientId] = i + 1;
                 if (tokens.TryGetValue(clientId, out string? token))
                     _tokenBySeat[i + 1] = token;
-                players[i + 1] = new PlayerSetup($"Joueur {i + 2}", false);
+                players[i + 1] = new PlayerSetup(UniqueName(ClientName(clientId), i + 1, usedNames), false);
             }
             for (int s = humans; s < totalSeats; s++)
             {
-                players[s] = new PlayerSetup($"Bot {s - humans + 1}", true);
+                players[s] = new PlayerSetup(UniqueName($"Bot {s - humans + 1}", s, usedNames), true);
             }
 
             _history.Clear();
             _matchSeed = seed;
-            _matchRandomContracts = randomContracts;
+            _matchRules = rules ?? MatchRules.Classic;
 
             foreach (KeyValuePair<ulong, int> entry in _seatByClient)
             {
@@ -835,7 +918,7 @@ namespace LevelUp.Network
                 {
                     Seed = seed,
                     LocalSeat = entry.Value,
-                    RandomContracts = randomContracts,
+                    Rules = _matchRules,
                     Players = players
                 });
                 _ngo.CustomMessagingManager.SendNamedMessage(MsgStart, entry.Key,
@@ -848,16 +931,59 @@ namespace LevelUp.Network
             {
                 Seed = seed,
                 LocalSeat = 0,
-                RandomContracts = randomContracts,
+                Rules = _matchRules,
                 Players = players
             };
+        }
+
+        private string ClientName(ulong clientId) =>
+            _nameByClient.TryGetValue(clientId, out string? n) ? n : "";
+
+        /// <summary>
+        /// Pseudo unique dans la partie : vide → "Joueur N" ; doublon → suffixe
+        /// " 2", " 3"… (deux "Alex" à la même table resteraient indiscernables).
+        /// </summary>
+        private static string UniqueName(string raw, int seat, List<string> used)
+        {
+            string baseName = PlayerProfile.Sanitize(raw);
+            if (baseName.Length == 0) baseName = $"Joueur {seat + 1}";
+
+            string name = baseName;
+            int n = 2;
+            while (used.Contains(name))
+            {
+                string suffix = $" {n++}";
+                int keep = Mathf.Min(baseName.Length, PlayerProfile.MaxNameLength - suffix.Length);
+                name = baseName.Substring(0, Mathf.Max(1, keep)).TrimEnd() + suffix;
+            }
+            used.Add(name);
+            return name;
+        }
+
+        private static void WriteRules(FastBufferWriter writer, MatchRules rules)
+        {
+            writer.WriteValueSafe(rules.RandomContracts);
+            writer.WriteValueSafe((byte)rules.SpecialCards);
+            writer.WriteValueSafe(rules.HandSize);
+            writer.WriteValueSafe(rules.LevelsToWin);
+            writer.WriteValueSafe(rules.TurnTimerSeconds);
+        }
+
+        private static MatchRules ReadRules(FastBufferReader reader)
+        {
+            reader.ReadValueSafe(out bool randomContracts);
+            reader.ReadValueSafe(out byte special);
+            reader.ReadValueSafe(out int handSize);
+            reader.ReadValueSafe(out int levelsToWin);
+            reader.ReadValueSafe(out int turnTimer);
+            return new MatchRules(randomContracts, (SpecialCardsMode)special, handSize, levelsToWin, turnTimer);
         }
 
         private static void WriteStartHeader(FastBufferWriter writer, OnlineStartData data)
         {
             writer.WriteValueSafe(data.Seed);
             writer.WriteValueSafe(data.LocalSeat);
-            writer.WriteValueSafe(data.RandomContracts);
+            WriteRules(writer, data.Rules ?? MatchRules.Classic);
             writer.WriteValueSafe(data.Players.Length);
             foreach (PlayerSetup p in data.Players)
             {
@@ -870,29 +996,126 @@ namespace LevelUp.Network
         {
             reader.ReadValueSafe(out int seed);
             reader.ReadValueSafe(out int localSeat);
-            reader.ReadValueSafe(out bool randomContracts);
+            MatchRules rules = ReadRules(reader);
             reader.ReadValueSafe(out int totalSeats);
+            if (totalSeats < 2 || totalSeats > MaxSeatsInMessage)
+            {
+                // En-tête invalide : l'appelant ignore le message (Players vide).
+                return new OnlineStartData { Players = Array.Empty<PlayerSetup>(), Rules = rules };
+            }
 
             PlayerSetup[] players = new PlayerSetup[totalSeats];
             for (int i = 0; i < totalSeats; i++)
             {
                 reader.ReadValueSafe(out string name);
                 reader.ReadValueSafe(out bool isAI);
-                players[i] = new PlayerSetup(name, isAI);
+                // Les noms s'affichent en rich text : toujours re-nettoyés.
+                string clean = PlayerProfile.Sanitize(name);
+                players[i] = new PlayerSetup(clean.Length > 0 ? clean : $"Joueur {i + 1}", isAI);
             }
 
             return new OnlineStartData
             {
                 Seed = seed,
                 LocalSeat = localSeat,
-                RandomContracts = randomContracts,
+                Rules = rules,
                 Players = players
             };
         }
 
+        // ────────────────────────────────────────────────────
+        //  SALON (pseudos + réglages, avant le lancement)
+        // ────────────────────────────────────────────────────
+
+        /// <summary>
+        /// Hôte : réglages de la prochaine partie (places totales, règles, niveau
+        /// des bots). Diffusés à tous les clients pour qu'ils sachent à quoi ils jouent.
+        /// </summary>
+        public void SetLobbySettings(int seats, MatchRules rules, int botDifficulty)
+        {
+            _lobbySeats = Mathf.Clamp(seats, 2, MaxPlayers);
+            _lobbyRules = rules ?? MatchRules.Classic;
+            _lobbyBotDifficulty = Mathf.Clamp(botDifficulty, 0, 2);
+            BroadcastLobby();
+        }
+
+        private LobbyInfo BuildLobbyInfo()
+        {
+            LobbyInfo info = new()
+            {
+                Seats = Mathf.Clamp(Mathf.Max(_lobbySeats, LobbyHumanCount), 2, MaxPlayers),
+                BotDifficulty = _lobbyBotDifficulty,
+                Rules = _lobbyRules,
+                LocalClientId = _ngo != null ? _ngo.LocalClientId : NgoManager.ServerClientId
+            };
+
+            List<string> used = new();
+            info.Members.Add(new LobbyMember(NgoManager.ServerClientId,
+                UniqueName(PlayerProfile.Name, 0, used), true));
+            for (int i = 0; i < _lobbyClients.Count; i++)
+            {
+                ulong id = _lobbyClients[i];
+                info.Members.Add(new LobbyMember(id, UniqueName(ClientName(id), i + 1, used), false));
+            }
+            return info;
+        }
+
+        /// <summary>Hôte : publie l'état du salon chez lui et chez chaque client.</summary>
+        private void BroadcastLobby()
+        {
+            if (_ngo == null || !_ngo.IsHost || _matchRunning) return;
+
+            LobbyInfo info = BuildLobbyInfo();
+            CurrentLobby = info;
+            LobbyChanged?.Invoke(info);
+
+            foreach (ulong clientId in _lobbyClients)
+            {
+                using FastBufferWriter writer = new(512, Allocator.Temp, 16 * 1024);
+                writer.WriteValueSafe(info.Seats);
+                writer.WriteValueSafe(info.BotDifficulty);
+                WriteRules(writer, info.Rules);
+                writer.WriteValueSafe(info.Members.Count);
+                foreach (LobbyMember m in info.Members)
+                {
+                    writer.WriteValueSafe(m.ClientId);
+                    writer.WriteValueSafe(m.Name);
+                    writer.WriteValueSafe(m.IsHost);
+                }
+                _ngo.CustomMessagingManager.SendNamedMessage(MsgLobby, clientId,
+                    writer, NetworkDelivery.ReliableFragmentedSequenced);
+            }
+        }
+
+        private void OnLobbyMessage(ulong senderId, FastBufferReader reader)
+        {
+            if (!IsFromHost(senderId)) return;
+
+            LobbyInfo info = new();
+            reader.ReadValueSafe(out info.Seats);
+            reader.ReadValueSafe(out info.BotDifficulty);
+            info.Rules = ReadRules(reader);
+            reader.ReadValueSafe(out int count);
+            if (count < 0 || count > MaxSeatsInMessage) return;
+            for (int i = 0; i < count; i++)
+            {
+                reader.ReadValueSafe(out ulong clientId);
+                reader.ReadValueSafe(out string name);
+                reader.ReadValueSafe(out bool isHost);
+                info.Members.Add(new LobbyMember(clientId, PlayerProfile.Sanitize(name), isHost));
+            }
+            info.LocalClientId = _ngo != null ? _ngo.LocalClientId : 0;
+
+            CurrentLobby = info;
+            LobbyChanged?.Invoke(info);
+        }
+
         private void OnStartMessage(ulong senderId, FastBufferReader reader)
         {
+            if (!IsFromHost(senderId)) return;
+
             OnlineStartData data = ReadStartHeader(reader);
+            if (data.Players == null || data.Players.Length < 2) return;
             _matchRunning = true;
             _awaitingResume = false;
             MatchStartReceived?.Invoke(data);
@@ -922,18 +1145,11 @@ namespace LevelUp.Network
             }
         }
 
-        private static byte[] Serialize(IGameCommand command)
-        {
-            using FastBufferWriter writer = new(256, Allocator.Temp, 64 * 1024);
-            NetCommandCodec.Write(writer, command);
-            return writer.ToArray();
-        }
+        // Même format que la sauvegarde solo (Core) : validé à la lecture,
+        // jamais d'exception ni d'allocation démesurée sur des octets reçus.
+        private static byte[] Serialize(IGameCommand command) => GameCommandCodec.ToBytes(command);
 
-        private static IGameCommand? Deserialize(byte[] bytes)
-        {
-            using FastBufferReader reader = new(bytes, Allocator.Temp);
-            return NetCommandCodec.Read(reader);
-        }
+        private static IGameCommand? Deserialize(byte[] bytes) => GameCommandCodec.FromBytes(bytes);
 
         private void OnLocalCommandExecuted(IGameCommand command, CommandResult result)
         {
@@ -987,10 +1203,18 @@ namespace LevelUp.Network
         {
             reader.ReadValueSafe(out int senderHash);
             reader.ReadValueSafe(out int length);
+            if (length <= 0 || length > GameCommandCodec.MaxCommandBytes)
+            {
+                Debug.LogWarning($"[OnlineSession] Commande ignorée : taille invalide ({length})");
+                return;
+            }
             byte[] bytes = new byte[length];
             reader.ReadBytesSafe(ref bytes, length);
 
             if (_gameManager == null || _ngo == null) return;
+
+            // Un client ne reçoit des commandes que de l'hôte.
+            if (!_ngo.IsHost && senderId != NgoManager.ServerClientId) return;
 
             // Client en attente d'un état complet : ces commandes y seront incluses.
             if (!_ngo.IsHost && _awaitingResume) return;
@@ -1000,9 +1224,10 @@ namespace LevelUp.Network
 
             if (_ngo.IsHost)
             {
-                // Anti-usurpation : le client ne peut agir que pour SON siège.
+                // Anti-usurpation : le client ne peut agir que pour SON siège, et
+                // seul l'hôte lance la manche suivante.
                 if (!_seatByClient.TryGetValue(senderId, out int seat) ||
-                    command.PlayerIndex != seat)
+                    command.PlayerIndex != seat || command is StartNextRoundCommand)
                 {
                     Debug.LogWarning($"[OnlineSession] Commande rejetée : siège invalide (client {senderId})");
                     SendResume(senderId);
@@ -1092,7 +1317,7 @@ namespace LevelUp.Network
                 {
                     Seed = _matchSeed,
                     LocalSeat = seat,
-                    RandomContracts = _matchRandomContracts,
+                    Rules = _matchRules,
                     Players = players
                 });
                 header.WriteValueSafe(_history.Count);
@@ -1136,7 +1361,10 @@ namespace LevelUp.Network
 
         private void OnResumeBeginMessage(ulong senderId, FastBufferReader reader)
         {
+            if (!IsFromHost(senderId)) return;
+
             _resumeHeader = ReadStartHeader(reader);
+            if (_resumeHeader.Players == null || _resumeHeader.Players.Length < 2) return;
             reader.ReadValueSafe(out _resumeExpectedCount);
             reader.ReadValueSafe(out _resumeHash);
             _resumeBuffer.Clear();
@@ -1146,10 +1374,14 @@ namespace LevelUp.Network
 
         private void OnResumeChunkMessage(ulong senderId, FastBufferReader reader)
         {
+            if (!IsFromHost(senderId) || !_awaitingResume) return;
+
             reader.ReadValueSafe(out int count);
+            if (count < 0 || _resumeBuffer.Count + count > MaxResumeCommands) return;
             for (int i = 0; i < count; i++)
             {
                 reader.ReadValueSafe(out int length);
+                if (length <= 0 || length > GameCommandCodec.MaxCommandBytes) return;
                 byte[] bytes = new byte[length];
                 reader.ReadBytesSafe(ref bytes, length);
                 _resumeBuffer.Add(bytes);
@@ -1158,6 +1390,8 @@ namespace LevelUp.Network
 
         private void OnResumeEndMessage(ulong senderId, FastBufferReader reader)
         {
+            if (!IsFromHost(senderId) || !_awaitingResume) return;
+
             reader.ReadValueSafe(out int total);
             if (total != _resumeBuffer.Count || total != _resumeExpectedCount)
             {
@@ -1170,7 +1404,14 @@ namespace LevelUp.Network
             foreach (byte[] bytes in _resumeBuffer)
             {
                 IGameCommand? cmd = Deserialize(bytes);
-                if (cmd != null) history.Add(cmd);
+                if (cmd == null)
+                {
+                    Debug.LogError("[OnlineSession] Reprise illisible → nouvel essai");
+                    _resumeBuffer.Clear();
+                    RequestResync();
+                    return;
+                }
+                history.Add(cmd);
             }
             _resumeBuffer.Clear();
             _awaitingResume = false;
@@ -1204,12 +1445,14 @@ namespace LevelUp.Network
 
         private void OnToAIMessage(ulong senderId, FastBufferReader reader)
         {
+            if (!IsFromHost(senderId)) return;
             reader.ReadValueSafe(out int seat);
             PlayerReplacedByAI?.Invoke(seat);
         }
 
         private void OnToHumanMessage(ulong senderId, FastBufferReader reader)
         {
+            if (!IsFromHost(senderId)) return;
             reader.ReadValueSafe(out int seat);
             PlayerRestoredToHuman?.Invoke(seat);
         }
@@ -1232,6 +1475,7 @@ namespace LevelUp.Network
 
         private void OnInfoMessage(ulong senderId, FastBufferReader reader)
         {
+            if (!IsFromHost(senderId)) return;
             reader.ReadValueSafe(out string text);
             Notice?.Invoke(text);
         }

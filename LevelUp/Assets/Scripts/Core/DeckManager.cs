@@ -11,8 +11,8 @@ namespace LevelUp.Core
     {
         private readonly List<CardModel> _drawPile = new();
         private readonly List<List<CardModel>> _discardPiles = new();
-        private int _nextCardId;
         private readonly GameConfig _config;
+        private readonly MatchRules _rules;
 
         // RNG dédié (jamais UnityEngine.Random) : avec un seed partagé, tous les
         // appareils d'une partie en ligne produisent exactement les mêmes mélanges,
@@ -27,13 +27,19 @@ namespace LevelUp.Core
 
         /// <summary>
         /// Constructeur avec config ScriptableObject. Un seed identique garantit
-        /// des mélanges identiques (requis pour le multijoueur en ligne).
+        /// des mélanges identiques (requis pour le multijoueur en ligne). Les
+        /// règles de partie fixent la taille de main et les cartes spéciales
+        /// (aucune par défaut : paquet classique).
         /// </summary>
-        public DeckManager(GameConfig config, int? seed = null)
+        public DeckManager(GameConfig config, int? seed = null, MatchRules? rules = null)
         {
             _config = config;
+            _rules = rules ?? MatchRules.Classic;
             _rng = seed.HasValue ? new System.Random(seed.Value) : new System.Random();
         }
+
+        /// <summary>Cartes distribuées par joueur : règle de la partie, sinon la config.</summary>
+        public int CardsPerPlayer => _rules.HandSize > 0 ? _rules.HandSize : _config.CardsPerPlayer;
 
         /// <summary>
         /// Crée un deck complet basé sur la configuration et le mélange.
@@ -42,31 +48,7 @@ namespace LevelUp.Core
         {
             _drawPile.Clear();
             _discardPiles.Clear();
-            _nextCardId = 0;
-
-            // Créer les cartes normales
-            CardColor[] colors = { CardColor.Red, CardColor.Blue, CardColor.Green,
-                                   CardColor.Yellow, CardColor.Purple, CardColor.Orange };
-
-            int cardsPerColor = _config.DeckSize / colors.Length;
-            int valRange = _config.CardMaxValue - _config.CardMinValue + 1;
-
-            foreach (CardColor color in colors)
-            {
-                for (int i = 0; i < cardsPerColor; i++)
-                {
-                    int value = _config.CardMinValue + (i % valRange);
-                    _drawPile.Add(new CardModel(_nextCardId++, value, color));
-                }
-            }
-
-            // Compléter si le deck n'est pas parfaitement divisible
-            while (_drawPile.Count < _config.DeckSize)
-            {
-                CardColor color = colors[_drawPile.Count % colors.Length];
-                int value = _config.CardMinValue + (_drawPile.Count % valRange);
-                _drawPile.Add(new CardModel(_nextCardId++, value, color));
-            }
+            _drawPile.AddRange(BuildComposition(_config, _rules));
 
             Shuffle();
 
@@ -75,6 +57,48 @@ namespace LevelUp.Core
             {
                 _discardPiles.Add(new List<CardModel>());
             }
+        }
+
+        /// <summary>
+        /// Composition complète du paquet (non mélangée, ids 0..N-1 dans l'ordre) :
+        /// cartes numérotées selon la config, puis cartes spéciales si les règles
+        /// les activent. Publique pour que l'IA connaisse le paquet sans le toucher.
+        /// </summary>
+        public static List<CardModel> BuildComposition(GameConfig config, MatchRules? rules = null)
+        {
+            MatchRules r = rules ?? MatchRules.Classic;
+            List<CardModel> cards = new(config.DeckSize + r.JokerCount + r.SkipCount + r.Draw2Count);
+            int nextId = 0;
+
+            CardColor[] colors = { CardColor.Red, CardColor.Blue, CardColor.Green,
+                                   CardColor.Yellow, CardColor.Purple, CardColor.Orange };
+
+            int cardsPerColor = config.DeckSize / colors.Length;
+            int valRange = config.CardMaxValue - config.CardMinValue + 1;
+
+            foreach (CardColor color in colors)
+            {
+                for (int i = 0; i < cardsPerColor; i++)
+                {
+                    int value = config.CardMinValue + (i % valRange);
+                    cards.Add(new CardModel(nextId++, value, color));
+                }
+            }
+
+            // Compléter si le deck n'est pas parfaitement divisible
+            while (cards.Count < config.DeckSize)
+            {
+                CardColor color = colors[cards.Count % colors.Length];
+                int value = config.CardMinValue + (cards.Count % valRange);
+                cards.Add(new CardModel(nextId++, value, color));
+            }
+
+            // Cartes spéciales : uniquement si la partie les active (option).
+            for (int i = 0; i < r.JokerCount; i++) cards.Add(new CardModel(nextId++, CardType.Wild));
+            for (int i = 0; i < r.SkipCount; i++) cards.Add(new CardModel(nextId++, CardType.Skip));
+            for (int i = 0; i < r.Draw2Count; i++) cards.Add(new CardModel(nextId++, CardType.Draw2));
+
+            return cards;
         }
 
         /// <summary>
@@ -95,11 +119,12 @@ namespace LevelUp.Core
         public List<List<CardModel>> Deal(int playerCount)
         {
             List<List<CardModel>> hands = new();
+            int perPlayer = CardsPerPlayer;
 
             for (int p = 0; p < playerCount; p++)
             {
                 List<CardModel> hand = new();
-                for (int c = 0; c < _config.CardsPerPlayer; c++)
+                for (int c = 0; c < perPlayer; c++)
                 {
                     if (_drawPile.Count > 0)
                     {

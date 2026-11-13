@@ -7,24 +7,24 @@ using LevelUp.Utils;
 namespace LevelUp.UI
 {
     /// <summary>
-    /// Animations juicy style Balatro : bounce/overshoot, cascade, particules UI,
-    /// flash écran. Sans DOTween — coroutines + courbes custom.
+    /// Animations de cartes et petits effets (sans DOTween : coroutines +
+    /// courbes) : arrivée d'une carte piochée, secousse d'erreur, pulsation,
+    /// apparition, flash et éclats (désactivés en « animations réduites »).
     /// </summary>
     public class AnimationController : MonoBehaviour
     {
-        [Header("Animation Curves")]
-        [SerializeField] private AnimationCurve _moveCurve = AnimationCurve.EaseInOut(0, 0, 1, 1);
-
         [Header("Reference Points")]
         [SerializeField] private RectTransform? _deckPosition;
-        [SerializeField] private RectTransform? _discardPosition;
-        [SerializeField] private RectTransform? _tableCenter;
 
         [Header("Effects")]
         [SerializeField] private Canvas? _effectCanvas;
 
-        /// <summary>Indique si une animation est en cours.</summary>
-        public bool IsAnimating { get; private set; }
+        // Compteur (et non booléen) : plusieurs animations peuvent se chevaucher,
+        // la première terminée ne doit pas libérer le verrou des autres.
+        private int _running;
+
+        /// <summary>Vrai tant qu'une animation qui verrouille les actions est en cours.</summary>
+        public bool IsAnimating => _running > 0;
 
         private static readonly AnimationCurve BounceCurve = CreateBounceCurve();
         private static readonly AnimationCurve OvershootCurve = CreateOvershootCurve();
@@ -51,101 +51,49 @@ namespace LevelUp.UI
         }
 
         /// <summary>
-        /// Anime une carte depuis le deck vers la main avec un arc et un bounce à l'arrivée.
+        /// Anime une carte vers sa place dans la main, en arc, depuis le paquet ou
+        /// depuis <paramref name="fromWorld"/> (défausse ramassée).
+        /// <paramref name="onComplete"/> est TOUJOURS appelé (même si la carte disparaît).
         /// </summary>
-        public void AnimateDrawToHand(RectTransform card, Action? onComplete = null)
+        public void AnimateDrawToHand(RectTransform card, Action? onComplete = null, Vector3? fromWorld = null)
         {
-            if (_deckPosition == null)
+            if (_deckPosition == null && !fromWorld.HasValue)
             {
                 onComplete?.Invoke();
                 return;
             }
-            StartCoroutine(AnimateDrawCoroutine(card, onComplete));
+            StartCoroutine(AnimateDrawCoroutine(card, onComplete, fromWorld ?? _deckPosition!.position));
         }
 
-        /// <summary>
-        /// Anime une carte glissant vers la table avec shrink.
-        /// </summary>
-        public void AnimateCardToTable(RectTransform card, Vector2 targetWorldPos, Action? onComplete = null)
-        {
-            Vector2 target = _tableCenter != null ? _tableCenter.anchoredPosition : targetWorldPos;
-            StartCoroutine(AnimateMoveAndScale(card, card.anchoredPosition, target,
-                card.localScale, card.localScale * 0.7f, Constants.AnimPlayDuration, onComplete));
-        }
-
-        /// <summary>
-        /// Anime une carte défaussée : tourne légèrement + shrink + fade.
-        /// </summary>
-        public void AnimateDiscard(RectTransform card, CanvasGroup? canvasGroup, Action? onComplete = null)
-        {
-            Vector2 target = _discardPosition != null
-                ? _discardPosition.anchoredPosition
-                : card.anchoredPosition + Vector2.down * 200f;
-
-            StartCoroutine(AnimateDiscardCoroutine(card, canvasGroup, target, onComplete));
-        }
-
-        /// <summary>
-        /// Animation de retournement de carte (scale X).
-        /// </summary>
-        public void AnimateFlip(RectTransform card, Action? onHalf = null, Action? onComplete = null)
-        {
-            StartCoroutine(AnimateFlipCoroutine(card, onHalf, onComplete));
-        }
-
-        /// <summary>
-        /// Shake horizontal punchy (erreur, action invalide).
-        /// </summary>
+        /// <summary>Secousse horizontale (erreur, action invalide).</summary>
         public void AnimateShake(RectTransform card, Action? onComplete = null)
         {
             StartCoroutine(AnimateShakeCoroutine(card, onComplete));
         }
 
-        /// <summary>
-        /// Pulse bounce : scale overshoot puis retour (succès, confirmation).
-        /// </summary>
+        /// <summary>Pulsation : agrandit puis revient (succès, confirmation).</summary>
         public void AnimatePulse(RectTransform target, Action? onComplete = null)
         {
             StartCoroutine(AnimatePulseCoroutine(target, onComplete));
         }
 
-        /// <summary>
-        /// Glow pulsant via alpha du CanvasGroup.
-        /// </summary>
-        public void AnimateGlow(CanvasGroup cg, float duration = 0.6f, Action? onComplete = null)
-        {
-            StartCoroutine(AnimateGlowCoroutine(cg, duration, onComplete));
-        }
-
-        /// <summary>
-        /// Scale pop-in : de 0 à 1 avec bounce (pour UI elements, status messages).
-        /// </summary>
+        /// <summary>Apparition : de 0 à 1 avec rebond.</summary>
         public void AnimatePopIn(RectTransform target, Action? onComplete = null)
         {
             StartCoroutine(AnimatePopInCoroutine(target, onComplete));
         }
 
-        /// <summary>
-        /// Cascade : anime une liste d'éléments avec un délai entre chacun.
-        /// </summary>
-        public void AnimateCascade(RectTransform[] cards, Vector2[] targets, Action? onComplete = null)
-        {
-            StartCoroutine(AnimateCascadeCoroutine(cards, targets, onComplete));
-        }
-
-        /// <summary>
-        /// Flash blanc rapide sur tout l'écran (round win, level complete).
-        /// </summary>
+        /// <summary>Voile coloré bref sur tout l'écran (désactivé en animations réduites).</summary>
         public void AnimateScreenFlash(Color? color = null, float duration = 0.3f)
         {
+            if (GameSettings.ReducedMotion) return;
             StartCoroutine(AnimateScreenFlashCoroutine(color ?? new Color(1f, 1f, 1f, 0.3f), duration));
         }
 
-        /// <summary>
-        /// Spawn de particules UI colorées qui explosent depuis un point (level complete, round win).
-        /// </summary>
+        /// <summary>Éclats colorés depuis un point (désactivés en animations réduites).</summary>
         public void SpawnParticleBurst(Vector2 position, Color color, int count = 12)
         {
+            if (GameSettings.ReducedMotion) return;
             StartCoroutine(ParticleBurstCoroutine(position, color, count));
         }
 
@@ -153,9 +101,9 @@ namespace LevelUp.UI
         //  COROUTINES
         // ══════════════════════════════════════════════════
 
-        private IEnumerator AnimateDrawCoroutine(RectTransform card, Action? onComplete)
+        private IEnumerator AnimateDrawCoroutine(RectTransform card, Action? onComplete, Vector3 fromWorld)
         {
-            IsAnimating = true;
+            _running++;
             try
             {
                 if (card == null) yield break;
@@ -163,14 +111,10 @@ namespace LevelUp.UI
                 Vector2 targetPos = card.anchoredPosition;
                 Vector3 targetScale = card.localScale;
 
-                // Position du deck en local
-                Vector3 deckWorldPos = _deckPosition!.position;
                 Transform? cardParent = card.parent;
-                Vector3 deckLocalPos = cardParent != null
-                    ? cardParent.InverseTransformPoint(deckWorldPos)
-                    : deckWorldPos;
+                Vector3 startLocal = cardParent != null ? cardParent.InverseTransformPoint(fromWorld) : fromWorld;
 
-                Vector2 startPos = new(deckLocalPos.x, deckLocalPos.y);
+                Vector2 startPos = new(startLocal.x, startLocal.y);
                 Vector3 startScale = targetScale * 0.4f;
                 float startRotation = 15f;
 
@@ -178,11 +122,12 @@ namespace LevelUp.UI
                 card.localScale = startScale;
                 card.localRotation = Quaternion.Euler(0, 0, startRotation);
 
-                // Arc plus haut pour un effet spectaculaire
                 Vector2 midPoint = Vector2.Lerp(startPos, targetPos, 0.5f) + Vector2.up * 120f;
 
                 float elapsed = 0f;
-                float duration = Constants.AnimDrawDuration;
+                float duration = GameSettings.ReducedMotion
+                    ? Constants.AnimDrawDuration * 0.5f
+                    : Constants.AnimDrawDuration;
 
                 while (elapsed < duration)
                 {
@@ -195,15 +140,8 @@ namespace LevelUp.UI
                     Vector2 a = Vector2.Lerp(startPos, midPoint, t);
                     Vector2 b = Vector2.Lerp(midPoint, targetPos, t);
                     card.anchoredPosition = Vector2.Lerp(a, b, t);
-
-                    // Scale avec bounce
-                    float scaleT = BounceCurve.Evaluate(rawT);
-                    card.localScale = Vector3.Lerp(startScale, targetScale, scaleT);
-
-                    // Rotation revient à 0
-                    float rot = Mathf.Lerp(startRotation, 0f, rawT);
-                    card.localRotation = Quaternion.Euler(0, 0, rot);
-
+                    card.localScale = Vector3.Lerp(startScale, targetScale, BounceCurve.Evaluate(rawT));
+                    card.localRotation = Quaternion.Euler(0, 0, Mathf.Lerp(startRotation, 0f, rawT));
                     yield return null;
                 }
 
@@ -216,139 +154,33 @@ namespace LevelUp.UI
             }
             finally
             {
-                IsAnimating = false;
-                // Toujours notifier pour que l'appelant libère ses locks
+                _running = Mathf.Max(0, _running - 1);
+                // Toujours notifier pour que l'appelant libère ses verrous
                 // (_animatingDraw, etc.), même si l'objet a été détruit.
                 onComplete?.Invoke();
             }
         }
 
-        private IEnumerator AnimateMoveAndScale(RectTransform rt, Vector2 fromPos, Vector2 toPos,
-            Vector3 fromScale, Vector3 toScale, float duration, Action? onComplete)
-        {
-            IsAnimating = true;
-            try
-            {
-                if (rt == null) yield break;
-                float elapsed = 0f;
-
-                while (elapsed < duration)
-                {
-                    if (rt == null) yield break;
-                    elapsed += Time.deltaTime;
-                    float t = OvershootCurve.Evaluate(Mathf.Clamp01(elapsed / duration));
-                    rt.anchoredPosition = Vector2.LerpUnclamped(fromPos, toPos, t);
-                    rt.localScale = Vector3.LerpUnclamped(fromScale, toScale, t);
-                    yield return null;
-                }
-
-                if (rt != null)
-                {
-                    rt.anchoredPosition = toPos;
-                    rt.localScale = toScale;
-                }
-            }
-            finally
-            {
-                IsAnimating = false;
-                onComplete?.Invoke();
-            }
-        }
-
-        private IEnumerator AnimateDiscardCoroutine(RectTransform rt, CanvasGroup? cg,
-            Vector2 target, Action? onComplete)
-        {
-            IsAnimating = true;
-            try
-            {
-                if (rt == null) yield break;
-                float elapsed = 0f;
-                float duration = Constants.AnimDiscardDuration;
-                Vector2 start = rt.anchoredPosition;
-                Vector3 startScale = rt.localScale;
-                float startAlpha = cg != null ? cg.alpha : 1f;
-                float startRot = rt.localEulerAngles.z;
-
-                // Rotation aléatoire légère pour un feel organique
-                float targetRot = startRot + UnityEngine.Random.Range(-15f, 15f);
-
-                while (elapsed < duration)
-                {
-                    if (rt == null) yield break;
-                    elapsed += Time.deltaTime;
-                    float rawT = Mathf.Clamp01(elapsed / duration);
-                    float t = _moveCurve.Evaluate(rawT);
-
-                    rt.anchoredPosition = Vector2.LerpUnclamped(start, target, t);
-                    rt.localScale = Vector3.Lerp(startScale, startScale * 0.6f, rawT);
-                    rt.localRotation = Quaternion.Euler(0, 0, Mathf.Lerp(startRot, targetRot, rawT));
-
-                    if (cg != null) cg.alpha = Mathf.Lerp(startAlpha, 0f, rawT * rawT);
-                    yield return null;
-                }
-
-                if (rt != null)
-                {
-                    rt.anchoredPosition = target;
-                    if (cg != null) cg.alpha = 0f;
-                }
-            }
-            finally
-            {
-                IsAnimating = false;
-                onComplete?.Invoke();
-            }
-        }
-
-        private IEnumerator AnimateFlipCoroutine(RectTransform rt, Action? onHalf, Action? onComplete)
-        {
-            float duration = 0.12f;
-            float elapsed = 0f;
-            Vector3 originalScale = rt.localScale;
-
-            while (elapsed < duration)
-            {
-                elapsed += Time.deltaTime;
-                float t = Mathf.Clamp01(elapsed / duration);
-                float scaleX = Mathf.Lerp(1f, 0f, t);
-                rt.localScale = new Vector3(scaleX * originalScale.x, originalScale.y, originalScale.z);
-                yield return null;
-            }
-
-            onHalf?.Invoke();
-            elapsed = 0f;
-
-            while (elapsed < duration)
-            {
-                elapsed += Time.deltaTime;
-                float t = Mathf.Clamp01(elapsed / duration);
-                float scaleX = Mathf.Lerp(0f, 1f, t);
-                rt.localScale = new Vector3(scaleX * originalScale.x, originalScale.y, originalScale.z);
-                yield return null;
-            }
-
-            rt.localScale = originalScale;
-            onComplete?.Invoke();
-        }
-
         private IEnumerator AnimateShakeCoroutine(RectTransform rt, Action? onComplete)
         {
+            if (rt == null) yield break;
             Vector2 original = rt.anchoredPosition;
             float duration = 0.3f;
-            float magnitude = 16f;
+            float magnitude = GameSettings.ReducedMotion ? 6f : 16f;
             float elapsed = 0f;
 
             while (elapsed < duration)
             {
+                if (rt == null) yield break;
                 elapsed += Time.deltaTime;
                 float decay = 1f - (elapsed / duration);
-                decay *= decay; // quadratic decay for punchier feel
+                decay *= decay;
                 float x = original.x + Mathf.Sin(elapsed * 60f) * magnitude * decay;
                 rt.anchoredPosition = new Vector2(x, original.y);
                 yield return null;
             }
 
-            rt.anchoredPosition = original;
+            if (rt != null) rt.anchoredPosition = original;
             onComplete?.Invoke();
         }
 
@@ -384,22 +216,9 @@ namespace LevelUp.UI
             onComplete?.Invoke();
         }
 
-        private IEnumerator AnimateGlowCoroutine(CanvasGroup cg, float duration, Action? onComplete)
-        {
-            float elapsed = 0f;
-            while (elapsed < duration)
-            {
-                elapsed += Time.deltaTime;
-                float t = Mathf.PingPong(elapsed * 3f, 1f);
-                cg.alpha = Mathf.Lerp(0.5f, 1f, t);
-                yield return null;
-            }
-            cg.alpha = 1f;
-            onComplete?.Invoke();
-        }
-
         private IEnumerator AnimatePopInCoroutine(RectTransform rt, Action? onComplete)
         {
+            if (rt == null) yield break;
             Vector3 targetScale = rt.localScale;
             rt.localScale = Vector3.zero;
 
@@ -408,52 +227,15 @@ namespace LevelUp.UI
 
             while (elapsed < duration)
             {
+                if (rt == null) yield break;
                 elapsed += Time.deltaTime;
                 float t = BounceCurve.Evaluate(Mathf.Clamp01(elapsed / duration));
                 rt.localScale = targetScale * t;
                 yield return null;
             }
 
-            rt.localScale = targetScale;
+            if (rt != null) rt.localScale = targetScale;
             onComplete?.Invoke();
-        }
-
-        private IEnumerator AnimateCascadeCoroutine(RectTransform[] cards, Vector2[] targets, Action? onComplete)
-        {
-            IsAnimating = true;
-            try
-            {
-                int remaining = cards.Length;
-
-                for (int i = 0; i < cards.Length; i++)
-                {
-                    int idx = i;
-                    if (cards[idx] == null) { remaining--; continue; }
-                    StartCoroutine(AnimateMoveAndScale(
-                        cards[idx],
-                        cards[idx].anchoredPosition,
-                        targets[idx],
-                        cards[idx].localScale,
-                        cards[idx].localScale * 0.7f,
-                        Constants.AnimPlayDuration,
-                        () => remaining--));
-
-                    yield return new WaitForSeconds(Constants.AnimCascadeDelay);
-                }
-
-                // Attendre que toutes les animations finissent (avec timeout de sécurité)
-                float guard = 0f;
-                while (remaining > 0 && guard < 5f)
-                {
-                    guard += Time.deltaTime;
-                    yield return null;
-                }
-            }
-            finally
-            {
-                IsAnimating = false;
-                onComplete?.Invoke();
-            }
         }
 
         private IEnumerator AnimateScreenFlashCoroutine(Color color, float duration)
@@ -495,7 +277,11 @@ namespace LevelUp.UI
             Canvas canvas = _effectCanvas != null ? _effectCanvas : GetComponentInParent<Canvas>();
             if (canvas == null) yield break;
 
+            // Composants mis en cache une fois : aucun GetComponent par frame.
             GameObject[] particles = new GameObject[count];
+            RectTransform[] rects = new RectTransform[count];
+            CanvasGroup[] groups = new CanvasGroup[count];
+            Vector2[] velocities = new Vector2[count];
 
             for (int i = 0; i < count; i++)
             {
@@ -509,25 +295,22 @@ namespace LevelUp.UI
                 rt.sizeDelta = new Vector2(size, size);
 
                 Image img = p.GetComponent<Image>();
-                // Slight color variation
                 float hueShift = UnityEngine.Random.Range(-0.05f, 0.05f);
                 Color.RGBToHSV(color, out float h, out float s, out float v);
                 img.color = Color.HSVToRGB(Mathf.Repeat(h + hueShift, 1f), s, v);
                 img.raycastTarget = false;
 
-                p.GetComponent<CanvasGroup>().blocksRaycasts = false;
-                particles[i] = p;
-            }
+                CanvasGroup cg = p.GetComponent<CanvasGroup>();
+                cg.blocksRaycasts = false;
 
-            // Directions aléatoires
-            Vector2[] velocities = new Vector2[count];
-            for (int i = 0; i < count; i++)
-            {
                 float angle = (360f / count) * i + UnityEngine.Random.Range(-15f, 15f);
                 float speed = UnityEngine.Random.Range(200f, 500f);
-                velocities[i] = new Vector2(
-                    Mathf.Cos(angle * Mathf.Deg2Rad) * speed,
+                velocities[i] = new Vector2(Mathf.Cos(angle * Mathf.Deg2Rad) * speed,
                     Mathf.Sin(angle * Mathf.Deg2Rad) * speed);
+
+                particles[i] = p;
+                rects[i] = rt;
+                groups[i] = cg;
             }
 
             float duration = 0.6f;
@@ -537,23 +320,16 @@ namespace LevelUp.UI
             {
                 elapsed += Time.deltaTime;
                 float t = elapsed / duration;
+                float alpha = Mathf.Lerp(1f, 0f, t * t);
+                float scale = Mathf.Lerp(1f, 0.2f, t);
 
                 for (int i = 0; i < count; i++)
                 {
                     if (particles[i] == null) continue;
-
-                    RectTransform rt = particles[i].GetComponent<RectTransform>();
-                    rt.anchoredPosition += velocities[i] * Time.deltaTime;
-
-                    // Gravité
+                    rects[i].anchoredPosition += velocities[i] * Time.deltaTime;
                     velocities[i] += Vector2.down * 400f * Time.deltaTime;
-
-                    // Fade + shrink
-                    CanvasGroup cg = particles[i].GetComponent<CanvasGroup>();
-                    cg.alpha = Mathf.Lerp(1f, 0f, t * t);
-
-                    float scale = Mathf.Lerp(1f, 0.2f, t);
-                    rt.localScale = Vector3.one * scale;
+                    groups[i].alpha = alpha;
+                    rects[i].localScale = Vector3.one * scale;
                 }
 
                 yield return null;

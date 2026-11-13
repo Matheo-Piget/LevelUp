@@ -1,6 +1,5 @@
 using System.Collections;
 using System.Collections.Generic;
-using System.Linq;
 using UnityEngine;
 using LevelUp.Core;
 using LevelUp.Utils;
@@ -8,8 +7,11 @@ using LevelUp.Utils;
 namespace LevelUp.AI
 {
     /// <summary>
-    /// Niveau de jeu des bots. Facile fait des erreurs d'évaluation et ignore
-    /// les défausses ; Difficile ramasse plus agressivement les cartes utiles.
+    /// Niveau de jeu des bots.
+    /// Facile : se trompe souvent, ramasse peu, oublie de compléter la table.
+    /// Normal : joue son contrat proprement et évite de nourrir la table.
+    /// Difficile (« Expert » dans l'UI) : compte les cartes, lit les ramassages
+    /// adverses, choisit sa pose et garde ses cartes action pour le bon moment.
     /// </summary>
     public enum AIDifficulty
     {
@@ -19,8 +21,8 @@ namespace LevelUp.AI
     }
 
     /// <summary>
-    /// Intelligence artificielle heuristique pour un joueur bot.
-    /// Évalue la main, décide de poser le niveau, choisit la meilleure défausse.
+    /// Pilote d'un bot : joue son tour phase par phase avec des délais de
+    /// "réflexion", en déléguant chaque décision à <see cref="BotBrain"/>.
     ///
     /// Principe fondamental : toute action passe par <see cref="GameManager.ExecuteCommand"/>.
     /// L'IA emprunte exactement le même chemin que le joueur humain —
@@ -28,36 +30,80 @@ namespace LevelUp.AI
     /// </summary>
     public class AIPlayer : MonoBehaviour
     {
-        [SerializeField] private float _thinkDelay = 0.5f;
-        [SerializeField] private float _actionDelay = 0.3f;
+        [SerializeField] private float _thinkDelay = 0.55f;
+        [SerializeField] private float _actionDelay = 0.35f;
 
         private GameManager? _gameManager;
         private int _playerIndex = -1;
         private AIDifficulty _difficulty = AIDifficulty.Normal;
+        private float _delayFactor = 1f;
+        private BotBrain? _brain;
+        private Coroutine? _turnRoutine;
+        private int _lastDeckCount = -1;
 
         /// <summary>Siège joué par ce bot.</summary>
         public int PlayerIndex => _playerIndex;
 
         /// <summary>
-        /// Initialise l'IA avec les références nécessaires.
+        /// Initialise l'IA. <paramref name="delayFactor"/> règle la vitesse de jeu
+        /// (1 = normale, &lt; 1 = plus rapide, &gt; 1 = plus posée).
         /// </summary>
         public void Initialize(GameManager gameManager, int playerIndex,
-            AIDifficulty difficulty = AIDifficulty.Normal)
+            AIDifficulty difficulty = AIDifficulty.Normal, float delayFactor = 1f, int? seed = null)
         {
             _gameManager = gameManager;
             _playerIndex = playerIndex;
             _difficulty = difficulty;
+            _delayFactor = Mathf.Clamp(delayFactor, 0.2f, 3f);
+            // Graine imposée (donne du jour) : les bots jouent pareil pour tout le monde.
+            int baseSeed = seed ?? System.Environment.TickCount;
+            _brain = new BotBrain(gameManager, playerIndex, difficulty,
+                unchecked(baseSeed * 31 + playerIndex * 7919));
         }
 
         private void OnEnable()
         {
             EventBus.Subscribe<TurnStartedEvent>(OnTurnStarted);
+            EventBus.Subscribe<RoundStartedEvent>(OnRoundStarted);
+            EventBus.Subscribe<CardDiscardedEvent>(OnCardDiscarded);
+            EventBus.Subscribe<CardDrawnEvent>(OnCardDrawn);
+            EventBus.Subscribe<DeckChangedEvent>(OnDeckChanged);
         }
 
         private void OnDisable()
         {
             EventBus.Unsubscribe<TurnStartedEvent>(OnTurnStarted);
+            EventBus.Unsubscribe<RoundStartedEvent>(OnRoundStarted);
+            EventBus.Unsubscribe<CardDiscardedEvent>(OnCardDiscarded);
+            EventBus.Unsubscribe<CardDrawnEvent>(OnCardDrawn);
+            EventBus.Unsubscribe<DeckChangedEvent>(OnDeckChanged);
         }
+
+        // ────────────────────────────────────────────────────
+        //  MÉMOIRE PUBLIQUE (ce que tout joueur voit à la table)
+        // ────────────────────────────────────────────────────
+
+        private void OnRoundStarted(RoundStartedEvent evt)
+        {
+            _brain?.OnRoundStarted();
+            _lastDeckCount = -1;
+        }
+
+        private void OnCardDiscarded(CardDiscardedEvent evt) => _brain?.OnCardDiscarded(evt.PlayerIndex, evt.Card);
+
+        private void OnCardDrawn(CardDrawnEvent evt) =>
+            _brain?.OnCardDrawn(evt.PlayerIndex, evt.Card, evt.FromDiscard);
+
+        private void OnDeckChanged(DeckChangedEvent evt)
+        {
+            // Pioche qui remonte = défausses remélangées : la mémoire est périmée.
+            if (_lastDeckCount >= 0 && evt.CardsRemaining > _lastDeckCount) _brain?.OnDeckRecycled();
+            _lastDeckCount = evt.CardsRemaining;
+        }
+
+        // ────────────────────────────────────────────────────
+        //  TOUR
+        // ────────────────────────────────────────────────────
 
         /// <summary>
         /// Réagit au début d'un tour : si c'est le tour de ce bot, joue automatiquement.
@@ -70,7 +116,7 @@ namespace LevelUp.AI
             PlayerModel? player = _gameManager.GetCurrentPlayer();
             if (player == null || !player.IsAI) return;
 
-            StartCoroutine(PlayTurnCoroutine());
+            StartTurn();
         }
 
         /// <summary>
@@ -84,8 +130,27 @@ namespace LevelUp.AI
             if (_gameManager?.TurnManager == null) return;
             if (_gameManager.TurnManager.CurrentPlayerIndex != _playerIndex) return;
 
-            StartCoroutine(PlayTurnCoroutine());
+            StartTurn();
         }
+
+        private void StartTurn()
+        {
+            if (_turnRoutine != null) StopCoroutine(_turnRoutine);
+            _turnRoutine = StartCoroutine(PlayTurnCoroutine());
+        }
+
+        /// <summary>Vrai tant que c'est toujours le même tour de ce bot (même manche).</summary>
+        private bool StillMyTurn(int round)
+        {
+            if (_gameManager?.TurnManager == null) return false;
+            if (_gameManager.State != GameState.PlayerTurn) return false;
+            if (_gameManager.RoundNumber != round) return false;
+            if (_gameManager.TurnManager.CurrentPlayerIndex != _playerIndex) return false;
+            PlayerModel? me = _gameManager.GetCurrentPlayer();
+            return me != null && me.IsAI;
+        }
+
+        private WaitForSeconds Wait(float seconds) => new(seconds * _delayFactor);
 
         /// <summary>
         /// Joue un tour complet avec des délais pour simuler la réflexion.
@@ -94,300 +159,115 @@ namespace LevelUp.AI
         /// </summary>
         private IEnumerator PlayTurnCoroutine()
         {
-            if (_gameManager?.TurnManager == null) yield break;
-            if (_gameManager.TurnManager.CurrentPlayerIndex != _playerIndex) yield break;
+            if (_gameManager?.TurnManager == null || _brain == null) yield break;
+            int round = _gameManager.RoundNumber;
+            if (!StillMyTurn(round)) yield break;
 
             EventBus.Publish(new AIThinkingEvent { PlayerIndex = _playerIndex, IsThinking = true });
 
             // Phase 1 : Piocher (sautée si le tour a déjà dépassé cette phase)
-            yield return new WaitForSeconds(_thinkDelay);
-            if (_gameManager.TurnManager.CurrentPhase == TurnPhase.Draw)
+            yield return Wait(_thinkDelay);
+            if (StillMyTurn(round) && _gameManager.TurnManager.CurrentPhase == TurnPhase.Draw)
             {
                 DecideDraw();
             }
 
-            // Phase 2 : Tenter de poser le niveau
-            yield return new WaitForSeconds(_actionDelay);
-            if (_gameManager.TurnManager.CurrentPhase == TurnPhase.LayDown)
+            // Phase 2 : Poser le contrat si possible
+            yield return Wait(_actionDelay);
+            if (StillMyTurn(round) && _gameManager.TurnManager.CurrentPhase == TurnPhase.LayDown)
             {
                 DecideLayDown();
             }
 
-            // Phase 3 : Ajouter aux combinaisons si possible
-            if (_gameManager.TurnManager.CurrentPhase == TurnPhase.AddToMelds)
+            // Phase 3 : Compléter les combinaisons (une carte à la fois, lisible)
+            while (StillMyTurn(round) && _gameManager.TurnManager.CurrentPhase == TurnPhase.AddToMelds)
             {
-                yield return new WaitForSeconds(_actionDelay);
-                DecideAddToMelds();
+                yield return Wait(_actionDelay);
+                if (!StillMyTurn(round)) break;
+                if (!TryAddOneCard())
+                {
+                    if (StillMyTurn(round) && _gameManager.TurnManager.CurrentPhase == TurnPhase.AddToMelds)
+                    {
+                        _gameManager.ExecuteCommand(new SkipPhaseCommand(_playerIndex, TurnPhase.AddToMelds));
+                    }
+                    break;
+                }
             }
 
             // Phase 4 : Défausser
-            yield return new WaitForSeconds(_actionDelay);
-            if (_gameManager.TurnManager.CurrentPhase == TurnPhase.Discard)
+            yield return Wait(_actionDelay);
+            if (StillMyTurn(round) && _gameManager.TurnManager.CurrentPhase == TurnPhase.Discard)
             {
                 DecideDiscard();
             }
 
             EventBus.Publish(new AIThinkingEvent { PlayerIndex = _playerIndex, IsThinking = false });
+            _turnRoutine = null;
         }
 
         // ────────────────────────────────────────────────────
-        //  DÉCISIONS (lecture du modèle + envoi de commandes)
+        //  DÉCISIONS → COMMANDES
         // ────────────────────────────────────────────────────
 
-        /// <summary>
-        /// Décide d'où piocher : deck ou une défausse.
-        /// Privilégie la défausse si la carte visible aide à compléter le niveau.
-        /// </summary>
         private void DecideDraw()
         {
-            if (_gameManager?.DeckManager == null) return;
+            if (_gameManager == null || _brain == null) return;
 
-            PlayerModel player = _gameManager.TurnManager!.CurrentPlayer;
-            DeckManager deck = _gameManager.DeckManager;
-            bool drewFromDiscard = false;
-
-            // Facile : ne regarde jamais les défausses, pioche toujours au deck.
-            for (int i = 0; _difficulty != AIDifficulty.Easy && i < deck.DiscardPileCount; i++)
+            int pile = _brain.ChooseDrawPile();
+            if (pile >= 0)
             {
-                CardModel? topCard = deck.PeekDiscard(i);
-                if (!topCard.HasValue) continue;
-
-                if (IsCardUseful(topCard.Value, player))
-                {
-                    CommandResult result = _gameManager.ExecuteCommand(
-                        new DrawFromDiscardCommand(_playerIndex, i));
-                    if (result.Success)
-                    {
-                        drewFromDiscard = true;
-                        break;
-                    }
-                }
+                CommandResult result = _gameManager.ExecuteCommand(new DrawFromDiscardCommand(_playerIndex, pile));
+                if (result.Success) return;
             }
-
-            if (!drewFromDiscard)
-            {
-                _gameManager.ExecuteCommand(new DrawFromDeckCommand(_playerIndex));
-            }
+            _gameManager.ExecuteCommand(new DrawFromDeckCommand(_playerIndex));
         }
 
-        /// <summary>
-        /// Décide si le bot pose son niveau.
-        /// </summary>
         private void DecideLayDown()
         {
-            if (_gameManager == null) return;
+            if (_gameManager?.TurnManager == null || _brain == null) return;
 
-            PlayerModel player = _gameManager.TurnManager!.CurrentPlayer;
-
-            if (player.HasLaidDownThisRound)
-            {
-                _gameManager.ExecuteCommand(
-                    new SkipPhaseCommand(_playerIndex, TurnPhase.LayDown));
-                return;
-            }
-
-            if (LevelValidator.IsLevelComplete(player.Hand, player.CurrentLevel,
-                    _gameManager.Config, out List<Meld> melds))
+            List<Meld>? melds = _brain.ChooseLayDown();
+            if (melds != null)
             {
                 List<Meld> playerMelds = new();
                 foreach (Meld m in melds)
                 {
-                    playerMelds.Add(new Meld(m.Type, m.Cards, player.Index));
+                    playerMelds.Add(new Meld(m.Type, new List<CardModel>(m.Cards), _playerIndex));
                 }
-
-                _gameManager.ExecuteCommand(
-                    new LayDownLevelCommand(_playerIndex, playerMelds));
-            }
-            else
-            {
-                _gameManager.ExecuteCommand(
-                    new SkipPhaseCommand(_playerIndex, TurnPhase.LayDown));
-            }
-        }
-
-        /// <summary>
-        /// Tente d'ajouter des cartes aux combinaisons existantes.
-        /// </summary>
-        private void DecideAddToMelds()
-        {
-            if (_gameManager == null)
-            {
-                return;
-            }
-
-            PlayerModel player = _gameManager.TurnManager!.CurrentPlayer;
-
-            // Facile : oublie parfois de compléter les combinaisons posées.
-            if (_difficulty == AIDifficulty.Easy && Random.value < 0.4f)
-            {
-                _gameManager.ExecuteCommand(
-                    new SkipPhaseCommand(_playerIndex, TurnPhase.AddToMelds));
-                return;
-            }
-
-            bool addedAny = true;
-
-            while (addedAny && player.Hand.Count > 1)
-            {
-                addedAny = false;
-
-                foreach (PlayerModel otherPlayer in _gameManager.Players)
+                if (_gameManager.ExecuteCommand(new LayDownLevelCommand(_playerIndex, playerMelds)).Success)
                 {
-                    for (int m = 0; m < otherPlayer.LaidMelds.Count; m++)
-                    {
-                        for (int c = player.Hand.Count - 1; c >= 0; c--)
-                        {
-                            if (player.Hand.Count <= 1) break;
-
-                            CardModel card = player.Hand[c];
-                            CommandResult result = _gameManager.ExecuteCommand(
-                                new AddToMeldCommand(_playerIndex, card, otherPlayer.Index, m));
-
-                            if (result.Success)
-                            {
-                                addedAny = true;
-                                break;
-                            }
-                        }
-                    }
+                    return;
                 }
             }
 
-            _gameManager.ExecuteCommand(
-                new SkipPhaseCommand(_playerIndex, TurnPhase.AddToMelds));
+            if (_gameManager.TurnManager.CurrentPhase == TurnPhase.LayDown)
+            {
+                _gameManager.ExecuteCommand(new SkipPhaseCommand(_playerIndex, TurnPhase.LayDown));
+            }
         }
 
-        /// <summary>
-        /// Choisit la meilleure carte à défausser.
-        /// Stratégie : garder les cartes utiles pour le niveau, défausser les moins utiles.
-        /// </summary>
+        /// <summary>Pose une carte sur la table si une est jouable ; false sinon.</summary>
+        private bool TryAddOneCard()
+        {
+            if (_gameManager == null || _brain == null) return false;
+            if (!_brain.TryChooseAddToMeld(out CardModel card, out int owner, out int meld)) return false;
+            return _gameManager.ExecuteCommand(new AddToMeldCommand(_playerIndex, card, owner, meld)).Success;
+        }
+
         private void DecideDiscard()
         {
-            if (_gameManager == null) return;
+            if (_gameManager == null || _brain == null) return;
 
-            PlayerModel player = _gameManager.TurnManager!.CurrentPlayer;
-            if (player.Hand.Count == 0) return;
-
-            CardModel bestDiscard = player.Hand[0];
-            float bestScore = float.MaxValue;
-
-            foreach (CardModel card in player.Hand)
-            {
-                float score = EvaluateCardUsefulness(card, player);
-
-                if (card.IsAction && !card.IsWild)
-                {
-                    score -= 5f;
-                }
-
-                if (score < bestScore)
-                {
-                    bestScore = score;
-                    bestDiscard = card;
-                }
-            }
-
-            int targetIndex = -1;
-            if (bestDiscard.IsAction)
-            {
-                targetIndex = FindBestTarget(player);
-            }
+            PlayerModel? me = _gameManager.GetCurrentPlayer();
+            if (me == null || me.Hand.Count == 0) return;
 
             // ExecuteCommand gère automatiquement OnRoundEnd si la main est vide
-            _gameManager.ExecuteCommand(
-                new DiscardCommand(_playerIndex, bestDiscard, targetIndex));
-        }
+            DiscardCommand discard = _brain.ChooseDiscard();
+            if (_gameManager.ExecuteCommand(discard).Success) return;
 
-        // ────────────────────────────────────────────────────
-        //  HEURISTIQUES (lecture seule)
-        // ────────────────────────────────────────────────────
-
-        /// <summary>
-        /// Évalue l'utilité d'une carte pour le niveau actuel du joueur.
-        /// Score élevé = carte utile à garder.
-        /// </summary>
-        private float EvaluateCardUsefulness(CardModel card, PlayerModel player)
-        {
-            if (card.IsWild) return 10f;
-
-            // Facile : bruit d'évaluation — le bot se trompe régulièrement sur
-            // la valeur d'une carte et défausse parfois une carte utile.
-            float score = _difficulty == AIDifficulty.Easy
-                ? Random.Range(-4f, 4f)
-                : 0f;
-            int level = player.CurrentLevel;
-
-            List<List<LevelValidator.LevelRequirement>> reqs =
-                LevelValidator.GetRequirements(level, _gameManager?.Config);
-
-            if (reqs.Count == 0) return score;
-
-            foreach (List<LevelValidator.LevelRequirement> reqSet in reqs)
-            {
-                foreach (LevelValidator.LevelRequirement req in reqSet)
-                {
-                    switch (req.Type)
-                    {
-                        case MeldType.Run:
-                            int neighbors = player.Hand.Count(c =>
-                                c.Type == CardType.Normal &&
-                                System.Math.Abs(c.Value - card.Value) <= 1 &&
-                                c.Id != card.Id);
-                            score += neighbors * 2f;
-                            break;
-
-                        case MeldType.Set:
-                            int sameValue = player.Hand.Count(c =>
-                                c.Type == CardType.Normal &&
-                                c.Value == card.Value &&
-                                c.Id != card.Id);
-                            score += sameValue * 3f;
-                            break;
-
-                        case MeldType.Flush:
-                            int sameColor = player.Hand.Count(c =>
-                                c.Type == CardType.Normal &&
-                                c.Color == card.Color &&
-                                c.Id != card.Id);
-                            score += sameColor * 2f;
-                            break;
-                    }
-                }
-            }
-
-            return score;
-        }
-
-        private bool IsCardUseful(CardModel card, PlayerModel player)
-        {
-            // Difficile : ramasse plus agressivement dans les défausses.
-            float threshold = _difficulty == AIDifficulty.Hard ? 3f : 4f;
-            return EvaluateCardUsefulness(card, player) >= threshold;
-        }
-
-        /// <summary>
-        /// Trouve le meilleur joueur à cibler avec une carte action.
-        /// Cible le joueur le plus avancé en niveau.
-        /// </summary>
-        private int FindBestTarget(PlayerModel self)
-        {
-            if (_gameManager == null) return -1;
-
-            int bestTarget = -1;
-            int highestLevel = -1;
-
-            foreach (PlayerModel player in _gameManager.Players)
-            {
-                if (player.Index == self.Index) continue;
-
-                if (player.CurrentLevel > highestLevel)
-                {
-                    highestLevel = player.CurrentLevel;
-                    bestTarget = player.Index;
-                }
-            }
-
-            return bestTarget;
+            // Filet de sécurité : la décision a échoué (cas imprévu) → fin de tour simple.
+            IGameCommand? fallback = TurnAutoPlay.NextCommand(_gameManager);
+            if (fallback != null) _gameManager.ExecuteCommand(fallback);
         }
     }
 }

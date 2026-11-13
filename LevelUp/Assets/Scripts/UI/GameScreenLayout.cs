@@ -31,6 +31,8 @@ namespace LevelUp.UI
 
         // Top bar
         private TextMeshProUGUI? _roundText;
+        private GameObject? _rulesPill;
+        private TextMeshProUGUI? _rulesText;
         private readonly List<Image> _levelSegments = new();
         private TextMeshProUGUI? _levelValue;
         private Button? _pauseButton;
@@ -50,16 +52,37 @@ namespace LevelUp.UI
         private RectTransform? _contractRows;
         private readonly List<ContractRow> _contractRowPool = new();
 
+        /// <summary>Racine calée sur la safe area (pour y poser d'autres vues de jeu).</summary>
+        public RectTransform? Root => _root;
+
+        // Tapis (teinte au choix), invitation sur la pioche, consigne d'étape, toast.
+        private Canvas? _canvas;
+        private Image? _felt;
+        private Image? _feltLight;
+        private Image? _deckRing;
+        private TextMeshProUGUI? _phaseHint;
+        private Image? _toastEdge;
+        private HUDView? _hud;
+        private TurnPhase _phase = TurnPhase.Draw;
+        private bool _localTurn;
+        private float _pulse;
+
         /// <summary>Construit la mise en page. À appeler après SafeAreaFitter.Wrap.</summary>
         public void Build(Canvas canvas, RectTransform safeRoot, GameManager? gameManager)
         {
             _gameManager = gameManager;
             _root = safeRoot;
+            _canvas = canvas;
             UISkin.EnsureFonts();
 
             ConfigureScaler(canvas);
+            _hud = safeRoot.GetComponentInChildren<HUDView>(true);
+            if (_hud != null) _hud.StatusStyleChanged += OnStatusStyle;
 
             Image felt = BuildFelt(safeRoot);
+            _felt = felt;
+            _feltLight = felt.transform.Find("Light")?.GetComponent<Image>();
+            ApplyFelt();
             BuildTopBar(safeRoot);
             PlacePlayersRow(safeRoot);
             PlaceTableAndPiles(safeRoot, felt.rectTransform);
@@ -85,10 +108,56 @@ namespace LevelUp.UI
             EventBus.Subscribe<LevelLaidDownEvent>(OnLevelLaidDown);
             EventBus.Subscribe<HandChangedEvent>(OnHandChanged);
             EventBus.Subscribe<GameStartedEvent>(OnGameStarted);
+            EventBus.Subscribe<RoundSummaryEvent>(OnRoundSummary);
+            GameSettings.SettingsChanged += OnSettingsChanged;
+        }
+
+        private void OnSettingsChanged()
+        {
+            if (_canvas != null) ConfigureScaler(_canvas);
+            ApplyFelt();
+            RefreshContract();
+            RefreshPhaseHint();
+        }
+
+        private void ApplyFelt()
+        {
+            int v = GameSettings.Felt;
+            if (_felt != null) _felt.color = UISkin.FeltFor(v);
+            if (_feltLight != null) _feltLight.color = UISkin.WithAlpha(UISkin.FeltCenterFor(v), 0.9f);
+        }
+
+        private void OnStatusStyle(bool error)
+        {
+            if (_toastEdge != null)
+            {
+                _toastEdge.color = error ? UISkin.WithAlpha(UISkin.Hex(0xD96C5F), 0.75f)
+                    : UISkin.WithAlpha(UISkin.AccentLight, 0.4f);
+            }
+        }
+
+        private void Update()
+        {
+            // Invitation sur la pioche pendant l'étape « Piocher » du joueur local.
+            if (_deckRing == null) return;
+            bool show = _localTurn && _phase == TurnPhase.Draw && GameSettings.HintSteps
+                        && _gameManager != null && _gameManager.State == GameState.PlayerTurn;
+            if (!show)
+            {
+                if (_deckRing.enabled) _deckRing.enabled = false;
+                return;
+            }
+            if (!_deckRing.enabled) _deckRing.enabled = true;
+            _pulse += Time.unscaledDeltaTime;
+            float a = GameSettings.ReducedMotion ? 0.8f : 0.45f + 0.4f * (0.5f + 0.5f * Mathf.Sin(_pulse * 3.2f));
+            _deckRing.color = UISkin.WithAlpha(UISkin.AccentLight, a);
         }
 
         private void OnDestroy()
         {
+            GameSettings.SettingsChanged -= OnSettingsChanged;
+            if (_hud != null) _hud.StatusStyleChanged -= OnStatusStyle;
+            EventBus.Unsubscribe<RoundSummaryEvent>(OnRoundSummary);
             EventBus.Unsubscribe<RoundStartedEvent>(OnRoundStarted);
             EventBus.Unsubscribe<TurnStartedEvent>(OnTurnStarted);
             EventBus.Unsubscribe<TurnPhaseChangedEvent>(OnPhaseChanged);
@@ -116,7 +185,11 @@ namespace LevelUp.UI
             CanvasScaler? scaler = canvas.GetComponent<CanvasScaler>();
             if (scaler == null) return;
             scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
-            scaler.referenceResolution = new Vector2(1920f, 1080f);
+            // Interface « grande » (téléphones) : la même maquette, agrandie de
+            // 30 % — il y a moins d'unités à l'écran, la mise en page (ancrée sur
+            // les bords) les répartit, et chaque texte / bouton est 30 % plus grand.
+            float factor = GameSettings.UiScaleFactor;
+            scaler.referenceResolution = new Vector2(1920f / factor, 1080f / factor);
             scaler.screenMatchMode = CanvasScaler.ScreenMatchMode.MatchWidthOrHeight;
             // Écran plus large que 16:9 (téléphones) : on cale la hauteur à 1080
             // et la largeur s'étend ; plus étroit (tablettes) : on cale la largeur.
@@ -192,7 +265,7 @@ namespace LevelUp.UI
             GameObject left = new("Left", typeof(RectTransform));
             left.transform.SetParent(crt, false);
             RectTransform lrt = (RectTransform)left.transform;
-            UISkin.Place(lrt, new Vector2(0f, 0.5f), new Vector2(0f, 0.5f), Vector2.zero, new Vector2(400f, 48f));
+            UISkin.Place(lrt, new Vector2(0f, 0.5f), new Vector2(0f, 0.5f), Vector2.zero, new Vector2(640f, 48f));
             UISkin.HRow(left, 16f, null, TextAnchor.MiddleLeft);
 
             TextMeshProUGUI logo = UISkin.Text(left.transform, "Logo", "Level<color=#D8B66E>Up</color>", 26f,
@@ -204,6 +277,15 @@ namespace LevelUp.UI
             UISkin.Outline(pill.rectTransform, 15f, 1f, UISkin.WithAlpha(UISkin.Accent, 0.35f))
                 .gameObject.AddComponent<LayoutElement>().ignoreLayout = true;
             _roundText = UISkin.Text(pill.transform, "Text", "Manche 1", 13f, UISkin.AccentPale, TextWeight.SemiBold);
+
+            // Règles qui diffèrent du jeu classique (jokers, minuteur…) : rappel discret.
+            Image rules = UISkin.Rect(left.transform, "RulesPill", UISkin.Glass, 15f);
+            UISkin.HRow(rules.gameObject, 0f, new RectOffset(12, 12, 6, 6), TextAnchor.MiddleCenter);
+            UISkin.Outline(rules.rectTransform, 15f, 1f, UISkin.Line)
+                .gameObject.AddComponent<LayoutElement>().ignoreLayout = true;
+            _rulesText = UISkin.Text(rules.transform, "Text", "", 13f, UISkin.TextMuted, TextWeight.SemiBold);
+            _rulesPill = rules.gameObject;
+            _rulesPill.SetActive(false);
 
             // Centre : niveau du joueur local
             GameObject center = new("Level", typeof(RectTransform));
@@ -259,17 +341,36 @@ namespace LevelUp.UI
             return btn;
         }
 
+        /// <summary>Barre de niveau : autant de segments que de niveaux dans la partie.</summary>
         private void SetLevel(int level)
         {
+            int total = GameSession.Rules.LevelsToWin;
+            int shown = Mathf.Min(level, total);
             for (int i = 0; i < _levelSegments.Count; i++)
             {
                 int l = i + 1;
-                _levelSegments[i].color = l < level ? UISkin.AccentLight : l == level ? UISkin.Accent : UISkin.SurfaceRaised;
+                bool inGame = l <= total;
+                if (_levelSegments[i].gameObject.activeSelf != inGame) _levelSegments[i].gameObject.SetActive(inGame);
+                _levelSegments[i].color = l < shown ? UISkin.AccentLight : l == shown ? UISkin.Accent : UISkin.SurfaceRaised;
             }
             if (_levelValue != null)
             {
-                _levelValue.text = $"{level}<color=#A7A198><size=18> / {Constants.MaxLevel}</size></color>";
+                _levelValue.text = $"{shown}<color=#A7A198><size=18> / {total}</size></color>";
             }
+        }
+
+        private void RefreshRulesPill()
+        {
+            if (_rulesPill == null || _rulesText == null) return;
+            string tags = MatchRulesText.ShortTags(GameSession.Rules);
+            _rulesText.text = tags;
+            _rulesPill.SetActive(tags.Length > 0);
+            if (tags.Length == 0) return;
+
+            // Largeur bornée : la pastille ne doit jamais toucher la barre de niveau.
+            _rulesText.overflowMode = TextOverflowModes.Ellipsis;
+            float width = Mathf.Min(_rulesText.GetPreferredValues(tags).x + 2f, 300f);
+            UISkin.Size(_rulesText.gameObject, width);
         }
 
         // ═══════════════════════════════════════════════════════════
@@ -300,6 +401,11 @@ namespace LevelUp.UI
                 UISkin.Place(deck, new Vector2(0f, 0.5f), new Vector2(0.5f, 0.5f),
                     new Vector2(64f + 60f, 16f), new Vector2(120f, 180f));
                 deck.localRotation = Quaternion.identity;
+
+                // Anneau d'invitation (pulse pendant l'étape « Piocher » du joueur local).
+                _deckRing = UISkin.Outline(deck, 17f, 2.5f, UISkin.AccentLight, "DeckRing");
+                UISkin.Stretch(_deckRing.rectTransform, -6f);
+                _deckRing.enabled = false;
 
                 _deckCaption = UISkin.Text(felt, "DeckCaption", "Pioche", 13f, UISkin.TextMuted,
                     TextWeight.SemiBold, TextAlignmentOptions.Center);
@@ -392,7 +498,78 @@ namespace LevelUp.UI
                     TextWeight.SemiBold);
                 _steps.Add(new StepPill { Bg = pill, Dot = dot, Num = num, Check = check, Label = label });
             }
+
+            // « Défausser » se touche : passe directement à la défausse (sans poser
+            // ni compléter), puis on touche la carte à jeter.
+            Image discardStep = _steps[3].Bg;
+            discardStep.raycastTarget = true;
+            Button skip = discardStep.gameObject.AddComponent<Button>();
+            skip.transition = Selectable.Transition.None;
+            skip.onClick.AddListener(() => _input?.SkipToDiscard());
+
+            // Consigne de l'étape en cours, juste au-dessus des étapes.
+            _phaseHint = UISkin.Text(root, "PhaseHint", "", 15f, UISkin.TextMuted, TextWeight.Medium,
+                TextAlignmentOptions.Center);
+            UISkin.Place(_phaseHint.rectTransform, new Vector2(0.5f, 0f), new Vector2(0.5f, 0f),
+                new Vector2(0f, StepperBottom + 60f), new Vector2(1100f, 24f));
+            _phaseHint.richText = true;
+
             SetStep(TurnPhase.Draw, active: false);
+        }
+
+        /// <summary>Consigne courte de l'étape en cours (aides de jeu activées).</summary>
+        private void RefreshPhaseHint()
+        {
+            if (_phaseHint == null) return;
+            TurnManager? tm = _gameManager?.TurnManager;
+            if (tm == null || _gameManager!.State != GameState.PlayerTurn || !GameSettings.HintSteps)
+            {
+                _phaseHint.text = "";
+                return;
+            }
+
+            if (!_localTurn)
+            {
+                _phaseHint.text = $"Tour de {tm.CurrentPlayer.Name}…  <color=#7E7A73>tu peux ranger ta main</color>";
+                return;
+            }
+
+            PlayerModel me = tm.CurrentPlayer;
+            _phaseHint.text = _phase switch
+            {
+                TurnPhase.Draw => "Pioche : touche la pioche, ou une défausse pour prendre sa carte",
+                // Étape Poser : le panneau de sélection (juste au-dessus) donne déjà
+                // la consigne — pas de second texte dessous (ils se chevauchaient).
+                TurnPhase.LayDown => "",
+                TurnPhase.AddToMelds => me.HasLaidDownThisRound
+                    ? GameSettings.HintPlayable
+                        ? "Complète la table : glisse une carte, ou touche une carte marquée « + »"
+                        : "Complète la table en y glissant tes cartes, ou touche « Défausser »"
+                    : "",
+                TurnPhase.Discard => GameSettings.QuickDiscard
+                    ? "Touche une carte pour la défausser"
+                    : "Touche une carte, puis touche-la encore pour la défausser",
+                _ => ""
+            };
+        }
+
+        /// <summary>« Défausser » n'est touchable que lorsqu'il permet de sauter des étapes.</summary>
+        private void RefreshSkipStep()
+        {
+            if (_steps.Count < 4) return;
+            bool canSkip = _localTurn && (_phase == TurnPhase.LayDown || _phase == TurnPhase.AddToMelds);
+            Button? b = _steps[3].Bg.GetComponent<Button>();
+            if (b != null) b.interactable = canSkip;
+            if (canSkip) _steps[3].Label.color = UISkin.TextColor;
+        }
+
+        private void UpdateTurnContext(int playerIndex, TurnPhase phase)
+        {
+            _phase = phase;
+            _localTurn = _gameManager != null && playerIndex >= 0 && playerIndex < _gameManager.Players.Count
+                         && GameSession.IsLocalHuman(_gameManager.Players[playerIndex]);
+            RefreshPhaseHint();
+            RefreshSkipStep();
         }
 
         private void SetStep(TurnPhase phase, bool active)
@@ -464,7 +641,7 @@ namespace LevelUp.UI
             {
                 if (_input != null && _input.SelectSuggestedLayDown())
                 {
-                    ShowHint("Touche la table pour poser");
+                    ShowHint("Touche « Poser » pour poser ton niveau");
                 }
             });
             _prepareButton = prep.gameObject;
@@ -479,8 +656,7 @@ namespace LevelUp.UI
 
         private void ShowHint(string message)
         {
-            HUDView? hud = FindObjectOfType<HUDView>();
-            hud?.ShowStatus(message);
+            _hud?.ShowStatus(message);
         }
 
         private ContractRow GetContractRow(int index)
@@ -525,18 +701,21 @@ namespace LevelUp.UI
             List<LevelValidator.LevelRequirement> reqs = sets.Count > 0 ? sets[0] : new List<LevelValidator.LevelRequirement>();
             List<ContractProgress.Entry> entries = ContractProgress.Evaluate(local.Hand, reqs);
             bool laid = local.HasLaidDownThisRound;
+            // Sans l'aide « détection du contrat », la carte rappelle seulement les
+            // exigences : pas de "2/3" ni de coche tant que le contrat n'est pas posé.
+            bool showProgress = GameSettings.HintContract;
 
             for (int i = 0; i < _contractRowPool.Count; i++) _contractRowPool[i].Root.SetActive(false);
             for (int i = 0; i < entries.Count; i++)
             {
                 ContractRow row = GetContractRow(i);
                 ContractProgress.Entry e = entries[i];
-                bool done = laid || e.IsMet;
+                bool done = laid || (showProgress && e.IsMet);
                 string name = ContractCatalog.Name(e.Requirement);
                 row.Root.SetActive(true);
                 row.Label.text = char.ToUpperInvariant(name[0]) + name.Substring(1);
                 int have = laid ? e.Requirement.CardCount : Mathf.Min(e.Have, e.Requirement.CardCount);
-                row.Progress.text = laid ? "posé" : $"{have}/{e.Requirement.CardCount}";
+                row.Progress.text = laid ? "posé" : showProgress ? $"{have}/{e.Requirement.CardCount}" : "";
                 row.Box.color = done ? UISkin.Success : UISkin.SurfaceRaised;
                 row.Ring.enabled = !done;
                 row.Check.gameObject.SetActive(done);
@@ -583,7 +762,7 @@ namespace LevelUp.UI
         //  HUD : seuls les messages de statut restent (toast central)
         // ═══════════════════════════════════════════════════════════
 
-        private static void RestyleHud(RectTransform root)
+        private void RestyleHud(RectTransform root)
         {
             RectTransform? hud = Find(root, "HUD");
             if (hud == null) return;
@@ -623,7 +802,7 @@ namespace LevelUp.UI
             UISkin.SetRounded(pimg, 24f);
             pimg.color = UISkin.WithAlpha(UISkin.Surface, 0.94f);
             pimg.raycastTarget = false;
-            UISkin.Outline(prt, 24f, 1f, UISkin.WithAlpha(UISkin.AccentLight, 0.4f));
+            _toastEdge = UISkin.Outline(prt, 24f, 1.5f, UISkin.WithAlpha(UISkin.AccentLight, 0.4f));
 
             TextMeshProUGUI front = UISkin.Text(status, "Front", "", 30f, Color.white, TextWeight.Display,
                 TextAlignmentOptions.Center);
@@ -642,6 +821,7 @@ namespace LevelUp.UI
         {
             RefreshLocalLevel();
             RefreshContract();
+            RefreshRulesPill();
         }
 
         private void OnRoundStarted(RoundStartedEvent evt)
@@ -656,12 +836,22 @@ namespace LevelUp.UI
             SetStep(evt.Phase, active: true);
             RefreshLocalLevel();
             RefreshContract();
+            UpdateTurnContext(evt.PlayerIndex, evt.Phase);
         }
 
         private void OnPhaseChanged(TurnPhaseChangedEvent evt)
         {
             SetStep(evt.NewPhase, active: true);
             RefreshContract();
+            UpdateTurnContext(evt.PlayerIndex, evt.NewPhase);
+        }
+
+        private void OnRoundSummary(RoundSummaryEvent evt)
+        {
+            _localTurn = false;
+            SetStep(TurnPhase.Draw, active: false);
+            if (_phaseHint != null) _phaseHint.text = "";
+            RefreshSkipStep();
         }
 
         private void OnDeckChanged(DeckChangedEvent evt)
@@ -679,7 +869,9 @@ namespace LevelUp.UI
 
         private void OnHandChanged(HandChangedEvent evt)
         {
-            if (evt.PlayerIndex == GameSession.LocalPlayerIndex) RefreshContract();
+            if (evt.PlayerIndex != GameSession.LocalPlayerIndex) return;
+            RefreshContract();
+            if (_localTurn && _phase == TurnPhase.LayDown) RefreshPhaseHint();
         }
 
         private void RefreshLocalLevel()

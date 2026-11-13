@@ -37,11 +37,14 @@ namespace LevelUp.UI
         private int _draggedOriginalIndex = -1;
         private int _reorderInsertIndex = -1;
 
-        // Idle breathing
-        private float _breathTime;
+        // Vrai quand toutes les cartes sont à leur place : plus rien à écrire.
+        private bool _settled;
 
         // Deal cascade
         private bool _animatingDeal;
+
+        /// <summary>Prefab de carte (partagé avec les cartes « en vol »).</summary>
+        public GameObject? CardPrefab => _cardPrefab;
 
         /// <summary>Carte unique sélectionnée (pour défausse).</summary>
         public CardView? SelectedCard => _selectedCards.Count == 1 ? _selectedCards[0] : null;
@@ -114,6 +117,9 @@ namespace LevelUp.UI
         /// d'un coup d'œil dans quel ordre est sa main.
         /// </summary>
         public void SetActiveSort(bool byValue) => SetActiveSort(byValue, highlight: true);
+
+        /// <summary>Surbrillance du tri mémorisé : 0 = ordre libre (aucun), 1 = valeur, 2 = couleur.</summary>
+        public void SetSortMode(int mode) => SetActiveSort(mode == 1, highlight: mode != 0);
 
         private void SetActiveSort(bool byValue, bool highlight)
         {
@@ -214,9 +220,8 @@ namespace LevelUp.UI
 
         private void Update()
         {
-            _breathTime += Time.deltaTime;
             UpdateHover();
-            LerpCardsToTarget();
+            if (!_settled) LerpCardsToTarget();
         }
 
         /// <summary>
@@ -273,13 +278,16 @@ namespace LevelUp.UI
         }
 
         /// <summary>
-        /// Lerp smooth + idle breathing.
+        /// Rapproche chaque carte de sa cible (amortissement exponentiel). Une
+        /// fois toutes les cartes arrivées, plus aucune écriture : le canvas de
+        /// la main ne se redessine plus tant que rien ne bouge (batterie mobile).
         /// </summary>
         private void LerpCardsToTarget()
         {
             // Amortissement exponentiel : convergence identique à 30 et 144 fps
             // (un Lerp(a, b, deltaTime * k) brut est dépendant du framerate).
             float dt = 1f - Mathf.Exp(-Constants.CardLerpSpeed * Time.deltaTime);
+            bool allSettled = !_animatingDeal && !_animatingDraw && _draggedCard == null;
 
             for (int i = 0; i < _cardViews.Count; i++)
             {
@@ -288,34 +296,27 @@ namespace LevelUp.UI
                 if (i >= _targetPositions.Count) break;
 
                 RectTransform rt = card.RectTransform;
-
-                // Idle breathing : sin wave légère par carte
-                float breathOffset = Mathf.Sin(_breathTime * 1.8f + i * 0.6f) * 2.5f;
-                float breathScale = 1f + Mathf.Sin(_breathTime * 1.2f + i * 0.4f) * 0.005f;
-
                 Vector2 targetPos = _targetPositions[i];
-                // N'appliquer le breathing que si pas hovered/selected
-                if (i != _hoveredIndex && !card.IsSelected)
-                {
-                    targetPos.y += breathOffset;
-                }
+                Vector3 targetScale = _targetScales[i];
+                float targetAngle = _targetRotations[i];
 
-                // Position
-                rt.anchoredPosition = Vector2.Lerp(rt.anchoredPosition, targetPos, dt);
-
-                // Rotation
                 float currentAngle = rt.localEulerAngles.z;
                 if (currentAngle > 180f) currentAngle -= 360f;
-                float newAngle = Mathf.Lerp(currentAngle, _targetRotations[i], dt);
-                rt.localRotation = Quaternion.Euler(0, 0, newAngle);
 
-                // Scale (avec breathing subtil)
-                Vector3 targetScale = _targetScales[i];
-                if (i != _hoveredIndex && !card.IsSelected)
+                bool arrived = (rt.anchoredPosition - targetPos).sqrMagnitude < 0.04f
+                               && Mathf.Abs(currentAngle - targetAngle) < 0.05f
+                               && Mathf.Abs(rt.localScale.x - targetScale.x) < 0.0015f;
+                if (arrived)
                 {
-                    targetScale *= breathScale;
+                    if (rt.anchoredPosition != targetPos) rt.anchoredPosition = targetPos;
                 }
-                rt.localScale = Vector3.Lerp(rt.localScale, targetScale, dt);
+                else
+                {
+                    allSettled = false;
+                    rt.anchoredPosition = Vector2.Lerp(rt.anchoredPosition, targetPos, dt);
+                    rt.localRotation = Quaternion.Euler(0, 0, Mathf.Lerp(currentAngle, targetAngle, dt));
+                    rt.localScale = Vector3.Lerp(rt.localScale, targetScale, dt);
+                }
 
                 // Z-order : ne toucher à la hiérarchie que si elle change vraiment.
                 // SetSiblingIndex force un rebuild complet de la géométrie du Canvas,
@@ -328,6 +329,8 @@ namespace LevelUp.UI
                     rt.SetSiblingIndex(desiredIndex);
                 }
             }
+
+            _settled = allSettled;
         }
 
         /// <summary>
@@ -335,6 +338,7 @@ namespace LevelUp.UI
         /// </summary>
         private void RecalculateTargets()
         {
+            _settled = false;
             int count = _cardViews.Count;
             _targetPositions.Clear();
             _targetRotations.Clear();
@@ -477,47 +481,92 @@ namespace LevelUp.UI
 
             if (_cardPrefab == null || _handContainer == null) return;
 
-            // Reduire le surplus.
-            while (_cardViews.Count > cards.Count)
+            // Chaque carte garde SA vue (retrouvée par identifiant) : après une
+            // défausse ou une pose, les cartes restantes glissent vers leur nouvelle
+            // place au lieu de changer de contenu sur place (« téléportation »).
+            _viewById.Clear();
+            _spareViews.Clear();
+            foreach (CardView cv in _cardViews)
             {
-                int last = _cardViews.Count - 1;
-                if (_cardViews[last] != null) Destroy(_cardViews[last].gameObject);
-                _cardViews.RemoveAt(last);
+                if (cv == null) continue;
+                if (!_viewById.ContainsKey(cv.CardModel.Id)) _viewById[cv.CardModel.Id] = cv;
+                else _spareViews.Add(cv);
             }
 
-            // Reconfigurer les existantes + instancier le déficit.
+            _nextViews.Clear();
+            _freshViews.Clear();
             for (int i = 0; i < cards.Count; i++)
             {
-                if (i < _cardViews.Count && _cardViews[i] != null)
+                if (!dealAnimation && _viewById.TryGetValue(cards[i].Id, out CardView kept))
                 {
-                    _cardViews[i].Setup(cards[i], faceUp: true);
+                    _viewById.Remove(cards[i].Id);
+                    kept.Setup(cards[i], faceUp: true); // réinitialise sélection / survol
+                    _nextViews.Add(kept);
+                    continue;
+                }
+                _nextViews.Add(null!); // complété ci-dessous
+            }
+
+            // Vues sans carte : recyclées pour les nouvelles cartes, sinon détruites.
+            foreach (CardView leftover in _viewById.Values) _spareViews.Add(leftover);
+            int spare = 0;
+            for (int i = 0; i < cards.Count; i++)
+            {
+                if (_nextViews[i] != null) continue;
+                CardView view;
+                if (spare < _spareViews.Count)
+                {
+                    view = _spareViews[spare++];
                 }
                 else
                 {
                     GameObject cardObj = Instantiate(_cardPrefab, _handContainer);
-                    CardView cardView = cardObj.GetComponent<CardView>();
-                    if (cardView == null)
-                    {
-                        Destroy(cardObj);
-                        continue;
-                    }
-                    cardView.Setup(cards[i], faceUp: true);
-                    if (i < _cardViews.Count) _cardViews[i] = cardView;
-                    else _cardViews.Add(cardView);
+                    view = cardObj.GetComponent<CardView>();
                 }
+                view.Setup(cards[i], faceUp: true);
+                _nextViews[i] = view;
+                _freshViews.Add(view);
+            }
+            for (int i = spare; i < _spareViews.Count; i++)
+            {
+                if (_spareViews[i] != null) Destroy(_spareViews[i].gameObject);
             }
 
+            _cardViews.Clear();
+            _cardViews.AddRange(_nextViews);
             RecalculateTargets();
 
             if (dealAnimation && _animController != null)
             {
                 StartCoroutine(DealCascadeCoroutine());
             }
-            else
+            else if (!_hasLaidOut)
             {
                 ApplyTargetsInstantly();
             }
+            else
+            {
+                // Les cartes conservées glissent (LerpCardsToTarget) ; une carte
+                // apparue hors pioche (+2 subi, reprise) se pose directement.
+                for (int i = 0; i < _cardViews.Count && i < _targetPositions.Count; i++)
+                {
+                    if (!_freshViews.Contains(_cardViews[i])) continue;
+                    RectTransform rt = _cardViews[i].RectTransform;
+                    rt.anchoredPosition = _targetPositions[i];
+                    rt.localRotation = Quaternion.Euler(0, 0, _targetRotations[i]);
+                    rt.localScale = _targetScales[i];
+                    _cardViews[i].SetAlpha(1f);
+                }
+            }
+            _hasLaidOut = true;
         }
+
+        // Tampons de RefreshHand (aucune allocation après le premier appel).
+        private readonly Dictionary<int, CardView> _viewById = new();
+        private readonly List<CardView> _spareViews = new();
+        private readonly List<CardView> _nextViews = new();
+        private readonly List<CardView> _freshViews = new();
+        private bool _hasLaidOut;
 
         /// <summary>
         /// Deal cascade : cartes arrivent une par une depuis le deck.
@@ -564,10 +613,34 @@ namespace LevelUp.UI
             FlushPendingHand();
         }
 
+        /// <summary>Fin de l'animation d'une carte piochée (le tri mémorisé peut s'appliquer).</summary>
+        public event System.Action? DrawAnimationFinished;
+
+        /// <summary>Vrai pendant l'arrivée d'une carte piochée.</summary>
+        public bool IsAnimatingDraw => _animatingDraw;
+
         /// <summary>
-        /// Ajoute une carte avec animation depuis le deck.
+        /// Position et échelle monde d'une carte de la main (départ des
+        /// trajectoires vers la table ou la défausse). Faux si absente.
         /// </summary>
-        public void AddCardWithAnimation(CardModel card)
+        public bool TryGetCardOrigin(int cardId, out CardOrigin origin)
+        {
+            foreach (CardView cv in _cardViews)
+            {
+                if (cv == null || cv.CardModel.Id != cardId) continue;
+                RectTransform rt = cv.RectTransform;
+                origin = new CardOrigin(rt.position, rt.lossyScale.x);
+                return true;
+            }
+            origin = default;
+            return false;
+        }
+
+        /// <summary>
+        /// Ajoute une carte avec animation depuis le paquet, ou depuis
+        /// <paramref name="fromWorld"/> (carte ramassée sur une défausse).
+        /// </summary>
+        public void AddCardWithAnimation(CardModel card, Vector3? fromWorld = null)
         {
             if (_cardPrefab == null || _handContainer == null) return;
 
@@ -592,12 +665,14 @@ namespace LevelUp.UI
                 {
                     _animatingDraw = false;
                     FlushPendingHand();
-                });
+                    DrawAnimationFinished?.Invoke();
+                }, fromWorld);
             }
             else
             {
                 _animatingDraw = false;
                 FlushPendingHand();
+                DrawAnimationFinished?.Invoke();
             }
         }
 
@@ -610,6 +685,7 @@ namespace LevelUp.UI
                 rt.localRotation = Quaternion.Euler(0, 0, _targetRotations[i]);
                 rt.localScale = _targetScales[i];
                 rt.SetSiblingIndex(i);
+                _cardViews[i].SetAlpha(1f);
             }
         }
 
@@ -816,7 +892,15 @@ namespace LevelUp.UI
             if (RectTransformUtility.ScreenPointToLocalPointInRectangle(
                     _handContainer, screenPosition, null, out Vector2 localPoint))
             {
-                _draggedCard.RectTransform.anchoredPosition = localPoint - _dragOffset;
+                RectTransform rt = _draggedCard.RectTransform;
+                Vector2 target = localPoint - _dragOffset;
+                // Léger tilt dans le sens du mouvement (la carte « traîne » derrière le doigt).
+                float dx = target.x - rt.anchoredPosition.x;
+                float tilt = GameSettings.ReducedMotion ? 0f : Mathf.Clamp(-dx * 0.5f, -12f, 12f);
+                float current = rt.localEulerAngles.z;
+                if (current > 180f) current -= 360f;
+                rt.localRotation = Quaternion.Euler(0f, 0f, Mathf.Lerp(current, tilt, 0.25f));
+                rt.anchoredPosition = target;
             }
         }
 

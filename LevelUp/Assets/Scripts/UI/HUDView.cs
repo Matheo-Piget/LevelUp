@@ -243,13 +243,32 @@ namespace LevelUp.UI
             text.fontStyle = style;
         }
 
+        // File des messages : un message arrivé pendant qu'un autre vient de
+        // s'afficher attend son tour (au lieu de l'écraser dans la même frame).
+        private const float MinVisibleSeconds = 1.1f;
+        private const int MaxQueued = 3;
+        private readonly Queue<(string Text, bool Error)> _queue = new();
+        private float _shownFor;
+
+        /// <summary>Le toast s'affiche (vrai = erreur) : le layout l'habille en conséquence.</summary>
+        public event System.Action<bool>? StatusStyleChanged;
+
         private void Update()
         {
+            _shownFor += Time.unscaledDeltaTime;
+
+            // Message en attente : affiché dès que le précédent a été lu.
+            if (_queue.Count > 0 && _shownFor >= MinVisibleSeconds)
+            {
+                (string text, bool error) = _queue.Dequeue();
+                Display(text, error);
+            }
+
             if (_statusTimer > 0f)
             {
-                _statusTimer -= Time.deltaTime;
+                _statusTimer -= Time.unscaledDeltaTime;
 
-                // Fade out progressif dans la dernière seconde
+                // Fade out progressif dans la dernière demi-seconde
                 if (_statusTimer <= 0.5f && _statusCanvasGroup != null)
                 {
                     _statusCanvasGroup.alpha = Mathf.Max(0f, _statusTimer / 0.5f);
@@ -262,11 +281,37 @@ namespace LevelUp.UI
             }
         }
 
+        /// <summary>Message d'erreur (action refusée) : toast teinté, placé au même endroit.</summary>
+        public void ShowError(string message) => ShowStatus(message, error: true);
+
         /// <summary>
-        /// Affiche un message de statut avec pop-in animé et slide.
+        /// Affiche un message de statut avec pop-in animé et slide. Si un message
+        /// vient d'apparaître, celui-ci attend son tour (file courte, sans doublon).
         /// </summary>
-        public void ShowStatus(string message)
+        public void ShowStatus(string message) => ShowStatus(message, error: false);
+
+        public void ShowStatus(string message, bool error)
         {
+            if (string.IsNullOrEmpty(message)) return;
+            bool busy = _statusTimer > 0f && _shownFor < MinVisibleSeconds;
+            if (busy)
+            {
+                if (_statusText != null && _statusText.text == message) return;
+                foreach ((string text, bool _) in _queue)
+                {
+                    if (text == message) return;
+                }
+                if (_queue.Count >= MaxQueued) _queue.Dequeue();
+                _queue.Enqueue((message, error));
+                return;
+            }
+            Display(message, error);
+        }
+
+        private void Display(string message, bool error)
+        {
+            _shownFor = 0f;
+            StatusStyleChanged?.Invoke(error);
             if (_statusText != null)
             {
                 _statusText.text = message;
@@ -319,7 +364,7 @@ namespace LevelUp.UI
             {
                 return _playerNames[playerIndex];
             }
-            return $"Player {playerIndex + 1}";
+            return $"Joueur {playerIndex + 1}";
         }
 
         private void OnPhaseChanged(TurnPhaseChangedEvent evt)
@@ -387,10 +432,10 @@ namespace LevelUp.UI
         {
             if (_roundNumberText != null)
             {
-                _roundNumberText.text = $"ROUND  {evt.RoundNumber}";
+                _roundNumberText.text = $"MANCHE  {evt.RoundNumber}";
                 _roundNumberText.color = Constants.TextMuted;
             }
-            ShowStatus($"ROUND {evt.RoundNumber}");
+            ShowStatus($"Manche {evt.RoundNumber}");
         }
 
         private void OnLevelLaidDown(LevelLaidDownEvent evt)
@@ -408,22 +453,24 @@ namespace LevelUp.UI
             ShowStatus($"+{evt.CardCount} cartes pour {ResolvePlayerName(evt.PlayerIndex)} !");
         }
 
+        /// <summary>Carte action jouée : un seul message clair, qui nomme la cible.</summary>
         private void OnActionCardPlayed(ActionCardPlayedEvent evt)
         {
-            string actionName = evt.Card.Type switch
+            string target = ResolvePlayerName(evt.TargetPlayerIndex);
+            string message = evt.Card.Type switch
             {
-                CardType.Skip      => "SKIP",
-                CardType.Draw2     => "+2",
-                CardType.Wild      => "WILD",
-                CardType.WildDraw2 => "WILD +2",
-                _                  => "ACTION"
+                CardType.Skip      => $"{ResolvePlayerName(evt.PlayerIndex)} fait passer son tour à {target}",
+                CardType.Draw2     => $"{target} pioche 2 cartes !",
+                CardType.WildDraw2 => $"{target} pioche 2 cartes !",
+                _                  => ""
             };
-            ShowStatus($"{actionName} !");
+            if (message.Length > 0) ShowStatus(message);
         }
 
         private void OnRoundEnded(RoundEndedEvent evt)
         {
-            ShowStatus($"{ResolvePlayerName(evt.WinnerIndex)} remporte la manche !");
+            // Le récap de fin de manche annonce le vainqueur : pas de toast en double.
+            _queue.Clear();
         }
 
         private void OnGameOver(GameOverEvent evt)

@@ -30,7 +30,10 @@ namespace LevelUp.UI
         Lock,
         Cards,
         SortValue,
-        Skip
+        Skip,
+        Edit,
+        Clock,
+        Copy
     }
 
     /// <summary>
@@ -541,6 +544,25 @@ namespace LevelUp.UI
         private static readonly Vector2[] HeartTip = { V(2.6f, 11.6f), V(21.4f, 11.6f), V(12f, 21.2f) };
         private static readonly Vector2[] SpadeBody = { V(12f, 2.5f), V(20.2f, 12.6f), V(3.8f, 12.6f) };
         private static readonly Vector2[] StemPoly = { V(10.7f, 15.5f), V(13.3f, 15.5f), V(14.6f, 21.5f), V(9.4f, 21.5f) };
+        private static readonly Vector2[] PencilBody =
+            { V(6.4f, 14.4f), V(16.1f, 4.7f), V(19.3f, 7.9f), V(9.6f, 17.6f) };
+        private static readonly Vector2[] PencilTip = { V(5.6f, 15.2f), V(8.8f, 18.4f), V(3.6f, 20.4f) };
+
+        /// <summary>Point dans le rectangle donné en coordonnées SVG 24×24.</summary>
+        private static bool InRect(float x, float y, float sx0, float sy0, float sx1, float sy1)
+        {
+            Vector2 a = V(sx0, sy0), b = V(sx1, sy1);
+            return x >= a.x && x <= b.x && y <= a.y && y >= b.y;
+        }
+
+        /// <summary>Contour (épaisseur 2·w) du rectangle donné en coordonnées SVG 24×24.</summary>
+        private static bool RectOutline(float x, float y, float sx0, float sy0, float sx1, float sy1, float w)
+        {
+            Vector2 a = V(sx0, sy0), b = V(sx1, sy1);
+            bool outer = x >= a.x - w && x <= b.x + w && y <= a.y + w && y >= b.y - w;
+            bool inner = x > a.x + w && x < b.x - w && y < a.y - w && y > b.y + w;
+            return outer && !inner;
+        }
 
         private static readonly Dictionary<CardColor, Sprite> SuitCache = new();
 
@@ -628,6 +650,21 @@ namespace LevelUp.UI
                     float sector = Mathf.Repeat(ang + Mathf.PI / 8f, Mathf.PI / 4f) - Mathf.PI / 8f;
                     return Mathf.Abs(sector) <= 0.2f;
                 },
+                // Crayon incliné à 45° : corps + pointe.
+                UIIcon.Edit => (x, y) =>
+                    InPolygon(x, y, PencilBody) || InPolygon(x, y, PencilTip),
+                // Cadran + deux aiguilles.
+                UIIcon.Clock => (x, y) =>
+                {
+                    float r = Mathf.Sqrt(x * x + y * y);
+                    return Mathf.Abs(r - 0.74f) <= w
+                           || NearSegment(x, y, 0f, 0f, V(12f, 6.6f).x, V(12f, 6.6f).y, w)
+                           || NearSegment(x, y, 0f, 0f, V(16f, 14.4f).x, V(16f, 14.4f).y, w);
+                },
+                // Deux feuilles superposées (copier).
+                UIIcon.Copy => (x, y) =>
+                    RectOutline(x, y, 4f, 4f, 15f, 15f, w)
+                    || (RectOutline(x, y, 9f, 9f, 20f, 20f, w) && !InRect(x, y, 4f, 4f, 15f + 2.4f, 15f + 2.4f)),
                 _ => (x, y) => false
             };
             s = Raster($"Icon_{icon}", 96, shape);
@@ -774,42 +811,78 @@ namespace LevelUp.UI
         /// </summary>
         public static void BuildCardBack(RectTransform parent, float radius = 14f)
         {
+            BuildCardBack(parent, radius, GameSettings.CardBack);
+        }
+
+        // Dos de carte : fond, encre (points, liserés, monogramme).
+        private static readonly Color[] BackGrounds = { Hex(0x171B1C), Hex(0x112019), Hex(0x221416) };
+        private static readonly Color[] BackInks = { Hex(0xE6CB92), Hex(0x8FD3B0), Hex(0xE3A3A3) };
+
+        /// <summary>Teinte du tapis choisi (vert, nuit, bordeaux).</summary>
+        public static Color FeltFor(int variant) => variant switch
+        {
+            1 => Hex(0x141A26),
+            2 => Hex(0x221518),
+            _ => Felt
+        };
+
+        /// <summary>Lumière centrale du tapis choisi.</summary>
+        public static Color FeltCenterFor(int variant) => variant switch
+        {
+            1 => Hex(0x1C2536),
+            2 => Hex(0x301D21),
+            _ => FeltCenter
+        };
+
+        /// <summary>Couleur d'encre du dos de carte (pastilles de choix dans les options).</summary>
+        public static Color CardBackInk(int variant) => BackInks[Mathf.Clamp(variant, 0, BackInks.Length - 1)];
+
+        /// <summary>Dos de carte d'une variante donnée (0 champagne, 1 jade, 2 bordeaux). Reconstructible.</summary>
+        public static void BuildCardBack(RectTransform parent, float radius, int variant)
+        {
+            int v = Mathf.Clamp(variant, 0, BackInks.Length - 1);
+            Color ink = BackInks[v];
+
             Image bg = parent.GetComponent<Image>();
             if (bg == null) bg = parent.gameObject.AddComponent<Image>();
             SetRounded(bg, radius);
-            bg.color = Surface;
+            bg.color = BackGrounds[v];
 
-            // Les enfants "BackDeco" sont reconstruits si on rappelle la méthode.
+            // Tout le décor vit sous "BackDeco" : rappeler la méthode le remplace.
             Transform? old = parent.Find("BackDeco");
-            if (old != null) UnityEngine.Object.Destroy(old.gameObject);
+            if (old != null)
+            {
+                old.SetParent(null, false);
+                UnityEngine.Object.Destroy(old.gameObject);
+            }
+
+            GameObject decoRoot = new("BackDeco", typeof(RectTransform));
+            decoRoot.transform.SetParent(parent, false);
+            RectTransform root = (RectTransform)decoRoot.transform;
+            Stretch(root);
 
             // Zone de points en retrait de 6px : reste dans les coins arrondis
             // sans masque (un masque ne suivrait pas une carte inclinée).
-            GameObject deco = new("BackDeco", typeof(RectTransform));
-            deco.transform.SetParent(parent, false);
-            RectTransform drt = (RectTransform)deco.transform;
-            Stretch(drt, 6f);
-
             GameObject dots = new("Dots", typeof(RectTransform), typeof(Image));
-            dots.transform.SetParent(deco.transform, false);
-            Stretch((RectTransform)dots.transform);
+            dots.transform.SetParent(root, false);
+            Stretch((RectTransform)dots.transform, 6f);
             Image dimg = dots.GetComponent<Image>();
             dimg.sprite = DotPattern;
             dimg.type = Image.Type.Tiled;
             dimg.pixelsPerUnitMultiplier = 1f;
-            dimg.color = WithAlpha(AccentLight, 0.35f);
+            dimg.color = WithAlpha(ink, 0.35f);
             dimg.raycastTarget = false;
 
-            Outline(parent, radius, 1.5f, WithAlpha(AccentLight, 0.55f), "Edge");
-            Image inner = Outline(parent, Mathf.Max(4f, radius - 5f), 1f, WithAlpha(AccentLight, 0.55f), "InnerEdge");
+            Outline(root, radius, 1.5f, WithAlpha(ink, 0.55f), "Edge");
+            Image inner = Outline(root, Mathf.Max(4f, radius - 5f), 1f, WithAlpha(ink, 0.55f), "InnerEdge");
             Stretch(inner.rectTransform, 8f);
 
-            Image mono = Rect(parent, "Monogram", Base, 12f);
+            Image mono = Rect(root, "Monogram", Base, 12f);
             Place(mono.rectTransform, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), Vector2.zero,
                 new Vector2(48f, 48f));
-            Outline(mono.rectTransform, 12f, 1.5f, WithAlpha(AccentLight, 0.55f));
-            TextMeshProUGUI lu = Text(mono.transform, "LU", "LU", 18f, AccentPale, TextWeight.Display,
-                TextAlignmentOptions.Center);
+            Outline(mono.rectTransform, 12f, 1.5f, WithAlpha(ink, 0.55f));
+            TextMeshProUGUI lu = Text(mono.transform, "LU", "LU", 18f, Color.Lerp(ink, Color.white, 0.45f),
+                TextWeight.Display, TextAlignmentOptions.Center);
             Stretch(lu.rectTransform);
         }
     }

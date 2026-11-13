@@ -1,3 +1,6 @@
+// Outil de vérification visuelle : compilé seulement pour l'éditeur et le PC
+// (jamais dans l'APK).
+#if UNITY_EDITOR || UNITY_STANDALONE
 using System;
 using System.Collections;
 using System.IO;
@@ -22,11 +25,32 @@ namespace LevelUp.Core
             string? dir = GetArg("-autoshot");
             if (string.IsNullOrEmpty(dir)) return;
 
+            // Sans focus, le lecteur PC se met en pause (Run In Background désactivé
+            // dans le projet) : une capture lancée en arrière-plan se figeait.
+            Application.runInBackground = true;
+
             GameObject go = new("DevAutoScreenshot");
             DontDestroyOnLoad(go);
             DevAutoScreenshot shot = go.AddComponent<DevAutoScreenshot>();
             shot._dir = dir!;
+
+            // -uiscale 0|1 : force la taille d'interface (rétablie à la fin).
+            string? scale = GetArg("-uiscale");
+            if (scale != null && int.TryParse(scale, out int s))
+            {
+                shot._savedUiScale = UI.GameSettings.UiScale;
+                UI.GameSettings.UiScale = s;
+            }
         }
+
+        private int _savedUiScale = -1;
+
+        // OnlineSession.Leave() remet runInBackground à faux (comportement voulu
+        // en jeu) : le harnais le réimpose, sinon une perte de focus le fige.
+        private void Update() => Application.runInBackground = true;
+
+        private void OnApplicationFocus(bool focus) =>
+            Debug.Log($"[DevAutoScreenshot] focus={focus} t={Time.realtimeSinceStartup:0.0}");
 
         private IEnumerator Start()
         {
@@ -34,15 +58,70 @@ namespace LevelUp.Core
             yield return new WaitForSecondsRealtime(2.5f);
             yield return Shot("01_menu");
 
+            Click("BtnRulesMenu");
+            yield return new WaitForSecondsRealtime(0.8f);
+            yield return Shot("01c_rules");
+            Click("BtnCloseRules");
+            yield return new WaitForSecondsRealtime(0.6f);
+
+            // Fenêtre de pseudo (rien n'est enregistré : on annule)
+            Click("ProfileChip");
+            yield return new WaitForSecondsRealtime(0.8f);
+            yield return Shot("01b_profile");
+            Click("BtnCancel");
+            yield return new WaitForSecondsRealtime(0.6f);
+
             Click("BtnOptions");
             yield return new WaitForSecondsRealtime(1.0f);
             yield return Shot("02_menu_options");
             Click("BtnClose");
             yield return new WaitForSecondsRealtime(0.8f);
 
+            // En ligne : accueil (pseudo) puis aperçu d'un salon (données factices, sans réseau)
+            Click("BtnOnline");
+            yield return new WaitForSecondsRealtime(0.8f);
+            yield return Shot("02b_online_home");
+            yield return ShowcaseLobby();
+
+            // Nouvelle partie : jokers + actions et minuteur pour la capture, réglages
+            // du joueur rétablis juste après le lancement.
+            int savedSpecial = UI.GameSettings.SpecialCards;
+            int savedTimer = UI.GameSettings.TurnTimer;
+            UI.GameSettings.SpecialCards = 2;
+            UI.GameSettings.TurnTimer = 30;
             Click("BtnPlay");
-            yield return new WaitForSecondsRealtime(6f);
+            yield return new WaitForSecondsRealtime(1.0f);
+            yield return Shot("02d_setup");
+            Click("BtnLaunch");
+            yield return new WaitForSecondsRealtime(0.7f);
+            // Partie déjà sauvegardée : capture de la confirmation, puis on remplace.
+            if (FindButton("BtnConfirmOk") != null)
+            {
+                yield return Shot("02e_confirm_replace");
+                Click("BtnConfirmOk");
+            }
+            yield return new WaitForSecondsRealtime(0.3f);
+            UI.GameSettings.SpecialCards = savedSpecial;
+            UI.GameSettings.TurnTimer = savedTimer;
+
+            yield return new WaitForSecondsRealtime(5.5f);
             yield return Shot("03_game");
+
+            // Étape Poser (pioche jouée en commande directe) avec deux cartes
+            // sélectionnées : panneau de sélection, bouton POSER, consigne.
+            GameManager? gmPose = FindObjectOfType<GameManager>();
+            UI.HandView? handPose = FindObjectOfType<UI.HandView>();
+            if (gmPose?.TurnManager != null && handPose != null
+                && gmPose.TurnManager.CurrentPhase == Utils.TurnPhase.Draw)
+            {
+                gmPose.ExecuteCommand(new DrawFromDeckCommand(gmPose.TurnManager.CurrentPlayerIndex));
+                yield return new WaitForSecondsRealtime(0.8f);
+                handPose.ToggleCardSelection(0);
+                handPose.ToggleCardSelection(1);
+                yield return new WaitForSecondsRealtime(0.6f);
+                yield return Shot("03a_laydown");
+                handPose.DeselectAll();
+            }
 
             // Aperçu visuel (données factices, mode capture uniquement) : table
             // avec combinaisons, indices "jouable", panneau "Choisis ta pose".
@@ -54,6 +133,17 @@ namespace LevelUp.Core
             yield return null;
             yield return Shot("03b_table");
             yield return ShowcaseChooser();
+            yield return ShowcaseTargets();
+
+            // Récap de manche (aperçu sur l'état courant, aucun événement publié)
+            UI.RoundSummaryView? summary = FindObjectOfType<UI.RoundSummaryView>();
+            GameManager? gm = FindObjectOfType<GameManager>();
+            if (summary != null && gm != null && gm.Players.Count > 1)
+            {
+                summary.ShowSnapshot(1, 2);
+                yield return new WaitForSecondsRealtime(0.9f);
+                yield return Shot("03e_round_summary");
+            }
 
             Click("BtnPause");
             yield return new WaitForSecondsRealtime(1.0f);
@@ -63,7 +153,61 @@ namespace LevelUp.Core
             yield return new WaitForSecondsRealtime(1.0f);
             yield return Shot("05_options");
 
+            // Fin de partie perdue (un bot gagne) : titre, classement
+            UI.GameOverCelebration? over = FindObjectOfType<UI.GameOverCelebration>();
+            if (over != null && gm != null && gm.Players.Count > 1)
+            {
+                foreach (UI.OptionsPanel options in FindObjectsOfType<UI.OptionsPanel>()) options.Hide();
+                FindObjectOfType<UI.PauseMenuController>()?.Hide();
+                yield return new WaitForSecondsRealtime(0.5f);
+                over.Show(1);
+                yield return new WaitForSecondsRealtime(1.4f);
+                yield return Shot("06_game_over");
+            }
+
+            if (_savedUiScale >= 0) UI.GameSettings.UiScale = _savedUiScale;
+            UI.GameSettings.Flush();
             Application.Quit();
+        }
+
+        /// <summary>Salon en ligne factice : code, trois joueurs, une place libre, règles.</summary>
+        private IEnumerator ShowcaseLobby()
+        {
+            UI.OnlinePanel? panel = FindObjectOfType<UI.OnlinePanel>();
+            if (panel == null) yield break;
+
+            panel.ShowHostLobby("K7Q2PX");
+            UI.LobbyViewModel lobby = new()
+            {
+                Seats = 4,
+                BotDifficulty = 2,
+                Rules = new MatchRules(true, SpecialCardsMode.Jokers, 10, 6, 60)
+            };
+            lobby.Members.Add(new UI.LobbySeatView("Alex", true, true));
+            lobby.Members.Add(new UI.LobbySeatView("Camille", false, false));
+            lobby.Members.Add(new UI.LobbySeatView("Lucas", false, false));
+            panel.UpdateLobby(lobby);
+            yield return new WaitForSecondsRealtime(0.8f);
+            yield return Shot("02c_online_lobby");
+
+            Click("BtnClose");
+            yield return new WaitForSecondsRealtime(0.6f);
+        }
+
+        /// <summary>Choix de cible d'une carte « Passe » (aperçu sur les joueurs réels).</summary>
+        private IEnumerator ShowcaseTargets()
+        {
+            Canvas? canvas = FindObjectOfType<Canvas>();
+            GameManager? gm = FindObjectOfType<GameManager>();
+            if (canvas == null || gm == null || gm.Players.Count < 3) yield break;
+
+            UI.TargetChooser chooser = gameObject.AddComponent<UI.TargetChooser>();
+            chooser.Setup(canvas.rootCanvas);
+            chooser.Show(Utils.CardType.Skip, gm.Players, 0, _ => { });
+            yield return new WaitForSecondsRealtime(0.6f);
+            yield return Shot("03d_targets");
+            chooser.Hide();
+            yield return new WaitForSecondsRealtime(0.4f);
         }
 
         private IEnumerator Shot(string name)
@@ -166,13 +310,19 @@ namespace LevelUp.Core
         /// <summary>Clique le dernier bouton actif portant ce nom (le plus au premier plan).</summary>
         private static void Click(string name)
         {
+            Button? target = FindButton(name);
+            if (target != null) target.onClick.Invoke();
+            else Debug.LogWarning($"[DevAutoScreenshot] bouton introuvable : {name}");
+        }
+
+        private static Button? FindButton(string name)
+        {
             Button? target = null;
             foreach (Button b in FindObjectsOfType<Button>())
             {
                 if (b.name == name && b.isActiveAndEnabled) target = b;
             }
-            if (target != null) target.onClick.Invoke();
-            else Debug.LogWarning($"[DevAutoScreenshot] bouton introuvable : {name}");
+            return target;
         }
 
         private static string? GetArg(string name)
@@ -186,3 +336,4 @@ namespace LevelUp.Core
         }
     }
 }
+#endif

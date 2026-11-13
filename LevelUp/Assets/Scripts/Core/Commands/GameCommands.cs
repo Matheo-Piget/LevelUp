@@ -93,6 +93,24 @@ namespace LevelUp.Core
     }
 
     /// <summary>
+    /// Lance la manche suivante une fois le récap de fin de manche lu (la partie
+    /// reste en <see cref="GameState.EndRound"/> jusque-là). Porte le numéro de
+    /// la manche terminée : une commande en double ou en retard est refusée au
+    /// lieu de sauter une manche. N'est pas liée au tour d'un joueur.
+    /// </summary>
+    public readonly struct StartNextRoundCommand : IGameCommand
+    {
+        public int PlayerIndex { get; }
+        public int FinishedRound { get; }
+
+        public StartNextRoundCommand(int playerIndex, int finishedRound)
+        {
+            PlayerIndex = playerIndex;
+            FinishedRound = finishedRound;
+        }
+    }
+
+    /// <summary>
     /// Résultat d'exécution d'une commande.
     /// Porte le succès/échec, un message, et des données optionnelles.
     /// </summary>

@@ -58,6 +58,8 @@ namespace LevelUp.UI
 
     public void Initialize(int playerCount, List<string> playerNames)
     {
+      _timerIndex = -1;
+      _timerShownSecond = -1;
       ClearPills();
       RectTransform host = _container != null ? _container : (RectTransform)transform;
       _ = _playerRowHeight;
@@ -72,6 +74,10 @@ namespace LevelUp.UI
         Transform child = host.GetChild(i);
         if (child.name != "PlayersRow") child.gameObject.SetActive(false);
       }
+
+      // Canvas imbriqué : le minuteur (barre qui se vide chaque frame) ne
+      // redessine que la rangée des joueurs.
+      if (host.GetComponent<Canvas>() == null) host.gameObject.AddComponent<Canvas>();
 
       if (_row == null)
       {
@@ -108,15 +114,40 @@ namespace LevelUp.UI
           UISkin.Base, TextWeight.Display, TextAlignmentOptions.Center);
       UISkin.Stretch(initial.rectTransform);
 
-      // Nom + statut
+      // Nom + statut (pseudo long : points de suspension plutôt que débordement)
       GameObject texts = new("Texts", typeof(RectTransform));
       texts.transform.SetParent(obj.transform, false);
       UISkin.VCol(texts, 2f, null, TextAnchor.MiddleLeft);
       TextMeshProUGUI nameText = UISkin.Text(texts.transform, "Name", name, 15f, UISkin.TextColor,
           TextWeight.SemiBold);
+      nameText.overflowMode = TextOverflowModes.Ellipsis;
+      UISkin.Size(nameText.gameObject, 128f, 19f);
       TextMeshProUGUI statusText = UISkin.Text(texts.transform, "Status", "En attente", 13f,
           UISkin.TextMuted);
-      UISkin.Size(texts, 112f);
+      UISkin.Size(statusText.gameObject, 128f, 17f);
+      UISkin.Size(texts, 128f);
+
+      // Minuteur de tour : fine barre en bas de la pastille (masquée sans minuteur)
+      GameObject track = new("TimerTrack", typeof(RectTransform), typeof(Image));
+      track.transform.SetParent(obj.transform, false);
+      track.AddComponent<LayoutElement>().ignoreLayout = true;
+      RectTransform trt = (RectTransform)track.transform;
+      trt.anchorMin = new Vector2(0f, 0f);
+      trt.anchorMax = new Vector2(1f, 0f);
+      trt.pivot = new Vector2(0.5f, 0f);
+      trt.offsetMin = new Vector2(18f, 4f);
+      trt.offsetMax = new Vector2(-18f, 7f);
+      Image trackImg = track.GetComponent<Image>();
+      UISkin.SetRounded(trackImg, 1.5f);
+      trackImg.color = UISkin.WithAlpha(UISkin.TextColor, 0.08f);
+      trackImg.raycastTarget = false;
+      Image fill = UISkin.Rect(track.transform, "Fill", UISkin.AccentLight, 1.5f);
+      RectTransform frt = fill.rectTransform;
+      frt.anchorMin = Vector2.zero;
+      frt.anchorMax = Vector2.one;
+      frt.offsetMin = Vector2.zero;
+      frt.offsetMax = Vector2.zero;
+      track.SetActive(false);
 
       // Cartes en main
       Image countChip = UISkin.Rect(obj.transform, "Cards", UISkin.SurfaceRaised, 10f);
@@ -142,17 +173,27 @@ namespace LevelUp.UI
         CountChip = countChip,
         CountIcon = countIcon,
         CountText = countText,
-        LevelText = levelText
+        LevelText = levelText,
+        TimerTrack = track,
+        TimerFill = frt
       };
     }
 
-    private static string Initial(string name)
+    private static string Initial(string name) => PlayerProfile.Initial(name);
+
+    /// <summary>
+    /// Point de départ / d'arrivée des cartes d'un joueur (son avatar), à
+    /// petite échelle : ses pioches, ses poses et ses défausses en partent.
+    /// </summary>
+    public bool TryGetPillOrigin(int playerIndex, out CardOrigin origin)
     {
-      if (string.IsNullOrEmpty(name)) return "?";
-      char last = name[name.Length - 1];
-      // "Bot 2" → "2" ; sinon première lettre.
-      if (char.IsDigit(last)) return last.ToString();
-      return char.ToUpperInvariant(name[0]).ToString();
+      origin = default;
+      if (playerIndex < 0 || playerIndex >= _pills.Count || _pills[playerIndex].Root == null) return false;
+      RectTransform rt = _pills[playerIndex].Root.rectTransform;
+      Transform? avatar = rt.Find("Avatar");
+      Vector3 pos = avatar != null ? avatar.position : rt.position;
+      origin = new CardOrigin(pos, rt.lossyScale.x * 0.3f);
+      return true;
     }
 
     public void UpdatePlayerLevel(int playerIndex, int currentLevel)
@@ -162,8 +203,60 @@ namespace LevelUp.UI
       if (pill.Level == currentLevel) return;
       bool changed = pill.Level > 0;
       pill.Level = currentLevel;
-      pill.LevelText.text = $"Niv. {currentLevel}";
+      // Au-delà du niveau final (partie gagnée) : on reste sur le dernier niveau.
+      int shown = Mathf.Min(currentLevel, GameSession.Rules.LevelsToWin);
+      pill.LevelText.text = $"Niv. {shown}";
       if (changed && _animController != null) _animController.AnimatePulse(pill.LevelText.rectTransform);
+    }
+
+    // ─── Minuteur de tour ───────────────────────────────────────────
+
+    private int _timerIndex = -1;
+    private int _timerShownSecond = -1;
+
+    /// <summary>
+    /// Affiche le temps restant sur la pastille du joueur actif : statut
+    /// "Joue · 23 s" et barre qui se vide (orange sous 10 secondes).
+    /// </summary>
+    public void SetTurnTimer(int playerIndex, float remaining, float total)
+    {
+      if (playerIndex < 0 || playerIndex >= _pills.Count || total <= 0f) return;
+      if (_timerIndex != playerIndex) ClearTurnTimer();
+      _timerIndex = playerIndex;
+
+      PlayerPill pill = _pills[playerIndex];
+      float t = Mathf.Clamp01(remaining / total);
+      bool hurry = remaining <= 10f;
+      Color color = hurry ? Constants.CardOrange : UISkin.AccentLight;
+
+      if (pill.TimerTrack != null && pill.TimerFill != null)
+      {
+        if (!pill.TimerTrack.activeSelf) pill.TimerTrack.SetActive(true);
+        pill.TimerFill.anchorMax = new Vector2(t, 1f);
+        Image fill = pill.TimerFill.GetComponent<Image>();
+        if (fill.color != color) fill.color = color;
+      }
+
+      int second = Mathf.CeilToInt(Mathf.Max(0f, remaining));
+      if (second != _timerShownSecond)
+      {
+        _timerShownSecond = second;
+        pill.Status.text = $"Joue · {second} s";
+        pill.Status.color = hurry ? Color.Lerp(Constants.CardOrange, Color.white, 0.2f) : UISkin.AccentPale;
+      }
+    }
+
+    /// <summary>Retire l'affichage du minuteur (tour terminé, bot, partie sans minuteur).</summary>
+    public void ClearTurnTimer()
+    {
+      if (_timerIndex >= 0 && _timerIndex < _pills.Count)
+      {
+        PlayerPill pill = _pills[_timerIndex];
+        if (pill.TimerTrack != null) pill.TimerTrack.SetActive(false);
+      }
+      _timerIndex = -1;
+      _timerShownSecond = -1;
+      RefreshStatuses();
     }
 
     /// <summary>Joueur actif : anneau accent 2px, statut "Joue…".</summary>
@@ -185,6 +278,7 @@ namespace LevelUp.UI
     {
       for (int i = 0; i < _pills.Count; i++)
       {
+        if (i == _timerIndex) continue; // le minuteur écrit lui-même le statut
         PlayerPill pill = _pills[i];
         string status;
         if (i == _activeIndex) status = "Joue…";
@@ -291,6 +385,8 @@ namespace LevelUp.UI
       public Image CountIcon = null!;
       public TextMeshProUGUI CountText = null!;
       public TextMeshProUGUI LevelText = null!;
+      public GameObject? TimerTrack;
+      public RectTransform? TimerFill;
       public int Level;
       public int LastCount = -1;
     }

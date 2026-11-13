@@ -25,6 +25,12 @@ namespace LevelUp.Core
         /// </summary>
         public static ContractPlan Contracts { get; set; } = ContractPlan.Classic;
 
+        /// <summary>
+        /// Règles de la partie en cours (fixées par <see cref="GameManager.StartGame(System.Collections.Generic.IReadOnlyList{PlayerSetup}, int, MatchRules)"/>) :
+        /// niveau final, minuteur, cartes spéciales… Lues par l'UI (barre de niveau, minuteur).
+        /// </summary>
+        public static MatchRules Rules { get; set; } = MatchRules.Classic;
+
         /// <summary>Retour à l'état hors ligne (solo).</summary>
         public static void Reset()
         {
