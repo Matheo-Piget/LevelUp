@@ -162,6 +162,7 @@ namespace LevelUp.Core
             {
                 _gameOverCelebration = gameObject.AddComponent<GameOverCelebration>();
                 _gameOverCelebration.OnReplayClicked += HandleReplay;
+                _gameOverCelebration.ReplayIsVote = () => GameSession.IsOnline;
                 _gameOverCelebration.OnMainMenuClicked += HandleReturnToMainMenu;
                 _gameOverCelebration.Setup(_mainCanvas);
                 if (_gameManager != null)
@@ -183,6 +184,8 @@ namespace LevelUp.Core
             Time.timeScale = 1f;
             _tutorial?.End();
             _pauseMenu?.SetPauseButtonVisible(false);
+            _emotes?.SetAvailable(false);
+            _gameOverCelebration?.SetReplayLabel("REJOUER");
 
             if (GameSession.IsOnline)
             {
@@ -203,20 +206,32 @@ namespace LevelUp.Core
 
             if (GameSession.IsOnline)
             {
-                if (GameSession.IsHost)
+                // Revanche votée : chaque joueur présent vote, l'hôte relance
+                // (nouveau seed diffusé) dès que tout le monde est d'accord.
+                // Seul en ligne avec des bots, l'hôte relance directement.
+                if (GameSession.IsHost && (_onlineSession == null || !_onlineSession.HasRemotePlayers))
                 {
-                    // L'hôte relance : nouveau seed diffusé à tous les appareils
+                    _gameOverCelebration?.Dismiss();
                     HandleOnlineLaunch();
                 }
                 else
                 {
-                    // Un client ne peut pas relancer la partie : retour menu
-                    HandleReturnToMainMenu();
+                    _onlineSession?.VoteRematch();
                 }
                 return;
             }
 
             StartNewSoloGame();
+        }
+
+        private EmoteView? _emotes;
+
+        private void EnsureEmotes()
+        {
+            if (_emotes != null || _screenLayout?.Root == null) return;
+            _emotes = gameObject.AddComponent<EmoteView>();
+            _emotes.Setup(_screenLayout.Root, _levelProgressView);
+            _emotes.EmoteChosen += id => _onlineSession?.SendEmote(id);
         }
 
         private void CleanupAIPlayers()
@@ -721,6 +736,17 @@ namespace LevelUp.Core
             _onlineSession.Reconnecting += msg => GetConnectionOverlay()?.Show(msg);
             _onlineSession.Reconnected += () =>
                 GetConnectionOverlay()?.Show("Reconnecté !\nReprise de la partie…");
+
+            // Réactions et vote de revanche.
+            _onlineSession.EmoteReceived += (seat, id) => _emotes?.ShowEmote(seat, id);
+            _onlineSession.RematchChanged += (votes, expected) =>
+                _gameOverCelebration?.SetReplayLabel(
+                    $"REVANCHE {SocialProtocol.CountBits(votes)}/{SocialProtocol.CountBits(expected)}");
+            _onlineSession.RematchAgreed += () =>
+            {
+                _gameOverCelebration?.Dismiss();
+                HandleOnlineLaunch();
+            };
         }
 
         private ConnectionOverlay? GetConnectionOverlay()
@@ -844,6 +870,7 @@ namespace LevelUp.Core
             _saveActive = false; // une partie en ligne ne remplace pas la sauvegarde solo
 
             _onlinePanel?.HideSilent();
+            _gameOverCelebration?.Dismiss();
             _mainMenu?.Hide();
             _connectionOverlay?.Hide();
 
@@ -864,6 +891,9 @@ namespace LevelUp.Core
             InitializePauseAndGameOver();
             _pauseMenu?.SetPauseButtonVisible(true);
             _gameStarted = true;
+            EnsureEmotes();
+            _emotes?.SetAvailable(true);
+            _gameOverCelebration?.SetReplayLabel("REVANCHE");
 
             if (_handView != null)
             {
@@ -925,6 +955,7 @@ namespace LevelUp.Core
             _saveActive = false;
 
             _onlinePanel?.HideSilent();
+            _gameOverCelebration?.Dismiss();
             _mainMenu?.Hide();
 
             EnsureGameSystems();

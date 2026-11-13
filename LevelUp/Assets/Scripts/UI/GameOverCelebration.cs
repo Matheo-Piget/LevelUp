@@ -19,6 +19,19 @@ namespace LevelUp.UI
         private RectTransform? _root;
         private CanvasGroup? _rootCg;
         private RectTransform? _panel;
+        private TextMeshProUGUI? _replayLabel;
+
+        /// <summary>Vrai si « Rejouer » est un vote (partie en ligne) : l'écran ne se ferme pas.</summary>
+        public Func<bool>? ReplayIsVote { get; set; }
+
+        /// <summary>Texte du bouton Rejouer (« REVANCHE 2/3 » pendant un vote en ligne).</summary>
+        public void SetReplayLabel(string text)
+        {
+            if (_replayLabel != null) _replayLabel.text = text;
+        }
+
+        /// <summary>Ferme l'écran sans rien déclencher (la revanche démarre).</summary>
+        public void Dismiss() => Hide();
         private bool _isShown;
 
         /// <summary>Déclenché quand le joueur clique sur Rejouer.</summary>
@@ -180,8 +193,8 @@ namespace LevelUp.UI
             hlg.childControlWidth = false;
             hlg.childControlHeight = false;
 
-            UIFactory.CreateButton(row.transform, "BtnReplay", "REJOUER",
-                new Vector2(268f, 64f), HandleReplay, primary: true);
+            _replayLabel = UIFactory.CreateButton(row.transform, "BtnReplay", "REJOUER",
+                new Vector2(268f, 64f), HandleReplay, primary: true).GetComponentInChildren<TextMeshProUGUI>();
             UIFactory.CreateButton(row.transform, "BtnMenu", "MENU",
                 new Vector2(268f, 64f), HandleMainMenu);
 
@@ -355,6 +368,12 @@ namespace LevelUp.UI
 
         private void HandleReplay()
         {
+            // En ligne : on vote pour la revanche, l'écran reste ouvert en attendant les autres.
+            if (ReplayIsVote != null && ReplayIsVote())
+            {
+                OnReplayClicked?.Invoke();
+                return;
+            }
             Hide(() => OnReplayClicked?.Invoke());
         }
 

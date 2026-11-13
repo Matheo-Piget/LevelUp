@@ -54,15 +54,15 @@
     "semantic_hash": ""
   },
   "LevelUp/Assets/Scripts/Core/Commands/GameCommands.cs": {
-    "mtime": 1794576636.0948696,
-    "seen": 1794577686.0013714,
-    "ast_hash": "8da4684288c2de913beae23b323c90e7",
+    "mtime": 1794579043.6539085,
+    "seen": 1794579283.9503052,
+    "ast_hash": "139aa3b8adc4ebef9a80e9774148f09f",
     "semantic_hash": ""
   },
   "LevelUp/Assets/Scripts/Core/DeckManager.cs": {
-    "mtime": 1794081643.4268556,
-    "seen": 1794083329.9087365,
-    "ast_hash": "322b031cc6a6b3c32eebf581c4a12e6e",
+    "mtime": 1794579031.805872,
+    "seen": 1794579283.9503052,
+    "ast_hash": "052dd23859e7fa58651a459298aaa740",
     "semantic_hash": ""
   },
   "LevelUp/Assets/Scripts/Core/GameConfig.cs": {
@@ -78,9 +78,9 @@
     "semantic_hash": ""
   },
   "LevelUp/Assets/Scripts/Core/GameManager.cs": {
-    "mtime": 1794578273.778728,
-    "seen": 1794578533.0821977,
-    "ast_hash": "c54fe92bbd064b42f629d792fd819168",
+    "mtime": 1794579043.627915,
+    "seen": 1794579283.9503052,
+    "ast_hash": "0f89351a4204ab8c4a6107aec4472b0b",
     "semantic_hash": ""
   },
   "LevelUp/Assets/Scripts/Core/GameSession.cs": {
@@ -108,9 +108,9 @@
     "semantic_hash": ""
   },
   "LevelUp/Assets/Scripts/GameBootstrapper.cs": {
-    "mtime": 1794578751.4095047,
-    "seen": 1794579007.371966,
-    "ast_hash": "2c9141342a15c7363471cece85fb3e14",
+    "mtime": 1794579127.829595,
+    "seen": 1794579283.9503052,
+    "ast_hash": "3938cb161c4baba4765208c9811c0f3d",
     "semantic_hash": ""
   },
   "LevelUp/Assets/Scripts/Network/NetworkManager.cs": {
@@ -596,9 +596,9 @@
     "semantic_hash": ""
   },
   "LevelUp/Assets/Scripts/UI/RulesPanel.cs": {
-    "mtime": 1794576824.3899825,
-    "seen": 1794577686.0013714,
-    "ast_hash": "4409dc9c8b53dfeedb093306b6b6388e",
+    "mtime": 1794579142.7679062,
+    "seen": 1794579283.9503052,
+    "ast_hash": "fef662276387e001a0f12e0369280e49",
     "semantic_hash": ""
   },
   "LevelUp/Assets/Scripts/UI/UIBackStack.cs": {
@@ -620,9 +620,9 @@
     "semantic_hash": ""
   },
   "LevelUp/Assets/Scripts/DevInputTest.cs": {
-    "mtime": 1794577896.5042222,
-    "seen": 1794578009.4085183,
-    "ast_hash": "3dae303e684d1b5c9a5e464254d6163d",
+    "mtime": 1794579195.774966,
+    "seen": 1794579283.9503052,
+    "ast_hash": "0e0c275a50d355a8a4fde43d0248990e",
     "semantic_hash": ""
   },
   "LevelUp/Assets/Scripts/UI/PointerInput.cs": {
@@ -638,9 +638,9 @@
     "semantic_hash": ""
   },
   "LevelUp/Assets/Scripts/UI/CommandErrorText.cs": {
-    "mtime": 1794576807.1937099,
-    "seen": 1794577686.0013714,
-    "ast_hash": "3dd808cb6c075bb549cdf83f984172e4",
+    "mtime": 1794579087.3789244,
+    "seen": 1794579283.9503052,
+    "ast_hash": "e3c2ac1e09915fe147b3a8a6362c02b8",
     "semantic_hash": ""
   },
   "LevelUp/Assets/Scripts/UI/FrameBudget.cs": {
@@ -689,6 +689,12 @@
     "mtime": 1794578551.828031,
     "seen": 1794579007.371966,
     "ast_hash": "445b0745a7806c486e55cf6c9dca18bb",
+    "semantic_hash": ""
+  },
+  "LevelUp/Assets/Scripts/TutorialDirector.cs": {
+    "mtime": 1794579109.7494743,
+    "seen": 1794579283.9503052,
+    "ast_hash": "e4bf494206dbfa073726b837addea365",
     "semantic_hash": ""
   }
 }

@@ -93,7 +93,7 @@ namespace LevelUp.Network
     ///    siège attend <see cref="ReconnectGraceSeconds"/> avant qu'un bot le prenne,
     ///    et le joueur le récupère même après.
     /// </summary>
-    public class OnlineSession : MonoBehaviour
+    public partial class OnlineSession : MonoBehaviour
     {
         private const string MsgStart = "LU_START";
         private const string MsgCommand = "LU_CMD";
@@ -492,6 +492,7 @@ namespace LevelUp.Network
             msg.RegisterNamedMessageHandler(MsgResumeChunk, OnResumeChunkMessage);
             msg.RegisterNamedMessageHandler(MsgResumeEnd, OnResumeEndMessage);
             msg.RegisterNamedMessageHandler(MsgLobby, OnLobbyMessage);
+            RegisterSocialHandlers(msg);
         }
 
         private void UnregisterCallbacks(NgoManager ngo)
@@ -675,6 +676,7 @@ namespace LevelUp.Network
                 if (_matchRunning && _seatByClient.TryGetValue(clientId, out int seat))
                 {
                     _seatByClient.Remove(clientId);
+                    RefreshRematchAfterLeave();
                     _disconnectedSeats.Add(seat);
                     string name = SeatName(seat);
                     BroadcastNotice($"{name} a perdu la connexion — on l'attend…");
@@ -927,6 +929,7 @@ namespace LevelUp.Network
             }
 
             _matchRunning = true;
+            ResetSocialState();
 
             return new OnlineStartData
             {
@@ -1116,6 +1119,7 @@ namespace LevelUp.Network
             OnlineStartData data = ReadStartHeader(reader);
             if (data.Players == null || data.Players.Length < 2) return;
             _matchRunning = true;
+            ResetSocialState();
             _awaitingResume = false;
             MatchStartReceived?.Invoke(data);
         }
