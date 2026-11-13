@@ -37,7 +37,7 @@ namespace LevelUp.Core
     public static class SaveGame
     {
         private const uint Magic = 0x5653554C; // "LUSV"
-        private const int FormatVersion = 1;
+        private const int FormatVersion = 2; // v2 : variantes de règles
         private const string FileName = "partie-solo.sav";
         private const int MaxPlayers = 8;
 
@@ -140,11 +140,7 @@ namespace LevelUp.Core
             w.Write(FormatVersion);
             w.Write(GameManager.RulesVersion);
             w.Write(seed);
-            w.Write(rules.RandomContracts);
-            w.Write((byte)rules.SpecialCards);
-            w.Write(rules.HandSize);
-            w.Write(rules.LevelsToWin);
-            w.Write(rules.TurnTimerSeconds);
+            rules.Write(w);
             w.Write(botDifficulty);
             w.Write(mode);
             w.Write(dailyKey);
@@ -169,13 +165,7 @@ namespace LevelUp.Core
                 if (r.ReadInt32() != GameManager.RulesVersion) return null;
 
                 SavedGame saved = new() { Seed = r.ReadInt32() };
-                bool randomContracts = r.ReadBoolean();
-                byte special = r.ReadByte();
-                int handSize = r.ReadInt32();
-                int levelsToWin = r.ReadInt32();
-                int turnTimer = r.ReadInt32();
-                saved.Rules = new MatchRules(randomContracts, (SpecialCardsMode)special, handSize,
-                    levelsToWin, turnTimer);
+                saved.Rules = MatchRules.Read(r);
                 saved.BotDifficulty = r.ReadInt32();
                 saved.Mode = r.ReadInt32();
                 saved.DailyKey = r.ReadInt32();

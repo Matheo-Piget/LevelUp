@@ -189,7 +189,9 @@ namespace LevelUp.UI
             }
             if (_caption != null)
             {
-                _caption.text = evt.DeckExhausted
+                _caption.text = evt.TurnLimitReached
+                    ? "Limite de tours atteinte : seuls ceux qui ont posé montent d'un niveau."
+                    : evt.DeckExhausted
                     ? "Pioche épuisée : la main la plus courte l'emporte."
                     : "Cartes restées en main : 5 pts (1-9), 10 pts (10-18), 25 pts (joker).";
             }

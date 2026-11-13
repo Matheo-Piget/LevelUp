@@ -72,6 +72,7 @@ namespace LevelUp.Tests
             for (int turn = 0; turn < 4000 && gm.State != GameState.GameOver; turn++)
             {
                 int before = gm.ComputeStateHash();
+                _lastGameTurns = turn + 1;
                 PlayTurn(gm, brains[gm.TurnManager!.CurrentPlayerIndex]);
                 if (gm.State != GameState.GameOver && gm.ComputeStateHash() == before)
                 {
@@ -149,6 +150,34 @@ namespace LevelUp.Tests
                 MatchRules rules = new(seed % 2 == 0, special, 10, 3);
                 int winner = PlayGame(seats, seed * 101, rules, out int rounds);
                 Assert.GreaterOrEqual(winner, 0, $"Partie bloquée ({special}, seed {seed}, manche {rounds})");
+            }
+        }
+
+        private int _lastGameTurns;
+
+        /// <summary>
+        /// Mesure (pas une vérification) : manches et tours d'une partie de 4 bots
+        /// Normal selon le nombre de niveaux — sert à afficher une durée estimée.
+        /// </summary>
+        [Test]
+        public void GameLength_report()
+        {
+            AIDifficulty[] seats = { AIDifficulty.Normal, AIDifficulty.Normal, AIDifficulty.Normal, AIDifficulty.Normal };
+            foreach (int levels in new[] { 4, 6, 8 })
+            {
+                int totalRounds = 0, totalTurns = 0, games = 0;
+                for (int seed = 1; seed <= 8; seed++)
+                {
+                    int winner = PlayGame(seats, seed * 313, new MatchRules(levelsToWin: levels), out int rounds);
+                    if (winner < 0) continue;
+                    games++;
+                    totalRounds += rounds;
+                    totalTurns += _lastGameTurns;
+                }
+                Debug.Log($"[GameLength] niveaux={levels} parties={games} " +
+                          $"manches={totalRounds / (float)Mathf.Max(1, games):0.0} " +
+                          $"tours={totalTurns / (float)Mathf.Max(1, games):0}");
+                Assert.Greater(games, 0);
             }
         }
 

@@ -53,14 +53,101 @@ namespace LevelUp.Core
         /// <summary>Temps maximum par tour en secondes (0 = sans limite).</summary>
         public int TurnTimerSeconds { get; }
 
+        // ─── Variantes (toutes à leur valeur classique par défaut) ───────
+
+        /// <summary>Niveaux gagnés par le joueur qui sort après avoir posé (classique : 2 ; variante : 1).</summary>
+        public int GoOutBonus { get; }
+
+        /// <summary>
+        /// Vrai : le bonus de sortie ne fait pas sauter le dernier niveau — son
+        /// contrat doit être posé pour gagner (classique : faux).
+        /// </summary>
+        public bool FinalLevelRequired { get; }
+
+        /// <summary>
+        /// Nombre maximum de tours par joueur dans une manche (0 = sans limite,
+        /// classique). À la limite, la manche s'arrête : la main la plus légère l'emporte.
+        /// </summary>
+        public int RoundTurnLimit { get; }
+
+        /// <summary>
+        /// Coup de pouce : un joueur resté deux manches de suite au même niveau
+        /// reçoit une carte de plus à la donne (classique : faux).
+        /// </summary>
+        public bool CatchUp { get; }
+
+        public const int MaxRoundTurnLimit = 60;
+
+        /// <summary>Manches sans monter de niveau avant le coup de pouce.</summary>
+        public const int CatchUpAfterRounds = 2;
+
         public MatchRules(bool randomContracts = false, SpecialCardsMode specialCards = SpecialCardsMode.None,
-            int handSize = DefaultHandSize, int levelsToWin = Constants.MaxLevel, int turnTimerSeconds = 0)
+            int handSize = DefaultHandSize, int levelsToWin = Constants.MaxLevel, int turnTimerSeconds = 0,
+            int goOutBonus = 2, bool finalLevelRequired = false, int roundTurnLimit = 0, bool catchUp = false)
         {
             RandomContracts = randomContracts;
             SpecialCards = specialCards > SpecialCardsMode.All ? SpecialCardsMode.None : specialCards;
             HandSize = Clamp(handSize, MinHandSize, MaxHandSize);
             LevelsToWin = Clamp(levelsToWin, MinLevelsToWin, Constants.MaxLevel);
             TurnTimerSeconds = Clamp(turnTimerSeconds, 0, MaxTurnTimerSeconds);
+            GoOutBonus = Clamp(goOutBonus, 1, 2);
+            FinalLevelRequired = finalLevelRequired;
+            RoundTurnLimit = Clamp(roundTurnLimit, 0, MaxRoundTurnLimit);
+            CatchUp = catchUp;
+        }
+
+        /// <summary>Écrit les règles (sauvegarde, réseau) — même ordre que <see cref="Read"/>.</summary>
+        public void Write(System.IO.BinaryWriter w)
+        {
+            w.Write(RandomContracts);
+            w.Write((byte)SpecialCards);
+            w.Write(HandSize);
+            w.Write(LevelsToWin);
+            w.Write(TurnTimerSeconds);
+            w.Write((byte)GoOutBonus);
+            w.Write(FinalLevelRequired);
+            w.Write((byte)RoundTurnLimit);
+            w.Write(CatchUp);
+        }
+
+        /// <summary>Relit des règles ; chaque valeur est bornée par le constructeur.</summary>
+        public static MatchRules Read(System.IO.BinaryReader r)
+        {
+            bool random = r.ReadBoolean();
+            byte special = r.ReadByte();
+            int hand = r.ReadInt32();
+            int levels = r.ReadInt32();
+            int timer = r.ReadInt32();
+            int bonus = r.ReadByte();
+            bool final = r.ReadBoolean();
+            int limit = r.ReadByte();
+            bool catchUp = r.ReadBoolean();
+            return new MatchRules(random, (SpecialCardsMode)special, hand, levels, timer, bonus, final, limit, catchUp);
+        }
+
+        /// <summary>Règles sérialisées (réseau : envoyées comme un bloc d'octets).</summary>
+        public byte[] ToBytes()
+        {
+            using System.IO.MemoryStream stream = new(24);
+            using (System.IO.BinaryWriter w = new(stream)) Write(w);
+            return stream.ToArray();
+        }
+
+        /// <summary>Relit un bloc d'octets ; null s'il est tronqué ou trop long.</summary>
+        public static MatchRules? FromBytes(byte[]? bytes)
+        {
+            if (bytes == null || bytes.Length == 0 || bytes.Length > 64) return null;
+            try
+            {
+                using System.IO.MemoryStream stream = new(bytes, false);
+                using System.IO.BinaryReader r = new(stream);
+                MatchRules rules = Read(r);
+                return stream.Position == stream.Length ? rules : null;
+            }
+            catch (System.Exception)
+            {
+                return null;
+            }
         }
 
         /// <summary>Nombre de jokers dans le paquet.</summary>
@@ -78,7 +165,8 @@ namespace LevelUp.Core
         /// <summary>Vrai si ces règles sont exactement celles du jeu d'origine.</summary>
         public bool IsClassic =>
             !RandomContracts && SpecialCards == SpecialCardsMode.None && HandSize == DefaultHandSize
-            && LevelsToWin == Constants.MaxLevel && TurnTimerSeconds == 0;
+            && LevelsToWin == Constants.MaxLevel && TurnTimerSeconds == 0
+            && GoOutBonus == 2 && !FinalLevelRequired && RoundTurnLimit == 0 && !CatchUp;
 
         private static int Clamp(int v, int min, int max) => v < min ? min : v > max ? max : v;
 
@@ -89,7 +177,11 @@ namespace LevelUp.Core
                    && o.SpecialCards == SpecialCards
                    && o.HandSize == HandSize
                    && o.LevelsToWin == LevelsToWin
-                   && o.TurnTimerSeconds == TurnTimerSeconds;
+                   && o.TurnTimerSeconds == TurnTimerSeconds
+                   && o.GoOutBonus == GoOutBonus
+                   && o.FinalLevelRequired == FinalLevelRequired
+                   && o.RoundTurnLimit == RoundTurnLimit
+                   && o.CatchUp == CatchUp;
         }
 
         public override int GetHashCode()
@@ -101,6 +193,10 @@ namespace LevelUp.Core
                 h = h * 31 + HandSize;
                 h = h * 31 + LevelsToWin;
                 h = h * 31 + TurnTimerSeconds;
+                h = h * 31 + GoOutBonus;
+                h = h * 31 + (FinalLevelRequired ? 1 : 0);
+                h = h * 31 + RoundTurnLimit;
+                h = h * 31 + (CatchUp ? 1 : 0);
                 return h;
             }
         }

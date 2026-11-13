@@ -317,12 +317,49 @@ namespace LevelUp.UI
             return PlayerProfile.GamesWon >= CosmeticUnlockWins[variant];
         }
 
+        // ─── Variantes de règles (toutes coupées par défaut : jeu classique) ───
+
+        /// <summary>Tours par joueur quand la variante « limite de tours » est active.</summary>
+        public const int TurnLimitValue = 25;
+
+        /// <summary>Sortir ne rapporte qu'un niveau (classique : deux).</summary>
+        public static bool VariantSingleBonus
+        {
+            get => PlayerPrefs.GetInt("levelup.variant.bonus1", 0) == 1;
+            set { PlayerPrefs.SetInt("levelup.variant.bonus1", value ? 1 : 0); Notify(); }
+        }
+
+        /// <summary>Le dernier niveau ne se saute pas : son contrat doit être posé.</summary>
+        public static bool VariantFinalLevel
+        {
+            get => PlayerPrefs.GetInt("levelup.variant.final", 0) == 1;
+            set { PlayerPrefs.SetInt("levelup.variant.final", value ? 1 : 0); Notify(); }
+        }
+
+        /// <summary>Manche limitée à <see cref="TurnLimitValue"/> tours par joueur.</summary>
+        public static bool VariantTurnLimit
+        {
+            get => PlayerPrefs.GetInt("levelup.variant.turnlimit", 0) == 1;
+            set { PlayerPrefs.SetInt("levelup.variant.turnlimit", value ? 1 : 0); Notify(); }
+        }
+
+        /// <summary>Une carte de plus pour qui reste deux manches au même niveau.</summary>
+        public static bool VariantCatchUp
+        {
+            get => PlayerPrefs.GetInt("levelup.variant.catchup", 0) == 1;
+            set { PlayerPrefs.SetInt("levelup.variant.catchup", value ? 1 : 0); Notify(); }
+        }
+
         /// <summary>Règles de la prochaine partie, d'après les réglages enregistrés.</summary>
         public static MatchRules BuildMatchRules()
         {
             EnsureLoaded();
             return new MatchRules(_randomContracts, (SpecialCardsMode)_specialCards, _handSize,
-                _levelsToWin, _turnTimer);
+                _levelsToWin, _turnTimer,
+                goOutBonus: VariantSingleBonus ? 1 : 2,
+                finalLevelRequired: VariantFinalLevel,
+                roundTurnLimit: VariantTurnLimit ? TurnLimitValue : 0,
+                catchUp: VariantCatchUp);
         }
 
         private static void EnsureLoaded()

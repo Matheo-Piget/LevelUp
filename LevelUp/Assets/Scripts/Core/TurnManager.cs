@@ -36,8 +36,19 @@ namespace LevelUp.Core
         /// <summary>
         /// Démarre le premier tour du round.
         /// </summary>
+        /// <summary>Tours terminés (défausses) depuis le début de la manche.</summary>
+        public int TurnsThisRound { get; private set; }
+
+        /// <summary>Compte un tour terminé (appelé par l'exécuteur à chaque défausse).</summary>
+        internal void CountTurn() => TurnsThisRound++;
+
+        /// <summary>Vrai si la variante « limite de tours » arrête la manche maintenant.</summary>
+        public bool TurnLimitReached(MatchRules rules, int playerCount) =>
+            rules.RoundTurnLimit > 0 && TurnsThisRound >= rules.RoundTurnLimit * playerCount;
+
         public void StartRound(int startingPlayerIndex)
         {
+            TurnsThisRound = 0;
             _currentPlayerIndex = startingPlayerIndex;
             _currentPhase = TurnPhase.Draw;
 

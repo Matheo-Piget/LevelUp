@@ -115,7 +115,8 @@ namespace LevelUp.Network
         /// v5 : sortie par pose (main vide), phases Piocher/Défausser non passables,
         /// commandes refusées hors manche, points de pénalité dans l'empreinte.
         /// </summary>
-        private const int ProtocolVersion = 5;
+        /// v6 : règles envoyées en bloc (variantes), emotes, revanche votée.
+        private const int ProtocolVersion = 6;
 
         private const float ReconnectGraceSeconds = 45f;
         private const float ReconnectWindowSeconds = 90f;
@@ -962,21 +963,19 @@ namespace LevelUp.Network
 
         private static void WriteRules(FastBufferWriter writer, MatchRules rules)
         {
-            writer.WriteValueSafe(rules.RandomContracts);
-            writer.WriteValueSafe((byte)rules.SpecialCards);
-            writer.WriteValueSafe(rules.HandSize);
-            writer.WriteValueSafe(rules.LevelsToWin);
-            writer.WriteValueSafe(rules.TurnTimerSeconds);
+            // Bloc d'octets au format du Core (le même que la sauvegarde solo).
+            byte[] bytes = rules.ToBytes();
+            writer.WriteValueSafe((byte)bytes.Length);
+            writer.WriteBytesSafe(bytes);
         }
 
         private static MatchRules ReadRules(FastBufferReader reader)
         {
-            reader.ReadValueSafe(out bool randomContracts);
-            reader.ReadValueSafe(out byte special);
-            reader.ReadValueSafe(out int handSize);
-            reader.ReadValueSafe(out int levelsToWin);
-            reader.ReadValueSafe(out int turnTimer);
-            return new MatchRules(randomContracts, (SpecialCardsMode)special, handSize, levelsToWin, turnTimer);
+            reader.ReadValueSafe(out byte length);
+            if (length == 0 || length > 64) return MatchRules.Classic;
+            byte[] bytes = new byte[length];
+            reader.ReadBytesSafe(ref bytes, length);
+            return MatchRules.FromBytes(bytes) ?? MatchRules.Classic;
         }
 
         private static void WriteStartHeader(FastBufferWriter writer, OnlineStartData data)

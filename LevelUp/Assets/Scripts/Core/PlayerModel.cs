@@ -42,6 +42,9 @@ namespace LevelUp.Core
         /// </summary>
         public int SkipCount { get; internal set; }
 
+        /// <summary>Manches consécutives terminées sans changer de niveau (variante « coup de pouce »).</summary>
+        public int RoundsAtLevel { get; internal set; }
+
         /// <summary>Compat : indique si le joueur sera sauté au moins une fois.</summary>
         public bool IsSkipped => SkipCount > 0;
 

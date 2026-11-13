@@ -68,6 +68,28 @@ namespace LevelUp.UI
             if (rules.LevelsToWin != Constants.MaxLevel) Add($"{rules.LevelsToWin} niv.");
             if (rules.HandSize != MatchRules.DefaultHandSize) Add($"{rules.HandSize} cartes");
             if (rules.RandomContracts) Add("Contrats variés");
+            if (rules.GoOutBonus != 2) Add("Sortie +1");
+            if (rules.FinalLevelRequired) Add("Dernier niv. obligatoire");
+            if (rules.RoundTurnLimit > 0) Add($"{rules.RoundTurnLimit} tours max");
+            if (rules.CatchUp) Add("Coup de pouce");
+            return sb.ToString();
+        }
+
+        /// <summary>Explication des variantes actives, en une phrase chacune (vide si aucune).</summary>
+        public static string VariantsCaption(MatchRules rules)
+        {
+            StringBuilder sb = new();
+            void Add(string s)
+            {
+                if (sb.Length > 0) sb.Append(' ');
+                sb.Append(s);
+            }
+
+            if (rules.GoOutBonus != 2) Add("Sortir ne fait monter que d'un niveau.");
+            if (rules.FinalLevelRequired) Add("Le dernier contrat doit être posé pour gagner.");
+            if (rules.RoundTurnLimit > 0)
+                Add($"Après {rules.RoundTurnLimit} tours chacun, la manche s'arrête : seuls ceux qui ont posé montent.");
+            if (rules.CatchUp) Add("Deux manches au même niveau : une carte de plus à la donne.");
             return sb.ToString();
         }
     }

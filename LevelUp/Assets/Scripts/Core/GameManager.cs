@@ -154,7 +154,7 @@ namespace LevelUp.Core
             _actionHandler = new ActionCardHandler(_deckManager, _players);
             _turnManager = new TurnManager(_players, _actionHandler);
             _executor = new GameCommandExecutor(
-                _players, _deckManager, _turnManager, _actionHandler, _config);
+                _players, _deckManager, _turnManager, _actionHandler, _config, _rules);
 
             _roundStarterIndex = 0;
 
@@ -187,6 +187,17 @@ namespace LevelUp.Core
                 }
             }
 
+            // Variante « coup de pouce » : une carte de plus pour qui piétine.
+            if (_rules.CatchUp)
+            {
+                foreach (PlayerModel player in _players)
+                {
+                    if (player.RoundsAtLevel < MatchRules.CatchUpAfterRounds) continue;
+                    CardModel? extra = _deckManager.DrawFromPile();
+                    if (extra.HasValue) player.AddToHand(extra.Value);
+                }
+            }
+
             EventBus.Publish(new RoundStartedEvent { RoundNumber = _roundNumber });
 
             _turnManager!.StartRound(_roundStarterIndex);
@@ -196,7 +207,7 @@ namespace LevelUp.Core
         /// Appelé quand un joueur termine son tour en vidant sa main.
         /// Gère la fin du round et la progression des niveaux.
         /// </summary>
-        internal void OnRoundEnd(int winnerIndex, bool deckExhausted = false)
+        internal void OnRoundEnd(int winnerIndex, bool deckExhausted = false, bool turnLimitReached = false)
         {
             _state = GameState.EndRound;
             LastRoundWinner = winnerIndex;
@@ -222,20 +233,28 @@ namespace LevelUp.Core
 
             EventBus.Publish(new RoundEndedEvent { WinnerIndex = winnerIndex });
 
-            // Le gagnant du round saute un niveau (bonus)
-            if (winner.HasLaidDownThisRound)
+            // Le gagnant du round saute un niveau (bonus de sortie, réglable).
+            // Manche arrêtée par la limite de tours : personne n'est sorti, donc
+            // pas de bonus — le « gagnant » ne monte que s'il avait posé.
+            int winnerBefore = winner.CurrentLevel;
+            int gain = turnLimitReached
+                ? (winner.HasLaidDownThisRound ? 1 : 0)
+                : (winner.HasLaidDownThisRound ? _rules.GoOutBonus : 1);
+            winner.CurrentLevel += gain;
+            // Variante : le bonus ne fait pas sauter le dernier niveau.
+            if (_rules.FinalLevelRequired && winnerBefore < _rules.LevelsToWin
+                && winner.CurrentLevel > _rules.LevelsToWin)
             {
-                winner.CurrentLevel += 2;
+                winner.CurrentLevel = _rules.LevelsToWin;
             }
-            else
+            if (winner.CurrentLevel != winnerBefore)
             {
-                winner.CurrentLevel += 1;
+                EventBus.Publish(new LevelCompletedEvent
+                {
+                    PlayerIndex = winnerIndex,
+                    Level = winner.CurrentLevel - 1
+                });
             }
-            EventBus.Publish(new LevelCompletedEvent
-            {
-                PlayerIndex = winnerIndex,
-                Level = winner.CurrentLevel - 1
-            });
 
             // Les autres joueurs ayant posé leur niveau avancent d'un niveau
             foreach (PlayerModel player in _players)
@@ -274,7 +293,12 @@ namespace LevelUp.Core
             }
 
             int[] levelsAfter = new int[count];
-            for (int i = 0; i < count; i++) levelsAfter[i] = _players[i].CurrentLevel;
+            for (int i = 0; i < count; i++)
+            {
+                levelsAfter[i] = _players[i].CurrentLevel;
+                // Suivi pour la variante « coup de pouce ».
+                _players[i].RoundsAtLevel = levelsAfter[i] == levelsBefore[i] ? _players[i].RoundsAtLevel + 1 : 0;
+            }
 
             bool gameOver = champion >= 0;
             EventBus.Publish(new RoundSummaryEvent
@@ -282,6 +306,7 @@ namespace LevelUp.Core
                 RoundNumber = _roundNumber,
                 WinnerIndex = winnerIndex,
                 DeckExhausted = deckExhausted,
+                TurnLimitReached = turnLimitReached,
                 AwaitingNextRound = !gameOver && !AutoStartNextRound,
                 GameOver = gameOver,
                 LevelsBefore = levelsBefore,
@@ -366,7 +391,8 @@ namespace LevelUp.Core
                 // après défausse). Si l'exécuteur fournit un override (deck épuisé),
                 // c'est lui qui prime.
                 int winner = result.WinnerOverride ?? _turnManager!.CurrentPlayerIndex;
-                OnRoundEnd(winner, result.WinnerOverride.HasValue);
+                bool limit = result.WinnerOverride.HasValue && _turnManager!.TurnLimitReached(_rules, _players.Count);
+                OnRoundEnd(winner, result.WinnerOverride.HasValue && !limit, limit);
             }
 
             // Notifier APRÈS le traitement complet (fin de round comprise) : le
@@ -471,6 +497,7 @@ namespace LevelUp.Core
                 {
                     h = h * 31 + _turnManager.CurrentPlayerIndex;
                     h = h * 31 + (int)_turnManager.CurrentPhase;
+                    h = h * 31 + _turnManager.TurnsThisRound;
                 }
 
                 foreach (PlayerModel p in _players)
@@ -479,6 +506,7 @@ namespace LevelUp.Core
                     h = h * 31 + (p.HasLaidDownThisRound ? 1 : 0);
                     h = h * 31 + p.SkipCount;
                     h = h * 31 + p.PenaltyPoints;
+                    h = h * 31 + p.RoundsAtLevel;
 
                     // Somme commutative : l'ordre local de la main n'influe pas.
                     int handSum = 0;

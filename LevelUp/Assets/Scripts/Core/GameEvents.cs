@@ -92,6 +92,8 @@ namespace LevelUp.Core
         public int RoundNumber;
         public int WinnerIndex;
         public bool DeckExhausted;
+        /// <summary>Manche arrêtée par la variante « limite de tours ».</summary>
+        public bool TurnLimitReached;
         public bool AwaitingNextRound;
         public bool GameOver;
         public int[] LevelsBefore;

@@ -116,9 +116,21 @@ namespace LevelUp.UI
                     RefreshCaptions();
                 });
 
+            // Variantes (coupées par défaut : jeu classique), une pastille chacune.
+            GameObject variants = UIControls.Row(panel.transform, "Variants", inner, 44f, 10f);
+            UIControls.RowLabel(variants.transform, "Variantes", 110f);
+            VariantChip(variants.transform, "VarBonus", "Sortie : +1 niveau",
+                () => GameSettings.VariantSingleBonus, v => GameSettings.VariantSingleBonus = v);
+            VariantChip(variants.transform, "VarFinal", "Dernier niveau obligatoire",
+                () => GameSettings.VariantFinalLevel, v => GameSettings.VariantFinalLevel = v);
+            VariantChip(variants.transform, "VarLimit", $"{GameSettings.TurnLimitValue} tours max",
+                () => GameSettings.VariantTurnLimit, v => GameSettings.VariantTurnLimit = v);
+            VariantChip(variants.transform, "VarCatchUp", "Coup de pouce",
+                () => GameSettings.VariantCatchUp, v => GameSettings.VariantCatchUp = v);
+
             // Explication des cartes spéciales, sur toute la largeur
             Image note = UISkin.Rect(panel.transform, "SpecialNote", UISkin.Base, 16f);
-            UISkin.Size(note.gameObject, inner, 64f);
+            UISkin.Size(note.gameObject, inner, 76f);
             UISkin.HRow(note.gameObject, 14f, new RectOffset(18, 18, 10, 10), TextAnchor.MiddleLeft);
             UISkin.Outline(note.rectTransform, 16f, 1f, UISkin.Line).gameObject.AddComponent<LayoutElement>()
                 .ignoreLayout = true;
@@ -127,7 +139,7 @@ namespace LevelUp.UI
             TextMeshProUGUI j = UISkin.Text(badge.transform, "J", "J", 20f, UISkin.AccentPale, TextWeight.Display,
                 TextAlignmentOptions.Center);
             UISkin.Stretch(j.rectTransform);
-            _specialCaption = UIControls.Paragraph(note.transform, "Caption", "", inner - 36f - 14f - 36f, 44f, 14f,
+            _specialCaption = UIControls.Paragraph(note.transform, "Caption", "", inner - 36f - 14f - 36f, 58f, 13f,
                 UISkin.TextMuted, TextAlignmentOptions.MidlineLeft);
 
             // Pied : annuler | action principale
@@ -153,6 +165,38 @@ namespace LevelUp.UI
             _refreshers.Add(UIControls.Segmented(row.transform, "Segmented", options, ControlWidth, get, set));
         }
 
+        /// <summary>Pastille à bascule : pleine (accent) quand la variante est active.</summary>
+        private void VariantChip(Transform parent, string name, string label, Func<bool> get, Action<bool> set)
+        {
+            Image chip = UISkin.Rect(parent, name, UISkin.Base, 20f, raycast: true);
+            UISkin.HRow(chip.gameObject, 0f, new RectOffset(16, 16, 0, 0), TextAnchor.MiddleCenter);
+            UISkin.Size(chip.gameObject, -1f, 40f);
+            Image ring = UISkin.Outline(chip.rectTransform, 20f, 1f, UISkin.LineStrong);
+            ring.gameObject.AddComponent<LayoutElement>().ignoreLayout = true;
+            TextMeshProUGUI text = UISkin.Text(chip.transform, "Label", label, 14f, UISkin.TextMuted,
+                TextWeight.SemiBold, TextAlignmentOptions.Center);
+
+            void Refresh()
+            {
+                bool on = get();
+                chip.color = on ? UISkin.Accent : UISkin.Base;
+                text.color = on ? UISkin.OnAccent : UISkin.TextMuted;
+                ring.enabled = !on;
+            }
+
+            Button button = chip.gameObject.AddComponent<Button>();
+            button.transition = Selectable.Transition.None;
+            button.onClick.AddListener(() =>
+            {
+                set(!get());
+                Refresh();
+                RefreshCaptions();
+                AudioManager.Instance?.PlayClick();
+            });
+            _refreshers.Add(Refresh);
+            Refresh();
+        }
+
         private static int IndexOf(int[] options, int value)
         {
             for (int i = 0; i < options.Length; i++)
@@ -168,8 +212,29 @@ namespace LevelUp.UI
             return best;
         }
 
+        private string _playersCaptionBase = "";
+
+        /// <summary>
+        /// Durée indicative d'une partie. Base mesurée (BotSimulationTests.GameLength_report,
+        /// 4 bots Normal, règles classiques) : 45 / 73 / 116 tours pour 4 / 6 / 8 niveaux.
+        /// Hypothèse : ~5 s par tour en moyenne (humain + bots), plus le récap de
+        /// chaque manche — un ordre de grandeur, pas une promesse.
+        /// </summary>
+        private static int EstimatedMinutes(int levels)
+        {
+            float turns = levels <= 4 ? 45f : levels <= 6 ? 73f : 116f;
+            float rounds = levels <= 4 ? 3f : levels <= 6 ? 4.5f : 6f;
+            float seconds = turns * 5f + rounds * 15f;
+            return Mathf.Max(5, Mathf.RoundToInt(seconds / 60f / 5f) * 5);
+        }
+
         private void RefreshCaptions()
         {
+            if (_playersCaption != null)
+            {
+                _playersCaption.text = _playersCaptionBase
+                    + $"\nPartie en {GameSettings.LevelsToWin} niveaux : environ {EstimatedMinutes(GameSettings.LevelsToWin)} min.";
+            }
             if (_specialCaption != null)
             {
                 string text = MatchRulesText.SpecialCardsCaption((SpecialCardsMode)GameSettings.SpecialCards);
@@ -179,6 +244,8 @@ namespace LevelUp.UI
                 {
                     text += "\n<color=#E6CB92>Main de 8 : les contrats des niveaux 7 et 8 seront très durs.</color>";
                 }
+                string variants = MatchRulesText.VariantsCaption(GameSettings.BuildMatchRules());
+                if (variants.Length > 0) text += "\n<color=#E6CB92>" + variants + "</color>";
                 _specialCaption.richText = true;
                 _specialCaption.text = text;
             }
@@ -215,7 +282,7 @@ namespace LevelUp.UI
             if (_title != null) _title.text = title;
             if (_subtitle != null) _subtitle.text = subtitle;
             if (_primaryLabel != null) _primaryLabel.text = primary;
-            if (_playersCaption != null) _playersCaption.text = playersCaption;
+            _playersCaptionBase = playersCaption;
             foreach (Action refresh in _refreshers) refresh();
             RefreshCaptions();
 

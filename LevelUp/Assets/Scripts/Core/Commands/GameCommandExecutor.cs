@@ -18,19 +18,22 @@ namespace LevelUp.Core
         private readonly TurnManager _turnManager;
         private readonly ActionCardHandler _actionHandler;
         private readonly GameConfig _config;
+        private readonly MatchRules _rules;
 
         public GameCommandExecutor(
             List<PlayerModel> players,
             DeckManager deckManager,
             TurnManager turnManager,
             ActionCardHandler actionHandler,
-            GameConfig config)
+            GameConfig config,
+            MatchRules? rules = null)
         {
             _players = players;
             _deckManager = deckManager;
             _turnManager = turnManager;
             _actionHandler = actionHandler;
             _config = config;
+            _rules = rules ?? MatchRules.Classic;
         }
 
         /// <summary>
@@ -362,6 +365,11 @@ namespace LevelUp.Core
 
             if (player.IsHandEmpty)
                 return CommandResult.RoundComplete();
+
+            // Variante « limite de tours » : la manche s'arrête, la main la plus légère l'emporte.
+            _turnManager.CountTurn();
+            if (_turnManager.TurnLimitReached(_rules, _players.Count))
+                return CommandResult.RoundCompleteWithWinner(FindPlayerWithSmallestHand(), "Limite de tours");
 
             _turnManager.NextTurn();
             return CommandResult.Ok();
