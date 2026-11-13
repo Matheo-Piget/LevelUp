@@ -116,6 +116,7 @@ namespace LevelUp.UI
         private void OnSettingsChanged()
         {
             if (_canvas != null) ConfigureScaler(_canvas);
+            ApplyZones();
             ApplyFelt();
             RefreshContract();
             RefreshPhaseHint();
@@ -399,6 +400,10 @@ namespace LevelUp.UI
             RectTransform? deck = table != null ? Find(table, "DeckArea") : null;
             RectTransform? piles = Find(root, "DiscarPileView");
 
+            _deckArea = deck;
+            _pilesArea = piles;
+            _tableArea = table;
+
             // Pioche : à gauche du tapis
             if (deck != null)
             {
@@ -444,6 +449,51 @@ namespace LevelUp.UI
                 if (img != null) img.color = new Color(0f, 0f, 0f, 0f);
                 // Au-dessus du tapis
                 table.SetSiblingIndex(felt.GetSiblingIndex() + 1);
+            }
+
+            ApplyZones();
+        }
+
+        private RectTransform? _deckArea;
+        private RectTransform? _pilesArea;
+        private RectTransform? _tableArea;
+
+        /// <summary>
+        /// Répartition du tapis. Interface « grande » (téléphone) : pioche et
+        /// défausses compactes (grille 2×2) dans une colonne étroite à gauche,
+        /// la table des combinaisons récupère la largeur. Sinon : la maquette
+        /// d'origine (pioche + défausses en ligne sur 824 unités).
+        /// </summary>
+        private void ApplyZones()
+        {
+            bool compact = GameSettings.UiScale == 1;
+            float leftZone = compact ? 392f : FeltLeftZone;
+
+            if (_deckArea != null)
+            {
+                _deckArea.anchoredPosition = compact ? new Vector2(40f + 52f, 14f) : new Vector2(64f + 60f, 16f);
+                _deckArea.localScale = Vector3.one * (compact ? 0.86f : 1f);
+            }
+            if (_deckCaption != null)
+            {
+                _deckCaption.rectTransform.anchoredPosition =
+                    compact ? new Vector2(40f + 52f, -82f) : new Vector2(64f + 60f, -96f);
+                _deckCaption.fontSize = compact ? 15f : 13f;
+            }
+            if (_pilesArea != null)
+            {
+                _pilesArea.anchoredPosition = compact ? new Vector2(158f, 0f) : new Vector2(64f + 120f + 40f, 0f);
+                _pilesArea.sizeDelta = compact ? new Vector2(226f, 300f) : new Vector2(560f, 210f);
+                DiscardPileView? view = _pilesArea.GetComponent<DiscardPileView>();
+                if (view != null) view.Compact = compact;
+            }
+            if (_tableArea != null)
+            {
+                _tableArea.offsetMin = new Vector2(Margin + leftZone, FeltBottom + (compact ? 24f : 36f));
+                _tableArea.offsetMax = new Vector2(-(Margin + (compact ? 28f : 48f)), -(FeltTop + (compact ? 24f : 36f)));
+                // La table se remet en page à sa nouvelle largeur.
+                TableView? tv = _tableArea.GetComponentInChildren<TableView>(true);
+                if (tv != null) tv.Relayout();
             }
         }
 
@@ -522,7 +572,7 @@ namespace LevelUp.UI
             _skipOutline.enabled = false;
 
             // Consigne de l'étape en cours, juste au-dessus des étapes.
-            _phaseHint = UISkin.Text(root, "PhaseHint", "", 15f, UISkin.TextMuted, TextWeight.Medium,
+            _phaseHint = UISkin.Text(root, "PhaseHint", "", 17f, UISkin.TextMuted, TextWeight.Medium,
                 TextAlignmentOptions.Center);
             UISkin.Place(_phaseHint.rectTransform, new Vector2(0.5f, 0f), new Vector2(0.5f, 0f),
                 new Vector2(0f, StepperBottom + 60f), new Vector2(1100f, 24f));

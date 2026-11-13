@@ -72,7 +72,7 @@ namespace LevelUp.UI
     {
       if (_content != null || _tableContainer == null) return;
 
-      TextMeshProUGUI title = UISkin.Text(_tableContainer, "Title", "COMBINAISONS POSÉES", 13f,
+      TextMeshProUGUI title = UISkin.Text(_tableContainer, "Title", "COMBINAISONS POSÉES", 15f,
           UISkin.TextMuted, TextWeight.SemiBold, TextAlignmentOptions.MidlineLeft);
       title.characterSpacing = 8f;
       RectTransform trt = title.rectTransform;
@@ -83,7 +83,7 @@ namespace LevelUp.UI
       trt.offsetMax = new Vector2(0f, 0f);
 
       TextMeshProUGUI hint = UISkin.Text(_tableContainer, "Hint",
-          "Glisse une carte sur une combinaison pour la compléter", 13f, UISkin.TextMuted,
+          "Glisse une carte sur une combinaison pour la compléter", 15f, UISkin.TextMuted,
           TextWeight.Regular, TextAlignmentOptions.MidlineRight);
       RectTransform hrt = hint.rectTransform;
       hrt.anchorMin = new Vector2(0.4f, 1f);
@@ -191,6 +191,15 @@ namespace LevelUp.UI
       }
       _playerMeldGroups[playerIndex].Add(groupView);
       return groupView;
+    }
+
+    /// <summary>Remet la table en page (la zone a changé de taille).</summary>
+    public void Relayout()
+    {
+      if (_content == null) return;
+      // La taille du rect n'est connue qu'après la passe de mise en page.
+      Canvas.ForceUpdateCanvases();
+      LayoutTable();
     }
 
     private static MeldType ClassifyMeld(List<CardModel> cards)

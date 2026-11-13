@@ -88,16 +88,75 @@ namespace LevelUp.UI
 
       if (_container == null) return;
 
-      float totalWidth = (playerCount - 1) * _pileSpacing;
-      float startX = -totalWidth / 2f;
-
       for (int i = 0; i < playerCount; i++)
       {
-        _pileSlots.Add(CreatePileSlot(i, playerNames[i], startX + i * _pileSpacing));
+        _pileSlots.Add(CreatePileSlot(i, playerNames[i], 0f));
       }
+      LayoutSlots();
 
       _phase = TurnPhase.Draw;
       SetActivePlayer(0);
+    }
+
+    private bool _compact;
+
+    /// <summary>
+    /// Disposition compacte (téléphone) : piles réduites en grille de deux
+    /// colonnes, pour laisser la largeur du tapis aux combinaisons posées.
+    /// </summary>
+    public bool Compact
+    {
+      get => _compact;
+      set
+      {
+        if (_compact == value) return;
+        _compact = value;
+        LayoutSlots();
+      }
+    }
+
+    private const float CompactScale = 0.7f;
+
+    private void LayoutSlots()
+    {
+      int n = _pileSlots.Count;
+      if (n == 0) return;
+
+      if (!_compact)
+      {
+        float startX = -(n - 1) * _pileSpacing / 2f;
+        for (int i = 0; i < n; i++)
+        {
+          RectTransform rt = (RectTransform)_pileSlots[i].Root.transform;
+          rt.anchoredPosition = new Vector2(startX + i * _pileSpacing, 0f);
+          rt.localScale = Vector3.one;
+          SetLabelStyle(_pileSlots[i], 13f, new Vector2(150f, 18f), -86f);
+        }
+        return;
+      }
+
+      const float colStep = 106f, rowStep = 150f;
+      int rows = (n + 1) / 2;
+      for (int i = 0; i < n; i++)
+      {
+        int col = i % 2, row = i / 2;
+        // Dernière rangée incomplète (3 joueurs) : pile centrée.
+        bool alone = row == rows - 1 && n % 2 == 1;
+        float x = alone ? 0f : (col - 0.5f) * colStep;
+        float y = ((rows - 1) * 0.5f - row) * rowStep;
+        RectTransform rt = (RectTransform)_pileSlots[i].Root.transform;
+        rt.anchoredPosition = new Vector2(x, y);
+        rt.localScale = Vector3.one * CompactScale;
+        // Texte agrandi d'autant : il garde sa taille à l'écran malgré la réduction.
+        SetLabelStyle(_pileSlots[i], 21f, new Vector2(150f, 28f), -94f);
+      }
+    }
+
+    private static void SetLabelStyle(PileSlot slot, float size, Vector2 rect, float y)
+    {
+      slot.LabelText.fontSize = size;
+      slot.LabelText.rectTransform.sizeDelta = rect;
+      slot.LabelText.rectTransform.anchoredPosition = new Vector2(0f, y);
     }
 
     private PileSlot CreatePileSlot(int playerIndex, string playerName, float xPos)

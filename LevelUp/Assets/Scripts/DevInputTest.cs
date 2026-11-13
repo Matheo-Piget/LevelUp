@@ -369,7 +369,7 @@ namespace LevelUp.Core
         {
             Rect r = _tableRect!.rect;
             return RectTransformUtility.WorldToScreenPoint(null,
-                _tableRect.TransformPoint(new Vector3(r.center.x, r.yMin + r.height * 0.12f, 0f)));
+                _tableRect.TransformPoint(new Vector3(r.xMin + r.width * 0.88f, r.yMin + r.height * 0.2f, 0f)));
         }
 
         private int IndexInView(int cardId)
