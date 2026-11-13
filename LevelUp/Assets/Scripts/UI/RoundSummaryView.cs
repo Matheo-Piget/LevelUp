@@ -43,6 +43,14 @@ namespace LevelUp.UI
         /// <summary>Le joueur (ou la suite automatique) demande la manche suivante.</summary>
         public event Action<int>? ContinueRequested;
 
+        /// <summary>« Revoir » : rejouer la manche qui vient de finir (solo).</summary>
+        public event Action? ReplayRequested;
+
+        /// <summary>Vrai si la relecture est possible (branché par le bootstrapper).</summary>
+        public Func<bool>? ReplayAvailable { get; set; }
+
+        private GameObject? _replayButton;
+
         public bool IsVisible => _visible;
 
         public void Setup(RectTransform parent)
@@ -80,6 +88,10 @@ namespace LevelUp.UI
             _waitingLabel = UISkin.Text(footer.transform, "Waiting", "", 14f, UISkin.TextMuted,
                 TextWeight.Medium, TextAlignmentOptions.MidlineLeft);
             UISkin.Size(_waitingLabel.gameObject, -1f, 40f, 1f);
+            Button replay = UIFactory.CreateButton(footer.transform, "BtnReplayRound", "REVOIR",
+                new Vector2(150f, 52f), () => ReplayRequested?.Invoke(), subtle: true);
+            UISkin.Size(replay.gameObject, 150f, 52f);
+            _replayButton = replay.gameObject;
             Button cont = UIFactory.CreateButton(footer.transform, "BtnContinue", "CONTINUER",
                 new Vector2(260f, 60f), RequestContinue, primary: true);
             UISkin.Size(cont.gameObject, 260f, 60f);
@@ -205,6 +217,7 @@ namespace LevelUp.UI
             _remaining = AutoContinueSeconds;
             _shownSecond = -1;
             if (_continueButton != null) _continueButton.SetActive(_canContinue);
+            if (_replayButton != null) _replayButton.SetActive(ReplayAvailable != null && ReplayAvailable());
             if (_waitingLabel != null)
             {
                 _waitingLabel.text = _canContinue ? "" : "L'hôte lance la manche suivante…";

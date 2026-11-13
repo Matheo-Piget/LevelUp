@@ -52,6 +52,12 @@ namespace LevelUp.Core
                 tutorial = false;
                 _passMode = i >= 0;
             }
+            if (i < 0)
+            {
+                i = Array.IndexOf(args, "-replaytest");
+                _passMode = false;
+                _replayMode = i >= 0;
+            }
             if (i < 0 || i + 1 >= args.Length) return;
             _tutorialMode = tutorial;
 
@@ -111,7 +117,7 @@ namespace LevelUp.Core
             }
 
             PointerInput.Override = () => _pointer;
-            IEnumerator scenarios = _tutorialMode ? RunTutorial() : _passMode ? RunPassAndPlay() : RunScenarios();
+            IEnumerator scenarios = _tutorialMode ? RunTutorial() : _passMode ? RunPassAndPlay() : _replayMode ? RunReplay() : RunScenarios();
             while (true)
             {
                 bool more;
@@ -282,6 +288,58 @@ namespace LevelUp.Core
                 }
             }
             if (!laid) Line("IGNORE", "pose au relâchement sur la table", "contrat jamais réalisable en 30 tours");
+        }
+
+        private static bool _replayMode;
+
+        /// <summary>Finit une manche, la revoit, et vérifie que l'état et la sauvegarde n'ont pas bougé.</summary>
+        private IEnumerator RunReplay()
+        {
+            if (_gm?.TurnManager == null)
+            {
+                Line("ECHEC", "relecture", "partie introuvable");
+                yield break;
+            }
+
+            // Le joueur joue « au plus simple » (commandes directes) jusqu'à la fin de la manche.
+            float waited = 0f;
+            while (_gm.State == GameState.PlayerTurn && waited < 150f)
+            {
+                if (_gm.TurnManager.CurrentPlayerIndex == 0)
+                {
+                    IGameCommand? next = TurnAutoPlay.NextCommand(_gm);
+                    if (next != null) _gm.ExecuteCommand(next);
+                }
+                waited += Time.unscaledDeltaTime;
+                yield return null;
+            }
+            Check("relecture : manche terminée", _gm.State == GameState.EndRound, $"état {_gm.State} après {waited:0} s");
+            if (_gm.State != GameState.EndRound) yield break;
+            yield return new WaitForSecondsRealtime(1.0f);
+
+            int hash = _gm.ComputeStateHash();
+            int round = _gm.RoundNumber;
+            string savePath = Path.Combine(Application.persistentDataPath, "partie-solo.sav");
+            long saveLength = new FileInfo(savePath).Length;
+            Check("relecture : bouton « Revoir » proposé", FindButton("BtnReplayRound") != null, "");
+            yield return Capture("r1_recap");
+
+            Click("BtnReplayRound");
+            yield return new WaitForSecondsRealtime(3.0f);
+            Check("relecture : la manche se rejoue", _gm.State == GameState.PlayerTurn && _gm.RoundNumber == round,
+                $"état {_gm.State}, manche {_gm.RoundNumber}");
+            // Pendant la relecture, une commande du joueur est refusée.
+            CommandResult intruder = _gm.ExecuteCommand(new DrawFromDeckCommand(_gm.TurnManager.CurrentPlayerIndex));
+            Check("relecture : commandes du joueur bloquées", intruder.Error == CommandError.Filtered, $"{intruder.Error}");
+            yield return Capture("r2_relecture");
+
+            Click("BtnReplaySkip");
+            yield return new WaitForSecondsRealtime(2.5f);
+            Check("relecture : retour au même état", _gm.State == GameState.EndRound && _gm.ComputeStateHash() == hash,
+                $"état {_gm.State}, empreinte identique : {_gm.ComputeStateHash() == hash}");
+            Check("relecture : sauvegarde inchangée", new FileInfo(savePath).Length == saveLength,
+                $"{saveLength} -> {new FileInfo(savePath).Length} octets");
+            Check("relecture : récap rouvert", FindButton("BtnContinue") != null, "");
         }
 
         private static bool _passMode;

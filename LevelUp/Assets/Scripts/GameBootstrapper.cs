@@ -13,7 +13,7 @@ namespace LevelUp.Core
     /// Câble tous les systèmes, applique le style visuel, et lance les parties :
     /// solo (nouvelle, reprise de sauvegarde, donne du jour) et en ligne.
     /// </summary>
-    public class GameBootstrapper : MonoBehaviour
+    public partial class GameBootstrapper : MonoBehaviour
     {
         [Header("Core")]
         [SerializeField] private GameManager? _gameManager;
@@ -402,6 +402,7 @@ namespace LevelUp.Core
             _dailyKey = dailyKey;
             _soloDifficulty = difficulty;
             _gameManager.StartGame(setups, seed, rules);
+            BeginLog(setups, seed, rules);
             _saveActive = SaveGame.Begin(setups, seed, rules, difficulty, mode, dailyKey);
 
             CreateAIPlayers(difficulty, mode == 1 ? seed : (int?)null);
@@ -433,6 +434,7 @@ namespace LevelUp.Core
                 _handView?.SetPlayerIndex(0);
 
                 bool ok = _gameManager.RebuildFromHistory(saved.Players, saved.Seed, saved.Rules, saved.History);
+                if (ok) BeginLog(saved.Players, saved.Seed, saved.Rules, saved.History);
                 if (!ok || _gameManager.State == GameState.GameOver || _gameManager.State == GameState.Setup)
                 {
                     Debug.LogWarning("[Save] Sauvegarde incohérente : nouvelle partie");
@@ -560,6 +562,8 @@ namespace LevelUp.Core
                 _roundSummary = gameObject.AddComponent<RoundSummaryView>();
                 _roundSummary.Setup(safeRoot);
                 _roundSummary.ContinueRequested += HandleContinue;
+                _roundSummary.ReplayRequested += HandleReplayRound;
+                _roundSummary.ReplayAvailable = CanReplayRound;
 
                 AnimatedBackground animBg = gameObject.AddComponent<AnimatedBackground>();
                 animBg.Setup(_mainCanvas);
@@ -640,7 +644,12 @@ namespace LevelUp.Core
 
         private void OnCommandExecuted(IGameCommand command, CommandResult result)
         {
-            if (_saveActive && !GameSession.IsOnline) SaveGame.Append(command);
+            if (_replaying) return; // relecture : déjà dans le journal et la sauvegarde
+            if (_saveActive && !GameSession.IsOnline)
+            {
+                SaveGame.Append(command);
+                _log.Add(command);
+            }
         }
 
         /// <summary>CONTINUER sur le récap (ou suite automatique) : manche suivante.</summary>
@@ -657,6 +666,7 @@ namespace LevelUp.Core
             PlayerModel? local = GameSession.GetLocalPlayer(_gameManager);
             if (_tutorial != null && _tutorial.IsRunning) return; // le tutoriel ne compte pas
             if (_passAndPlay != null && _passAndPlay.Active) return;
+            if (_replaying) return;
             if (local != null && local.Index == evt.WinnerIndex) PlayerProfile.RecordRoundWon();
         }
 

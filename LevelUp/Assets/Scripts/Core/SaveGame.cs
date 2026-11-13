@@ -100,9 +100,15 @@ namespace LevelUp.Core
         public static SavedGame? Load()
         {
             byte[] data;
+            long stamp;
             try
             {
-                if (!File.Exists(FilePath)) return null;
+                FileInfo info = new(FilePath);
+                if (!info.Exists) return null;
+                // Le menu relit la sauvegarde plusieurs fois de suite (état du
+                // bouton, confirmation, reprise) : même fichier = même résultat.
+                stamp = unchecked(info.LastWriteTimeUtc.Ticks * 31 + info.Length);
+                if (_cached != null && _cachedPath == FilePath && _cachedStamp == stamp) return _cached;
                 data = File.ReadAllBytes(FilePath);
             }
             catch (Exception e)
@@ -112,9 +118,21 @@ namespace LevelUp.Core
             }
 
             SavedGame? saved = Parse(data, out bool truncated);
-            if (saved != null && truncated) Rewrite(saved);
+            if (saved != null && truncated)
+            {
+                Rewrite(saved); // le fichier change : pas de mise en cache cette fois
+                _cached = null;
+                return saved;
+            }
+            _cached = saved;
+            _cachedPath = FilePath;
+            _cachedStamp = stamp;
             return saved;
         }
+
+        private static SavedGame? _cached;
+        private static string? _cachedPath;
+        private static long _cachedStamp;
 
         /// <summary>Supprime la sauvegarde (partie terminée ou illisible).</summary>
         public static void Delete()
