@@ -218,6 +218,8 @@ namespace LevelUp.Core
         {
             if (!_running) return;
             _step = Steps.Length;
+            PlayerPrefs.SetInt(Achievements.KeyTutorialDone, 1);
+            PlayerPrefs.Save();
             if (_text != null)
             {
                 _text.text = "<b>Bravo, tu connais l'essentiel !</b> Les contrats se corsent à chaque niveau. " +

@@ -77,7 +77,7 @@ namespace LevelUp.UI
             rt.anchorMin = new Vector2(0.5f, 0f);
             rt.anchorMax = new Vector2(0.5f, 0f);
             rt.pivot = new Vector2(0.5f, 0f);
-            rt.anchoredPosition = new Vector2(0f, 322f);
+            rt.anchoredPosition = new Vector2(0f, 334f);
             rt.sizeDelta = new Vector2(640f, 72f);
 
             _bg = _root.GetComponent<Image>();
@@ -211,6 +211,13 @@ namespace LevelUp.UI
             // bouton POSER apparaît dès qu'une carte est sélectionnée, le Core tranche.
             if (!GameSettings.HintContract)
             {
+                // Rien de sélectionné : aucun panneau (la consigne d'étape, discrète,
+                // suffit). Il n'apparaît qu'avec le bouton POSER, quand on choisit des cartes.
+                if (selectedCount == 0)
+                {
+                    Hide();
+                    return;
+                }
                 _label.text = $"NIVEAU {current.CurrentLevel}  <size=15><color=#A7A198>{requirementText}</color></size>";
                 _label.color = Constants.TextAccent;
                 // Consigne neutre (aucune information de jeu) : comment poser, et

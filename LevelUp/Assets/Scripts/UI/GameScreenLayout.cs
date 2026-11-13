@@ -605,7 +605,11 @@ namespace LevelUp.UI
                 TurnPhase.Draw => "Pioche : touche la pioche, ou une défausse pour prendre sa carte",
                 // Étape Poser : le panneau de sélection (juste au-dessus) donne déjà
                 // la consigne — pas de second texte dessous (ils se chevauchaient).
-                TurnPhase.LayDown => "",
+                // Sans l'aide « détection du contrat », le panneau de sélection n'apparaît
+                // qu'avec des cartes choisies : la consigne (neutre) est donnée ici.
+                TurnPhase.LayDown => GameSettings.HintContract || me.HasLaidDownThisRound
+                    ? ""
+                    : "Sélectionne ton contrat pour le poser, ou glisse une carte sur ta défausse",
                 TurnPhase.AddToMelds => me.HasLaidDownThisRound
                     ? GameSettings.HintPlayable
                         ? "Complète la table : glisse une carte, ou touche une carte marquée « + »"

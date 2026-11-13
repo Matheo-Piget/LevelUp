@@ -128,6 +128,7 @@ namespace LevelUp.Core
                 _mainMenu.Show();
             }
             RefreshMenuStatus();
+            OfferTutorialOnce();
         }
 
         private void RefreshMenuStatus()
@@ -347,6 +348,33 @@ namespace LevelUp.Core
 
         private DailyPanel? _dailyPanel;
         private TutorialDirector? _tutorial;
+
+        /// <summary>
+        /// Toute première ouverture (aucune partie jouée, tutoriel jamais proposé) :
+        /// on propose le tutoriel une seule fois, sans l'imposer.
+        /// </summary>
+        private void OfferTutorialOnce()
+        {
+            const string key = "levelup.tutorial.offered";
+            if (_mainCanvas == null || PlayerPrefs.GetInt(key, 0) == 1) return;
+            PlayerPrefs.SetInt(key, 1);
+            if (PlayerProfile.GamesPlayed > 0 || PlayerPrefs.GetInt(Achievements.KeyTutorialDone, 0) == 1) return;
+            // Pas pendant un harnais de test (il pilote le menu lui-même).
+            foreach (string arg in System.Environment.GetCommandLineArgs())
+            {
+                if (arg.EndsWith("test") || arg == "-autoshot") return;
+            }
+
+            if (_confirm == null)
+            {
+                _confirm = gameObject.AddComponent<ConfirmDialog>();
+                _confirm.Setup(_mainCanvas.transform);
+            }
+            _confirm.Show("Bienvenue !",
+                "Première partie ? Le tutoriel te montre un tour complet en deux minutes : piocher, poser ton contrat, " +
+                "compléter la table et défausser. Tu le retrouves ensuite dans « Comment jouer ».",
+                "JOUER LE TUTORIEL", StartTutorial, null);
+        }
         private ChallengeDirector? _challengeDirector;
         private int _challengeSeed;
         private int _challengeDifficulty;

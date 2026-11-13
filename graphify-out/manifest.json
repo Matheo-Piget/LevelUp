@@ -78,9 +78,9 @@
     "semantic_hash": ""
   },
   "LevelUp/Assets/Scripts/Core/GameManager.cs": {
-    "mtime": 1794579043.627915,
-    "seen": 1794579283.9503052,
-    "ast_hash": "0f89351a4204ab8c4a6107aec4472b0b",
+    "mtime": 1794580454.7424881,
+    "seen": 1794581142.4700391,
+    "ast_hash": "5385151a2f0ddf718a885562c95789ef",
     "semantic_hash": ""
   },
   "LevelUp/Assets/Scripts/Core/GameSession.cs": {
@@ -108,9 +108,9 @@
     "semantic_hash": ""
   },
   "LevelUp/Assets/Scripts/GameBootstrapper.cs": {
-    "mtime": 1794580170.2650192,
-    "seen": 1794580403.9874225,
-    "ast_hash": "e85d3ad88b356cb5190a66a6ff74ca6a",
+    "mtime": 1794580536.4240177,
+    "seen": 1794581142.4700391,
+    "ast_hash": "0b1aad807a60383a6939d139b9c74cf9",
     "semantic_hash": ""
   },
   "LevelUp/Assets/Scripts/Network/NetworkManager.cs": {
@@ -198,9 +198,9 @@
     "semantic_hash": ""
   },
   "LevelUp/Assets/Scripts/UI/MainMenuController.cs": {
-    "mtime": 1794493650.6768298,
-    "seen": 1794494506.7642496,
-    "ast_hash": "aa0d046da8b5cedbcaa0fd1951b0cf1a",
+    "mtime": 1794580441.1399415,
+    "seen": 1794581142.4700391,
+    "ast_hash": "6a45c01bbab893accad826eb20125b50",
     "semantic_hash": ""
   },
   "LevelUp/Assets/Scripts/UI/OnlinePanel.cs": {
@@ -338,9 +338,9 @@
     "semantic_hash": ""
   },
   "LevelUp/Assets/Scripts/Core/ContractCatalog.cs": {
-    "mtime": 1793981388.6163878,
-    "seen": 1793981744.7155838,
-    "ast_hash": "98da318ab1feaae8c0eda40bacdec4d7",
+    "mtime": 1794580454.6982725,
+    "seen": 1794581142.4700391,
+    "ast_hash": "f0cdadaafc598e3e79bab93ff75077cc",
     "semantic_hash": ""
   },
   "LevelUp/Assets/Scripts/UI/ConnectionOverlay.cs": {
@@ -356,9 +356,9 @@
     "semantic_hash": ""
   },
   "CLAUDE.md": {
-    "mtime": 1794494268.065677,
-    "seen": 1794494506.7642496,
-    "ast_hash": "68ba04a806a3ff2458a1abe576865a21",
+    "mtime": 1794580888.5857587,
+    "seen": 1794581142.4700391,
+    "ast_hash": "32629c2acdd228aec82f27cfba11901d",
     "semantic_hash": ""
   },
   "LevelUp/Assets/TextMesh Pro/Fonts/LiberationSans - OFL.txt": {
@@ -506,9 +506,9 @@
     "semantic_hash": ""
   },
   "LevelUp/Assets/Scripts/UI/RoundSummaryView.cs": {
-    "mtime": 1794580170.3075545,
-    "seen": 1794580403.9874225,
-    "ast_hash": "993de44b61cc57effb37faeab6daee0a",
+    "mtime": 1794580454.786908,
+    "seen": 1794581142.4700391,
+    "ast_hash": "f2e2e50636a07ac41ffb86a5818a0d42",
     "semantic_hash": ""
   },
   "LevelUp/Assets/Scripts/UI/TargetChooser.cs": {
@@ -620,9 +620,9 @@
     "semantic_hash": ""
   },
   "LevelUp/Assets/Scripts/DevInputTest.cs": {
-    "mtime": 1794580207.4589305,
-    "seen": 1794580403.9874225,
-    "ast_hash": "42310ef105247e1a0cafa69ab4ad35f6",
+    "mtime": 1794580599.968737,
+    "seen": 1794581142.4700391,
+    "ast_hash": "9a66cc719f0bcad720a11e16acf65730",
     "semantic_hash": ""
   },
   "LevelUp/Assets/Scripts/UI/PointerInput.cs": {
@@ -731,6 +731,36 @@
     "mtime": 1794580155.1267953,
     "seen": 1794580403.9874225,
     "ast_hash": "cac542143bcab106a1b0e2c291748733",
+    "semantic_hash": ""
+  },
+  "LevelUp/Assets/Scripts/ChallengeDirector.cs": {
+    "mtime": 1794580516.0828948,
+    "seen": 1794581142.4700391,
+    "ast_hash": "4d7d9ceb19cf7882892b71258e7f4453",
+    "semantic_hash": ""
+  },
+  "LevelUp/Assets/Scripts/Core/ChallengeGenerator.cs": {
+    "mtime": 1794580840.395864,
+    "seen": 1794581142.4700391,
+    "ast_hash": "ceef749cdf03bdcc6ef08b2481c47f6a",
+    "semantic_hash": ""
+  },
+  "LevelUp/Assets/Tests/EditMode/ChallengeGeneratorTests.cs": {
+    "mtime": 1794580572.323732,
+    "seen": 1794581142.4700391,
+    "ast_hash": "cf07876a4f6addd1a7917baec034931b",
+    "semantic_hash": ""
+  },
+  "tools/quick-compile.sh": {
+    "mtime": 1794580860.8957188,
+    "seen": 1794581142.4700391,
+    "ast_hash": "e75f1d6cd14dc489a970c6f4b53b8c08",
+    "semantic_hash": ""
+  },
+  "tools/run-harness.sh": {
+    "mtime": 1794580860.917851,
+    "seen": 1794581142.4700391,
+    "ast_hash": "a16b3f39c9c8ba9ef6fa4fe9a3b2634b",
     "semantic_hash": ""
   }
 }

@@ -20,6 +20,7 @@ namespace LevelUp.UI
         private CanvasGroup? _cg;
         private TMP_InputField? _input;
         private TextMeshProUGUI? _stats;
+        private TextMeshProUGUI? _achievements;
         private Action? _onSaved;
         private bool _isVisible;
 
@@ -62,6 +63,9 @@ namespace LevelUp.UI
 
             _stats = UISkin.Text(panel.transform, "Stats", "", 14f, UISkin.TextMuted, TextWeight.Medium);
             UISkin.Size(_stats.gameObject, Inner, 20f);
+            _achievements = UIControls.Paragraph(panel.transform, "Achievements", "", Inner, 232f, 14f, UISkin.TextColor);
+            _achievements.richText = true;
+            _achievements.lineSpacing = 6f;
 
             GameObject footer = UIControls.Row(panel.transform, "Footer", Inner, 60f, 14f);
             footer.GetComponent<HorizontalLayoutGroup>().childAlignment = TextAnchor.MiddleRight;
@@ -87,6 +91,7 @@ namespace LevelUp.UI
                 _input.text = PlayerProfile.HasCustomName ? PlayerProfile.Name : "";
             }
             if (_stats != null) _stats.text = StatsLine();
+            if (_achievements != null) _achievements.text = Achievements.Describe();
 
             if (_isVisible) return;
             _isVisible = true;
