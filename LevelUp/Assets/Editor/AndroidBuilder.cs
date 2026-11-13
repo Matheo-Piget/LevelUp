@@ -33,7 +33,16 @@ namespace LevelUp.EditorTools
             PlayerSettings.SetScriptingBackend(BuildTargetGroup.Android, ScriptingImplementation.IL2CPP);
             PlayerSettings.Android.targetArchitectures = AndroidArchitecture.ARM64;
             EditorUserBuildSettings.buildAppBundle = false;
+            // APK de test : signature de débogage, même si une clé Play Store est
+            // configurée dans le projet (son mot de passe n'est pas disponible ici).
+            bool oldCustomKeystore = PlayerSettings.Android.useCustomKeystore;
+            PlayerSettings.Android.useCustomKeystore = false;
+            try { BuildApkTo(output); }
+            finally { PlayerSettings.Android.useCustomKeystore = oldCustomKeystore; }
+        }
 
+        private static void BuildApkTo(string output)
+        {
             string[] scenes = EditorBuildSettings.scenes
                 .Where(s => s.enabled)
                 .Select(s => s.path)
