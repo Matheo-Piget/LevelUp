@@ -48,6 +48,9 @@ namespace LevelUp.UI
         /// <summary>Déclenché quand le joueur lance la donne du jour.</summary>
         public event Action? OnDailyClicked;
 
+        /// <summary>Bouton DÉFI : un casse-tête court (poser un contrat en quelques pioches connues).</summary>
+        public event Action? OnChallengeClicked;
+
         private GameObject? _resumeButton;
         private GameObject? _playPrimary;
         private GameObject? _playSecondary;
@@ -301,8 +304,14 @@ namespace LevelUp.UI
             _playSecondary = playAlt.gameObject;
             _playSecondary.SetActive(false);
 
-            Button daily = UIFactory.CreateButton(nav.transform, "BtnDaily", "DONNE DU JOUR",
-                new Vector2(400f, 60f), () => OnDailyClicked?.Invoke());
+            // Donne du jour et Défi sur une même rangée (le menu garde sa hauteur).
+            GameObject dailyRow = UIControls.Row(nav.transform, "DailyRow", 400f, 60f, 8f);
+            Button daily = UIFactory.CreateButton(dailyRow.transform, "BtnDaily", "DONNE DU JOUR",
+                new Vector2(282f, 60f), () => OnDailyClicked?.Invoke());
+            UISkin.Size(daily.gameObject, 282f, 60f);
+            Button challenge = UIFactory.CreateButton(dailyRow.transform, "BtnChallenge", "DÉFI",
+                new Vector2(110f, 60f), () => OnChallengeClicked?.Invoke());
+            UISkin.Size(challenge.gameObject, 110f, 60f);
             LeftAlign(daily);
             _dailyStatus = UISkin.Text(daily.transform, "Status", "", 13f, UISkin.TextMuted, TextWeight.Medium,
                 TextAlignmentOptions.MidlineRight);

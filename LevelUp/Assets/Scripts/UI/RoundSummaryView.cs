@@ -51,6 +51,9 @@ namespace LevelUp.UI
 
         private GameObject? _replayButton;
 
+        /// <summary>Vrai : le récap ne s'affiche pas (mode Défi).</summary>
+        public static bool Suppressed { get; set; }
+
         public bool IsVisible => _visible;
 
         public void Setup(RectTransform parent)
@@ -122,6 +125,7 @@ namespace LevelUp.UI
 
         private void OnRoundSummary(RoundSummaryEvent evt)
         {
+            if (Suppressed) return; // un mode scénarisé (Défi) affiche son propre résultat
             if (evt.GameOver || !evt.AwaitingNextRound) return; // l'écran de fin prend le relais
             Show(evt);
         }

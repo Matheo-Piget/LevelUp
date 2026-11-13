@@ -186,9 +186,21 @@ namespace LevelUp.Core
             return new ContractPlan(variants, true);
         }
 
+        private List<LevelValidator.LevelRequirement>? _custom;
+
+        /// <summary>Plan à contrat unique imposé pour tous les niveaux (mode Défi).</summary>
+        public static ContractPlan Custom(IReadOnlyList<LevelValidator.LevelRequirement> requirements)
+        {
+            return new ContractPlan(new int[Constants.MaxLevel], false)
+            {
+                _custom = new List<LevelValidator.LevelRequirement>(requirements)
+            };
+        }
+
         /// <summary>Exigences du niveau (1-8) selon ce plan.</summary>
         public List<LevelValidator.LevelRequirement> GetRequirements(int level)
         {
+            if (_custom != null) return new List<LevelValidator.LevelRequirement>(_custom);
             int variant = level >= 1 && level <= _variants.Length ? _variants[level - 1] : 0;
             return ContractCatalog.Get(level, variant);
         }

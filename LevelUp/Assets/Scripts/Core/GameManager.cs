@@ -144,6 +144,12 @@ namespace LevelUp.Core
                 ? ContractPlan.CreateRandom(seed)
                 : ContractPlan.Classic;
 
+            if (NextContracts != null)
+            {
+                GameSession.Contracts = NextContracts;
+                NextContracts = null;
+            }
+
             int totalPlayers = setups.Count;
             for (int i = 0; i < totalPlayers; i++)
             {
@@ -375,6 +381,9 @@ namespace LevelUp.Core
         /// tutoriel ou d'un défi), consommé par <see cref="StartGame(IReadOnlyList{PlayerSetup}, int, MatchRules)"/>.
         /// </summary>
         public List<CardModel>? NextDeckOrder { get; set; }
+
+        /// <summary>Contrats imposés pour la PROCHAINE partie (mode Défi), consommés par StartGame.</summary>
+        public ContractPlan? NextContracts { get; set; }
 
         /// <summary>
         /// Filtre optionnel (tutoriel, défi) : une commande refusée par le filtre

@@ -101,9 +101,17 @@ Deja livres : snap magnetique + snap-back, tri valeur/couleur anime, daltonisme 
 pseudo + salon en ligne, ecran "Nouvelle partie", minuteur, recap de manche, classement final, bots v2,
 audio procedural + vibrations, fin de manche explicite, sauvegarde/reprise solo, donne du jour, "Comment jouer",
 interface "grande" (telephones), cosmetiques (tapis / dos), points de penalite, bouton Retour Android.
-1. Mise en page telephone dediee (au-dela du facteur 1.3 de `GameSettings.UiScaleFactor`) : cibles >= 7 mm.
-2. Pass-and-play local (plusieurs humains sur un appareil) : `NetworkManager` n'est qu'un stub.
-3. Tutoriel jouable (donne scriptee) ; decoupage de `GameInputController` (etat par phase) et d'`OnlineSession`.
+Livres en novembre 2026 (audit) : file d'attente d'action pendant les animations, pose au relachement, defausse en
+touchant une pile, toast en haut, mise en page telephone (piles compactes), cartes action non ramassables et hors
+combinaisons (RulesVersion 6), garde de re-entrance, `CommandError`, `CardViewPool`, `FrameBudget` (rendu a la
+demande), variantes de regles (`MatchRules` : bonus de sortie, dernier niveau obligatoire, limite de tours, coup de
+pouce), bots a personnalite (`BotPersonas`), conseil (`CoachAdvisor`, option OFF), fenetre Donne du jour, tutoriel
+jouable (`TutorialDirector`), pass-and-play (`PassAndPlayController`), revoir la manche, mode Defi
+(`ChallengeDirector` / `ChallengeGenerator`), emotes + revanche votee en ligne (`SocialProtocol`, protocole 6).
+1. A valider sur appareil : tailles tactiles reelles, emotes et revanche a plusieurs (Relay).
+2. Decoupage de `GameInputController` (etat par phase), d'`OnlineSession` et de `GameBootstrapper` (deja en
+   fichiers partiels : `.Social`, `.Replay`).
+3. Atlas des sprites proceduraux de `UISkin`, polices SDF pre-generees ; retirer le stub `NetworkManager` de la scene.
 4. `InputSystemUIInputModule` a la place de `StandaloneInputModule` (a verifier sur appareil).
 
 ## 10) Carte du code (a lire AVANT d'explorer : evite de tout relire)
@@ -178,6 +186,13 @@ interface "grande" (telephones), cosmetiques (tapis / dos), points de penalite, 
   `LevelUp.exe -screen-fullscreen 0 -screen-width 1600 -screen-height 720 -autoshot <dossier>`
   (`DevAutoScreenshot` : menu, profil, options, en ligne, nouvelle partie, jeu, table, pose, cibles, recap,
   pause, fin de partie). APK : `AndroidBuilder.BuildApk`.
+- Gestes et modes sans appareil (`DevInputTest`, build PC) : `LevelUp.exe ... -inputtest <dossier>` (aussi
+  `-tutorialtest`, `-passtest`, `-replaytest`, `-challengetest`) rejoue de vrais gestes via `PointerInput.Override`
+  et ecrit `input-report.txt` (OK / ECHEC par scenario). Tout nouveau geste ou mode doit y avoir son scenario.
+- Scripts : `tools/quick-compile.sh` (erreurs C# en ~10 s avec le Roslyn d'Unity), `tools/run-harness.sh <mode>
+  <dossier>` (lance un harnais en protegeant la sauvegarde solo du PC), `tools/run-tests.ps1 [-Build]`.
+- Un scenario qui impose une donne ou filtre des commandes passe par `GameManager.NextDeckOrder`,
+  `NextContracts` et `CommandFilter` (tutoriel, defi, relecture) : jamais de mutation directe du modele.
 - Les `.meta` des nouveaux scripts sont generes par Unity : les commiter.
 
 ## graphify

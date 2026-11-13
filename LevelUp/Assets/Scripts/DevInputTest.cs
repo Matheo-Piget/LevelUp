@@ -58,6 +58,12 @@ namespace LevelUp.Core
                 _passMode = false;
                 _replayMode = i >= 0;
             }
+            if (i < 0)
+            {
+                i = Array.IndexOf(args, "-challengetest");
+                _replayMode = false;
+                _challengeMode = i >= 0;
+            }
             if (i < 0 || i + 1 >= args.Length) return;
             _tutorialMode = tutorial;
 
@@ -94,6 +100,10 @@ namespace LevelUp.Core
             {
                 RulesPanel.TutorialRequested?.Invoke();
             }
+            else if (_challengeMode)
+            {
+                Click("BtnChallenge");
+            }
             else
             {
                 Click("BtnPlay");
@@ -117,7 +127,7 @@ namespace LevelUp.Core
             }
 
             PointerInput.Override = () => _pointer;
-            IEnumerator scenarios = _tutorialMode ? RunTutorial() : _passMode ? RunPassAndPlay() : _replayMode ? RunReplay() : RunScenarios();
+            IEnumerator scenarios = _tutorialMode ? RunTutorial() : _passMode ? RunPassAndPlay() : _replayMode ? RunReplay() : _challengeMode ? RunChallenge() : RunScenarios();
             while (true)
             {
                 bool more;
@@ -288,6 +298,66 @@ namespace LevelUp.Core
                 }
             }
             if (!laid) Line("IGNORE", "pose au relâchement sur la table", "contrat jamais réalisable en 30 tours");
+        }
+
+        private static bool _challengeMode;
+
+        /// <summary>Joue un défi : garde les bonnes cartes, pose dès que possible.</summary>
+        private IEnumerator RunChallenge()
+        {
+            if (_gm?.TurnManager == null || _hand == null || _input == null || _deck == null || _piles == null)
+            {
+                Line("ECHEC", "défi", "objets de jeu introuvables");
+                yield break;
+            }
+            PlayerModel me = _gm.Players[0];
+            Check("défi : seul à la table, main de 8", _gm.Players.Count == 1 && me.Hand.Count == ChallengeGenerator.HandSize,
+                $"{_gm.Players.Count} joueur(s), main {me.Hand.Count}");
+            Check("défi : main de départ incomplète",
+                !LevelValidator.IsLevelComplete(me.Hand, me.CurrentLevel, _gm.Config, out _), "");
+            yield return Capture("c1_debut");
+
+            int solvedBefore = ChallengeDirector.Solved;
+            CommandResult pick = _gm.ExecuteCommand(new DrawFromDiscardCommand(0, 0));
+            Check("défi : pioche dans la défausse interdite", pick.Error == CommandError.Filtered, $"{pick.Error}");
+
+            AI.BotBrain brain = new(_gm, 0, AI.AIDifficulty.Hard, 1);
+            bool laid = false;
+            for (int turn = 0; turn < ChallengeGenerator.Draws && !laid; turn++)
+            {
+                yield return Tap(Center(_deck));
+                yield return new WaitForSecondsRealtime(0.8f);
+                if (LevelValidator.IsLevelComplete(me.Hand, me.CurrentLevel, _gm.Config, out _))
+                {
+                    _input.SelectSuggestedLayDown();
+                    yield return new WaitForSecondsRealtime(0.3f);
+                    if (turn == 0) yield return Capture("c2_pose");
+                    _input.OnLayDownButton();
+                    yield return new WaitForSecondsRealtime(0.6f);
+                    if (LayDownChooser.IsOpen) Click("Option0");
+                    yield return new WaitForSecondsRealtime(0.8f);
+                    laid = me.HasLaidDownThisRound;
+                    break;
+                }
+                // Défausse d'une carte qui n'aide pas le contrat (glissée sur la défausse).
+                CardModel toss = brain.ChooseDiscard().Card;
+                yield return Drag(CardPos(Mathf.Max(0, IndexInView(toss.Id))), PilePos(0));
+                yield return new WaitForSecondsRealtime(0.5f);
+            }
+
+            Check("défi : contrat posé dans les 6 pioches", laid, $"posé : {laid}");
+            Check("défi : résultat annoncé et compté",
+                FindButton("BtnConfirmOk") != null && ChallengeDirector.Solved == solvedBefore + 1,
+                $"réussis {solvedBefore} -> {ChallengeDirector.Solved}");
+            yield return Capture("c3_resultat");
+
+            // « Plus difficile » : un nouveau défi démarre.
+            Click("BtnConfirmOk");
+            yield return new WaitForSecondsRealtime(3.0f);
+            Check("défi : le défi suivant démarre", _gm.State == GameState.PlayerTurn && !_gm.Players[0].HasLaidDownThisRound
+                                                    && _gm.Players[0].Hand.Count == ChallengeGenerator.HandSize,
+                $"état {_gm.State}, main {_gm.Players[0].Hand.Count}");
+            PlayerPrefs.SetInt("levelup.challenge.solved", solvedBefore); // le test ne compte pas
         }
 
         private static bool _replayMode;

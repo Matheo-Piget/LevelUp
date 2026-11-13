@@ -119,6 +119,7 @@ namespace LevelUp.Core
                 _mainMenu.OnResumeClicked += HandleResumeSolo;
                 _mainMenu.OnDailyClicked += HandleDaily;
                 RulesPanel.TutorialRequested = StartTutorial;
+                _mainMenu.OnChallengeClicked += () => StartChallenge(0);
                 RulesPanel.TutorialAvailable = () => !_gameStarted;
                 _mainMenu.Setup(_mainCanvas);
             }
@@ -183,6 +184,7 @@ namespace LevelUp.Core
         {
             Time.timeScale = 1f;
             _tutorial?.End();
+            _challengeDirector?.End();
             _passAndPlay?.End();
             _pauseMenu?.SetPauseButtonVisible(false);
             _emotes?.SetAvailable(false);
@@ -345,6 +347,59 @@ namespace LevelUp.Core
 
         private DailyPanel? _dailyPanel;
         private TutorialDirector? _tutorial;
+        private ChallengeDirector? _challengeDirector;
+        private int _challengeSeed;
+        private int _challengeDifficulty;
+
+        /// <summary>
+        /// Mode Défi : poser un contrat avec une main et six pioches connues.
+        /// <paramref name="difficulty"/> = -1 : rejouer le même défi.
+        /// </summary>
+        private void StartChallenge(int difficulty)
+        {
+            if (_gameManager == null || _gameManager.Config == null || _screenLayout?.Root == null
+                || _mainCanvas == null) return;
+
+            if (difficulty >= 0)
+            {
+                _challengeDifficulty = difficulty;
+                _challengeSeed = System.Environment.TickCount;
+            }
+
+            void Launch()
+            {
+                GameSession.Reset();
+                EnsureGameSystems();
+                CleanupAIPlayers();
+                _passAndPlay?.End();
+                _tutorial?.End();
+                _handView?.SetPlayerIndex(0);
+
+                if (_challengeDirector == null)
+                {
+                    _challengeDirector = gameObject.AddComponent<ChallengeDirector>();
+                    _challengeDirector.Setup(_gameManager, _screenLayout.Root, _mainCanvas.transform,
+                        HandleReturnToMainMenu, StartChallenge);
+                }
+                _challengeDirector.End();
+
+                Challenge challenge = ChallengeGenerator.Create(_gameManager.Config, _challengeSeed, _challengeDifficulty);
+                _saveActive = false; // la partie solo sauvegardée reste intacte
+                _gameManager.NextDeckOrder = challenge.DeckOrder;
+                _gameManager.NextContracts = ContractPlan.Custom(challenge.Contract);
+                _gameManager.StartGame(ChallengeDirector.Seats(), challenge.Seed, ChallengeDirector.Rules);
+
+                RefreshPlayerViews();
+                InitializePauseAndGameOver();
+                _pauseMenu?.SetPauseButtonVisible(true);
+                _gameStarted = true;
+                if (_handView != null) StartCoroutine(FirstDealCascade());
+                _challengeDirector.Begin(challenge);
+            }
+
+            if (_mainMenu != null && _mainMenu.IsVisible) _mainMenu.Hide(Launch);
+            else Launch();
+        }
 
         /// <summary>
         /// Tutoriel jouable : une manche scriptée à deux, sans sauvegarde ni
@@ -667,6 +722,7 @@ namespace LevelUp.Core
             if (_tutorial != null && _tutorial.IsRunning) return; // le tutoriel ne compte pas
             if (_passAndPlay != null && _passAndPlay.Active) return;
             if (_replaying) return;
+            if (_challengeDirector != null && _challengeDirector.IsRunning) return;
             if (local != null && local.Index == evt.WinnerIndex) PlayerProfile.RecordRoundWon();
         }
 
