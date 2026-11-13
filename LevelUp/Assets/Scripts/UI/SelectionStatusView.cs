@@ -77,7 +77,7 @@ namespace LevelUp.UI
             rt.anchorMin = new Vector2(0.5f, 0f);
             rt.anchorMax = new Vector2(0.5f, 0f);
             rt.pivot = new Vector2(0.5f, 0f);
-            rt.anchoredPosition = new Vector2(0f, 334f);
+            rt.anchoredPosition = new Vector2(0f, 346f);
             rt.sizeDelta = new Vector2(640f, 72f);
 
             _bg = _root.GetComponent<Image>();

@@ -70,6 +70,32 @@ namespace LevelUp.EditorTools
 
             Texture2D icon = AssetDatabase.LoadAssetAtPath<Texture2D>(Path);
             PlayerSettings.SetIconsForTargetGroup(BuildTargetGroup.Unknown, new[] { icon });
+
+            // Écran de démarrage : fond graphite, logo Unity (obligatoire en licence
+            // Personal) puis le visuel du jeu.
+            const string splashPath = "Assets/Icon/SplashLogo.png";
+            File.Copy(Path, splashPath, true);
+            AssetDatabase.ImportAsset(splashPath, ImportAssetOptions.ForceUpdate);
+            if (AssetImporter.GetAtPath(splashPath) is TextureImporter splashImporter)
+            {
+                splashImporter.textureType = TextureImporterType.Sprite;
+                splashImporter.spriteImportMode = SpriteImportMode.Single;
+                splashImporter.mipmapEnabled = false;
+                splashImporter.alphaIsTransparency = true;
+                splashImporter.SaveAndReimport();
+            }
+            Sprite logo = AssetDatabase.LoadAssetAtPath<Sprite>(splashPath);
+            PlayerSettings.SplashScreen.show = true;
+            PlayerSettings.SplashScreen.backgroundColor = Hex(0x111516);
+            PlayerSettings.SplashScreen.unityLogoStyle = PlayerSettings.SplashScreen.UnityLogoStyle.LightOnDark;
+            PlayerSettings.SplashScreen.drawMode = PlayerSettings.SplashScreen.DrawMode.AllSequential;
+            PlayerSettings.SplashScreen.logos = new[]
+            {
+                PlayerSettings.SplashScreenLogo.CreateWithUnityLogo(),
+                PlayerSettings.SplashScreenLogo.Create(2f, logo)
+            };
+            PlayerSettings.companyName = "MrDonut Corporate";
+
             AssetDatabase.SaveAssets();
             Debug.Log($"[IconBuilder] Icône générée : {Path}");
         }

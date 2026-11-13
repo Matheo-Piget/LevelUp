@@ -4,7 +4,7 @@
 # Usage : run-harness.sh <autoshot|inputtest|tutorialtest|passtest|replaytest|challengetest> <sous-dossier> [args supplémentaires]
 set -u
 SCR="${TEMP:-/tmp}/levelup-harness"; mkdir -p "$SCR"
-SAVE="/c/Users/mathe/AppData/LocalLow/Indie/LevelUp/partie-solo.sav"
+SAVE="/c/Users/mathe/AppData/LocalLow/MrDonut Corporate/LevelUp/partie-solo.sav"
 MODE="$1"; OUT="$SCR/$2"; shift 2
 mkdir -p "$OUT"
 [ -f "$SAVE" ] && cp -p "$SAVE" "$SCR/partie-solo.sav.bak"
