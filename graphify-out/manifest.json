@@ -228,9 +228,9 @@
     "semantic_hash": ""
   },
   "LevelUp/Assets/Scripts/UI/SelectionStatusView.cs": {
-    "mtime": 1794585903.3929539,
-    "seen": 1794586480.0781944,
-    "ast_hash": "f133cd6fdf02eaab57823856806aa61a",
+    "mtime": 1794586723.0580974,
+    "seen": 1794586795.8060842,
+    "ast_hash": "c7aa83e81e9250844a0649cd49758029",
     "semantic_hash": ""
   },
   "LevelUp/Assets/Scripts/UI/TableView.cs": {
@@ -758,15 +758,15 @@
     "semantic_hash": ""
   },
   "tools/run-harness.sh": {
-    "mtime": 1794580860.917851,
-    "seen": 1794581142.4700391,
-    "ast_hash": "a16b3f39c9c8ba9ef6fa4fe9a3b2634b",
+    "mtime": 1794586790.0833237,
+    "seen": 1794586795.8060842,
+    "ast_hash": "981f98a088b70eabb64c543992057a61",
     "semantic_hash": ""
   },
   "LevelUp/Assets/Editor/IconBuilder.cs": {
-    "mtime": 1794585975.7539165,
-    "seen": 1794586480.0781944,
-    "ast_hash": "2f75649511d88cbae2ad563037b5d4bb",
+    "mtime": 1794586722.742735,
+    "seen": 1794586795.8060842,
+    "ast_hash": "871cdafd541b66e60636d1e2a0c47b4d",
     "semantic_hash": ""
   },
   "LevelUp/Assets/Scripts/UI/Achievements.cs": {
@@ -776,8 +776,14 @@
     "semantic_hash": ""
   },
   "LevelUp/Assets/Icon/AppIcon.png": {
-    "mtime": 1794586007.5430975,
-    "seen": 1794586480.0781944,
+    "mtime": 1794586750.773678,
+    "seen": 1794586795.8060842,
+    "ast_hash": "43c38ec0f21bde7737a15db95d78e47f",
+    "semantic_hash": ""
+  },
+  "LevelUp/Assets/Icon/SplashLogo.png": {
+    "mtime": 1794586750.773678,
+    "seen": 1794586795.8060842,
     "ast_hash": "43c38ec0f21bde7737a15db95d78e47f",
     "semantic_hash": ""
   }

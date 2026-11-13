@@ -34,6 +34,14 @@ namespace LevelUp.Core
             DevAutoScreenshot shot = go.AddComponent<DevAutoScreenshot>();
             shot._dir = dir!;
 
+            // -lang 0|1 : force la langue (français / anglais), rétablie à la fin.
+            string? lang = GetArg("-lang");
+            if (lang != null && int.TryParse(lang, out int l))
+            {
+                shot._savedLang = Utils.Loc.Language;
+                Utils.Loc.Language = l;
+            }
+
             // -uiscale 0|1 : force la taille d'interface (rétablie à la fin).
             string? scale = GetArg("-uiscale");
             if (scale != null && int.TryParse(scale, out int s))
@@ -44,6 +52,7 @@ namespace LevelUp.Core
         }
 
         private int _savedUiScale = -1;
+        private int _savedLang = -1;
 
         // OnlineSession.Leave() remet runInBackground à faux (comportement voulu
         // en jeu) : le harnais le réimpose, sinon une perte de focus le fige.
@@ -172,6 +181,7 @@ namespace LevelUp.Core
             }
 
             if (_savedUiScale >= 0) UI.GameSettings.UiScale = _savedUiScale;
+            if (_savedLang >= 0) Utils.Loc.Language = _savedLang;
             UI.GameSettings.Flush();
             Application.Quit();
         }

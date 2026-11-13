@@ -252,6 +252,7 @@ namespace LevelUp.UI
             GameObject obj = new(name, typeof(RectTransform));
             obj.transform.SetParent(parent, false);
             TextMeshProUGUI tmp = obj.AddComponent<TextMeshProUGUI>();
+            LocDriver.Register(tmp);
             ApplyFont(tmp, weight);
             tmp.text = content;
             tmp.fontSize = size;

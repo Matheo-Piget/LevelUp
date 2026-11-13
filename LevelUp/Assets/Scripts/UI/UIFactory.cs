@@ -246,6 +246,7 @@ namespace LevelUp.UI
             textObj.transform.SetParent(parent, false);
 
             TextMeshProUGUI tmp = textObj.AddComponent<TextMeshProUGUI>();
+            LocDriver.Register(tmp);
             tmp.text = content;
             tmp.fontSize = size;
             tmp.color = color;

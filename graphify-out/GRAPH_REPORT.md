@@ -1,18 +1,18 @@
 # Graph Report - LevelUp  (2026-11-13)
 
 ## Corpus Check
-- 120 files · ~121,660 words
+- 120 files · ~121,738 words
 - Verdict: corpus is large enough that graph structure adds value.
-- Unclassified: 254 file(s) not represented in the graph (top: .meta 185, .asset 34, .shader 13)
-- WARNING: 254 of 384 files seen (66%) have no supported extractor and are missing from this graph entirely. It may look complete while representing only part of the codebase.
+- Unclassified: 255 file(s) not represented in the graph (top: .meta 186, .asset 34, .shader 13)
+- WARNING: 255 of 386 files seen (66%) have no supported extractor and are missing from this graph entirely. It may look complete while representing only part of the codebase.
 
 ## Summary
-- 2732 nodes · 8644 edges · 156 communities (78 shown, 78 thin omitted)
+- 2733 nodes · 8645 edges · 156 communities (77 shown, 79 thin omitted)
 - Extraction: 90% EXTRACTED · 10% INFERRED · 0% AMBIGUOUS · INFERRED: 859 edges (avg confidence: 0.86)
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `705f428a`
+- Built from commit: `c0306a2f`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -25,7 +25,7 @@
 - manifest.json
 - com.unity.2d.common@8.1.0
 - TutorialDirector
-- CardFactory.P
+- CardFactory.B
 - AudioManager
 - com.unity.render-pipelines.core
 - NetworkManager
@@ -51,10 +51,10 @@
 - com.unity.2d.tilemap
 - MeldGroupView
 - com.unity.ugui@1.0.0
-- DeckManager
+- EventBus.Clear
 - AIPlayer
 - CoachAdvisor
-- CLAUDE.md - Brief d'execution optimise pour Claude
+- GameManager.ExecuteCommand
 - LevelRequirement
 - com.unity.modules.androidjni@1.0.0
 - com.unity.modules.unitywebrequest@1.0.0
@@ -121,21 +121,21 @@
 - SocialProtocol
 - TurnTimer
 - OnlinePanel
-- OnlineSession.OnCommandMessage
+- OnlineSession.cs
 - SelectionStatusView
-- EventBus.Clear
-- CardModel
+- BotSimulationTests.PlayGame
+- CardColor
 - MatchRules
 - TurnStartedEvent
 - DailyPanel
 - IGameCommand
 - RectTransform
 - IReadOnlyList
-- PlayerModel
+- Meld
 - GameSession.GetLocalPlayer
 - Haptics
 - EventBus
-- CardColor
+- FrameBudget
 - CardDrawnEvent
 - ChallengeDirector
 - RematchVote
@@ -145,22 +145,21 @@
 - UISkin.Text
 - Expect
 - PanelState
-- CardType
+- MatchRulesTests
 - GameBootstrapper.StartSoloGame
 - ContractAndReplayTests
 - Achievements
-- TurnPhase
+- GameSession
 - SpecialCardsMode
-- 15.4 Helpers STATIQUES (aucun GameObject)
+- Kind
 - quick-compile.sh
 - run-harness.sh
-- Constants
 
 ## God Nodes (most connected - your core abstractions)
 1. `OnlineSession` - 95 edges
 2. `GameInputController` - 90 edges
 3. `GameBootstrapper` - 83 edges
-4. `LevelUp.Core` - 80 edges
+4. `LevelUp.Core` - 79 edges
 5. `HandView` - 69 edges
 6. `GameManager` - 69 edges
 7. `GameScreenLayout` - 67 edges
@@ -173,24 +172,24 @@
   UNITY_LAYOUT_GUIDE.md → LevelUp/Assets/Scripts/Core/GameEvents.cs
 - `3.5.a HandContainer (enfant de PlayerHand)` --references--> `HandView`  [INFERRED]
   UNITY_LAYOUT_GUIDE.md → LevelUp/Assets/Scripts/UI/HandView.cs
-- `9) Prochaines taches recommandees (ordre d'execution)` --references--> `TutorialDirector`  [INFERRED]
-  CLAUDE.md → LevelUp/Assets/Scripts/TutorialDirector.cs
-- `Ce qui tourne vraiment` --references--> `GameScreenLayout`  [INFERRED]
-  CLAUDE.md → LevelUp/Assets/Scripts/UI/GameScreenLayout.cs
-- `UI / DA "Salon"` --references--> `GameScreenLayout`  [INFERRED]
-  CLAUDE.md → LevelUp/Assets/Scripts/UI/GameScreenLayout.cs
+- `Ce qui tourne vraiment` --references--> `SelectionStatusView`  [INFERRED]
+  CLAUDE.md → LevelUp/Assets/Scripts/UI/SelectionStatusView.cs
+- `15.2 Scripts AUTO-GÉNÉRÉS au runtime (ne pas les ajouter à la main)` --references--> `SelectionStatusView`  [INFERRED]
+  UNITY_LAYOUT_GUIDE.md → LevelUp/Assets/Scripts/UI/SelectionStatusView.cs
+- `Ce qui tourne vraiment` --references--> `AudioManager`  [INFERRED]
+  CLAUDE.md → LevelUp/Assets/Scripts/UI/AudioManager.cs
 
 ## Import Cycles
 - None detected.
 
-## Communities (156 total, 78 thin omitted)
+## Communities (156 total, 79 thin omitted)
 
 ### Community 1 - "LevelUp.Utils"
-Cohesion: 0.05
-Nodes (18): LevelUp.Core, LevelUp.Tests, LevelUp.Utils, LevelUp.EditorTools, LevelUp.UI, LevelUp.AI, LevelUp.Network, UIInputBlocker (+10 more)
+Cohesion: 0.06
+Nodes (17): LevelUp.Core, LevelUp.Tests, LevelUp.Utils, LevelUp.EditorTools, LevelUp.UI, LevelUp.AI, UIInputBlocker, GameState (+9 more)
 
 ### Community 2 - "CardModel"
-Cohesion: 0.14
+Cohesion: 0.13
 Nodes (3): CardExtensions, LevelRequirement, LevelValidator
 
 ### Community 5 - "HandView"
@@ -208,6 +207,10 @@ Nodes (44): dependencies, depth, source, url, version, dependencies, depth, sour
 ### Community 8 - "TutorialDirector"
 Cohesion: 0.14
 Nodes (4): Step, TutorialDirector, IsRunning, Rules
+
+### Community 9 - "CardFactory.B"
+Cohesion: 0.23
+Nodes (3): BotBrainTests, LevelValidatorTests, CardFactory
 
 ### Community 10 - "AudioManager"
 Cohesion: 0.15
@@ -230,8 +233,8 @@ Cohesion: 0.08
 Nodes (28): dependencies, depth, source, url, version, dependencies, depth, source (+20 more)
 
 ### Community 15 - "EventBus.Publish"
-Cohesion: 0.11
-Nodes (13): GameCommandExecutor, CommandResult, DrawnCard, Error, Message, RoundEnded, Success, WinnerOverride (+5 more)
+Cohesion: 0.06
+Nodes (26): GameCommandExecutor, CommandResult, DrawnCard, Error, Message, RoundEnded, Success, WinnerOverride (+18 more)
 
 ### Community 16 - "with"
 Cohesion: 0.06
@@ -258,8 +261,8 @@ Cohesion: 0.08
 Nodes (26): dependencies, depth, source, url, version, dependencies, depth, source (+18 more)
 
 ### Community 22 - "DrawFromDeckCommand"
-Cohesion: 0.09
-Nodes (26): AddToMeldCommand, Card, MeldIndex, MeldOwnerIndex, PlayerIndex, DiscardCommand, Card, PlayerIndex (+18 more)
+Cohesion: 0.10
+Nodes (26): Regles (Core), AddToMeldCommand, Card, MeldIndex, MeldOwnerIndex, PlayerIndex, DiscardCommand, Card (+18 more)
 
 ### Community 23 - "com.unity.nuget.newtonsoft-json"
 Cohesion: 0.06
@@ -278,12 +281,12 @@ Cohesion: 0.08
 Nodes (30): dependencies, depth, source, version, dependencies, depth, source, version (+22 more)
 
 ### Community 28 - "Test"
-Cohesion: 0.13
-Nodes (5): CardExtensionsTests, LayDownOptionsTests, LevelValidatorTests, MeldTests, CardFactory
+Cohesion: 0.15
+Nodes (3): CardExtensionsTests, LayDownOptionsTests, MeldTests
 
 ### Community 30 - "OnlineSession"
 Cohesion: 0.11
-Nodes (10): CurrentLobby, DeviceToken, IsActive, IsSessionHost, JoinCode, LastJoinCode, LobbyHumanCount, VersionTag (+2 more)
+Nodes (11): OnlineResumeData, CurrentLobby, DeviceToken, IsActive, IsSessionHost, JoinCode, LastJoinCode, LobbyHumanCount (+3 more)
 
 ### Community 31 - "BotBrain"
 Cohesion: 0.16
@@ -301,29 +304,21 @@ Nodes (8): CardOrigin, CardOrigins, Provider, MeldGroupView, MeldType, OwnerInde
 Cohesion: 0.12
 Nodes (17): dependencies, depth, source, url, version, depth, source, version (+9 more)
 
-### Community 35 - "DeckManager"
-Cohesion: 0.06
-Nodes (15): ActionCardHandler, DeckManager, CardsPerPlayer, DiscardPileCount, DrawPileCount, PresetOrder, GameConfig, CardMaxValue (+7 more)
-
-### Community 36 - "AIPlayer"
-Cohesion: 0.14
-Nodes (10): 10) Carte du code (a lire AVANT d'explorer : evite de tout relire), IA (`Scripts/AI`), Regles (Core), Verifier sans appareil (editeur Unity FERME, sinon le batchmode echoue), AIDifficulty, Easy, Hard, Normal (+2 more)
-
-### Community 39 - "CLAUDE.md - Brief d'execution optimise pour Claude"
-Cohesion: 0.14
-Nodes (13): 1) Role de Claude dans ce projet, 3) Objectif produit global, 4) Backlog priorise (spec fonctionnelle), 5) Contraintes de mise en oeuvre, 6) Definition of Done (DoD), 7) Format de reponse attendu de Claude, 8) Regles de priorisation quand il y a ambiguite, A. UX & Gameplay (zero friction) - PRIORITE P0 (+5 more)
+### Community 35 - "EventBus.Clear"
+Cohesion: 0.09
+Nodes (7): GameConfig, CardMaxValue, CardMinValue, CardsPerPlayer, DeckSize, MaxPlayers, MinPlayers
 
 ### Community 40 - "LevelRequirement"
 Cohesion: 0.17
 Nodes (6): ContractCatalog, ContractPlan, IsRandom, ContractProgress, Entry, IsMet
 
 ### Community 44 - "MatchRules"
-Cohesion: 0.08
+Cohesion: 0.09
 Nodes (16): MatchRules, CatchUp, Draw2Count, FinalLevelRequired, GoOutBonus, HandSize, HasTurnTimer, IsClassic (+8 more)
 
 ### Community 45 - "IEnumerator"
 Cohesion: 0.07
-Nodes (10): GameSession, Contracts, IsHost, IsOnline, LocalPlayerIndex, Rules, DevAutoScreenshot, DevInputTest (+2 more)
+Nodes (22): 10) Carte du code (a lire AVANT d'explorer : evite de tout relire), 1) Role de Claude dans ce projet, 3) Objectif produit global, 4) Backlog priorise (spec fonctionnelle), 5) Contraintes de mise en oeuvre, 6) Definition of Done (DoD), 7) Format de reponse attendu de Claude, 8) Regles de priorisation quand il y a ambiguite (+14 more)
 
 ### Community 46 - "com.unity.inputsystem"
 Cohesion: 0.33
@@ -354,12 +349,16 @@ Cohesion: 0.05
 Nodes (20): Ce qui tourne vraiment, AppLifecycle, ConfirmDialog, ConnectionOverlay, IsVisible, DailyPanel, IsVisible, MatchSetupPanel (+12 more)
 
 ### Community 53 - "GameConfig"
-Cohesion: 0.13
-Nodes (4): Challenge, ChallengeGenerator, ChallengeGeneratorTests, MatchRulesTests
+Cohesion: 0.14
+Nodes (8): Challenge, ChallengeGenerator, DeckManager, CardsPerPlayer, DiscardPileCount, DrawPileCount, PresetOrder, ChallengeGeneratorTests
 
 ### Community 56 - "MainMenuController"
 Cohesion: 0.10
 Nodes (7): PileSlot, StepPill, TextMirror, MainMenuController, IsVisible, MatchSetup, Root
+
+### Community 57 - "EventBus.Subscribe"
+Cohesion: 0.12
+Nodes (5): ActionCardHandler, DeckChangedEvent, EventBusTests, PingEvent, SkipStackingTests
 
 ### Community 58 - "GameManager"
 Cohesion: 0.12
@@ -405,57 +404,57 @@ Nodes (4): DiscardPileView, Compact, PileCount, PileSpacing
 Cohesion: 0.33
 Nodes (6): TextWeight, Bold, Display, Medium, Regular, SemiBold
 
+### Community 108 - "TurnTimer"
+Cohesion: 0.24
+Nodes (3): GameOverEvent, RoundEndedEvent, TurnTimer
+
 ### Community 109 - "OnlinePanel"
 Cohesion: 0.18
 Nodes (4): OnlinePanel, IsVisible, LastCode, UIInputs
 
-### Community 115 - "CardModel"
-Cohesion: 0.29
-Nodes (3): CardModel, IsAction, IsWild
+### Community 115 - "CardColor"
+Cohesion: 0.07
+Nodes (23): CardModel, IsAction, IsWild, CardColor, Blue, Green, Orange, Purple (+15 more)
 
 ### Community 116 - "MatchRules"
 Cohesion: 0.21
 Nodes (4): En ligne (`Scripts/Network`), LobbyInfo, LobbyMember, OnlineStartData
 
 ### Community 117 - "TurnStartedEvent"
-Cohesion: 0.19
-Nodes (15): ActionCardPlayedEvent, CardAddedToMeldEvent, CardDiscardedEvent, ForcedDrawEvent, GameOverEvent, GameStartedEvent, HandChangedEvent, LevelCompletedEvent (+7 more)
+Cohesion: 0.22
+Nodes (13): ActionCardPlayedEvent, CardAddedToMeldEvent, CardDiscardedEvent, ForcedDrawEvent, GameStartedEvent, HandChangedEvent, LevelCompletedEvent, LevelLaidDownEvent (+5 more)
 
 ### Community 118 - "DailyPanel"
 Cohesion: 0.17
 Nodes (4): DailyDeal, Rules, Streak, TodayKey
 
 ### Community 119 - "IGameCommand"
-Cohesion: 0.12
-Nodes (14): GameCommandCodec, Kind, AddToMeld, Discard, DrawFromDeck, DrawFromDiscard, LayDown, SkipPhase (+6 more)
+Cohesion: 0.16
+Nodes (6): GameCommandCodec, SavedGame, SaveGame, Exists, FilePath, PathOverride
 
 ### Community 120 - "RectTransform"
 Cohesion: 0.15
 Nodes (3): GameScreenLayout, Coach, Root
 
-### Community 122 - "PlayerModel"
-Cohesion: 0.09
-Nodes (17): Meld, Cards, OwnerIndex, Type, PlayerModel, CurrentLevel, Hand, HasLaidDownThisRound (+9 more)
+### Community 122 - "Meld"
+Cohesion: 0.31
+Nodes (4): Meld, Cards, OwnerIndex, Type
 
 ### Community 124 - "GameSession.GetLocalPlayer"
 Cohesion: 0.13
 Nodes (6): PlayerProfile, GamesPlayed, GamesWon, HasCustomName, Name, RoundsWon
 
 ### Community 127 - "EventBus"
-Cohesion: 0.29
-Nodes (3): EventBus, Muted, Subscription
-
-### Community 128 - "CardColor"
-Cohesion: 0.25
-Nodes (8): CardColor, Blue, Green, Orange, Purple, Red, Wild, Yellow
+Cohesion: 0.15
+Nodes (9): EventBus, Muted, Subscription, 15.3 Scripts sur PREFABS (pas dans la scène), 15.4 Helpers STATIQUES (aucun GameObject), 15.5 Hiérarchie finale complète (copier-coller mental), 15.6 Toutes les références Inspector (checklist drag & drop), 15.7 Résumé en 3 lignes (+1 more)
 
 ### Community 130 - "ChallengeDirector"
 Cohesion: 0.15
 Nodes (4): ChallengeDirector, IsRunning, Rules, Solved
 
 ### Community 131 - "RematchVote"
-Cohesion: 0.16
-Nodes (5): EmoteLimiter, RematchVote, ExpectedMask, IsAgreed, VotesMask
+Cohesion: 0.13
+Nodes (6): EmoteLimiter, RematchVote, ExpectedMask, IsAgreed, VotesMask, SocialProtocolTests
 
 ### Community 132 - "CanvasGroup"
 Cohesion: 0.13
@@ -477,45 +476,41 @@ Nodes (7): Expect, AddToMeld, Discard, Done, DrawDeck, DrawDiscard, LayDown
 Cohesion: 0.33
 Nodes (6): PanelState, Busy, ClientLobby, Home, HostLobby, Join
 
-### Community 138 - "CardType"
-Cohesion: 0.29
-Nodes (6): CardType, Draw2, Normal, Skip, Wild, WildDraw2
-
 ### Community 142 - "Achievements"
 Cohesion: 0.40
 Nodes (3): Achievements, Entry, Done
 
-### Community 143 - "TurnPhase"
-Cohesion: 0.33
-Nodes (5): TurnPhase, AddToMelds, Discard, Draw, LayDown
+### Community 143 - "GameSession"
+Cohesion: 0.25
+Nodes (6): GameSession, Contracts, IsHost, IsOnline, LocalPlayerIndex, Rules
 
 ### Community 145 - "SpecialCardsMode"
 Cohesion: 0.24
 Nodes (5): SpecialCardsMode, All, Jokers, None, MatchRulesText
 
-### Community 146 - "15.4 Helpers STATIQUES (aucun GameObject)"
-Cohesion: 0.33
-Nodes (6): 15.3 Scripts sur PREFABS (pas dans la scène), 15.4 Helpers STATIQUES (aucun GameObject), 15.5 Hiérarchie finale complète (copier-coller mental), 15.6 Toutes les références Inspector (checklist drag & drop), 15.7 Résumé en 3 lignes, 15. Mapping complet script → GameObject
+### Community 146 - "Kind"
+Cohesion: 0.25
+Nodes (8): Kind, AddToMeld, Discard, DrawFromDeck, DrawFromDiscard, LayDown, SkipPhase, StartNextRound
 
 ## Knowledge Gaps
-- **297 isolated node(s):** `DrawDeck`, `LayDown`, `AddToMeld`, `Discard`, `DrawDiscard` (+292 more)
-  These have ≤1 connection - possible missing edges or undocumented components. (Counts symbols only; 726 node(s) total have ≤1 connection when file, concept and rationale nodes are included.)
-- **78 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
+- **297 isolated node(s):** `EndRound`, `GameOver`, `PlayerTurn`, `Setup`, `Validate` (+292 more)
+  These have ≤1 connection - possible missing edges or undocumented components. (Counts symbols only; 727 node(s) total have ≤1 connection when file, concept and rationale nodes are included.)
+- **79 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
 
 ## Suggested Questions
 _Questions this graph is uniquely positioned to answer:_
 
-- **Why does `OnlineSession` connect `OnlineSession` to `LevelUp.Utils`, `CardModel`, `RematchVote`, `CardView`, `FastBufferReader`, `TutorialDirector`, `SocialProtocol`, `OnlinePanel`, `OnlineSession.OnCommandMessage`, `Action`, `GameConfig`, `MatchRules`, `OnlineSession.HostAsync`, `IGameCommand`?**
-  _High betweenness centrality (0.067) - this node is a cross-community bridge._
+- **Why does `OnlineSession` connect `OnlineSession` to `CardModel`, `RematchVote`, `CardView`, `FastBufferReader`, `TutorialDirector`, `SocialProtocol`, `OnlinePanel`, `OnlineSession.cs`, `Action`, `GameConfig`, `MatchRules`, `OnlineSession.HostAsync`, `IGameCommand`?**
+  _High betweenness centrality (0.070) - this node is a cross-community bridge._
 - **Are the 2 inferred relationships involving `OnlineSession` (e.g. with `9) Prochaines taches recommandees (ordre d'execution)` and `Ce qui tourne vraiment`) actually correct?**
   _`OnlineSession` has 2 INFERRED edges - model-reasoned connections that need verification._
-- **What connects `DrawDeck`, `LayDown`, `AddToMeld` to the rest of the system?**
+- **What connects `EndRound`, `GameOver`, `PlayerTurn` to the rest of the system?**
   _297 weakly-connected nodes found - possible documentation gaps or missing edges._
 - **Should `LevelUp.Utils` be split into smaller, more focused modules?**
-  _Cohesion score 0.052950910093767234 - nodes in this community are weakly interconnected._
-- **Why does `HandView` connect `HandView` to `Vector2`, `LevelUp.Utils`, `CardModel`, `Image`, `UISkin.Text`, `NetworkManager`, `GameBootstrapper.HandleResumeSolo`, `MeldGroupView`, `GameInputController.ApplyPreferredSort`, `IEnumerator`, `Action`, `MainMenuController`, `EventBus.Subscribe`, `GameInputController`, `RectTransform`, `3. Configuration détaillée par GameObject`, `CardView`, `TurnStartedEvent`, `IReadOnlyList`?**
-  _High betweenness centrality (0.046) - this node is a cross-community bridge._
+  _Cohesion score 0.059252898239587806 - nodes in this community are weakly interconnected._
+- **Why does `GameBootstrapper` connect `GameBootstrapper` to `LevelUp.Utils`, `CardModel`, `Image`, `CanvasGroup`, `TutorialDirector`, `GameBootstrapper.StartSoloGame`, `GameBootstrapper.HandleResumeSolo`, `DrawFromDeckCommand`, `OnlineSession`, `MeldGroupView`, `IEnumerator`, `PassAndPlayController`, `Action`, `GameBootstrapper.LaunchOnlineMatch`, `RectTransform`, `BalatroEffects`, `OnlinePanel`, `SelectionStatusView`, `RoundStartedEvent`, `DailyPanel`, `IGameCommand`, `RectTransform`, `GameSession.GetLocalPlayer`?**
+  _High betweenness centrality (0.049) - this node is a cross-community bridge._
 - **Should `CardModel` be split into smaller, more focused modules?**
-  _Cohesion score 0.1417004048582996 - nodes in this community are weakly interconnected._
-- **Why does `GameManager` connect `GameManager` to `LevelUp.Utils`, `ChallengeDirector`, `CardModel`, `CardDrawnEvent`, `UISkin.Text`, `CardFactory.P`, `AudioManager`, `GameBootstrapper.StartSoloGame`, `ContractAndReplayTests`, `NetworkManager`, `EventBus.Publish`, `15.4 Helpers STATIQUES (aucun GameObject)`, `DrawFromDeckCommand`, `GameBootstrapper`, `DeckManager`, `AIPlayer`, `LevelRequirement`, `MatchRules`, `IEnumerator`, `Action`, `GameConfig`, `GameInputController`, `RoundSummaryView`, `GameCommandExecutor.Execute`, `DiscardPileView`, `TurnTimer`, `EventBus.Clear`, `MatchRules`, `TurnStartedEvent`, `IReadOnlyList`?**
-  _High betweenness centrality (0.043) - this node is a cross-community bridge._
+  _Cohesion score 0.1329268292682927 - nodes in this community are weakly interconnected._
+- **Why does `GameInputController` connect `GameInputController` to `Vector2`, `LevelUp.Utils`, `CardModel`, `Image`, `HandView`, `UISkin.Text`, `NetworkManager`, `HUDView`, `MeldGroupView`, `GameInputController.ApplyPreferredSort`, `IEnumerator`, `Action`, `GameConfig`, `GameManager`, `RectTransform`, `CardView`, `DiscardPileView`, `TurnTimer`, `SelectionStatusView`, `TurnStartedEvent`, `GameSession.GetLocalPlayer`?**
+  _High betweenness centrality (0.039) - this node is a cross-community bridge._

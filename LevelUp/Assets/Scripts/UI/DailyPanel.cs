@@ -160,7 +160,7 @@ namespace LevelUp.UI
         {
             string text = DailyDeal.ShareText(DailyDeal.TodayKey);
             if (text.Length == 0) return;
-            GUIUtility.systemCopyBuffer = text;
+            GUIUtility.systemCopyBuffer = LevelUp.Utils.Loc.T(text);
             if (_shareLabel != null) _shareLabel.text = "COPIÉ !";
         }
 

@@ -126,7 +126,7 @@ namespace LevelUp.UI
         {
             if (_content == null) return;
             int key = (GameSettings.HintContract ? 1 : 0) | (GameSettings.HintPlayable ? 2 : 0)
-                      | (GameSettings.QuickDiscard ? 4 : 0);
+                      | (GameSettings.QuickDiscard ? 4 : 0) | (LevelUp.Utils.Loc.Language << 3);
             if (key == _builtFor) return;
             _builtFor = key;
             for (int i = _content.childCount - 1; i >= 0; i--)
@@ -208,7 +208,8 @@ namespace LevelUp.UI
             t.lineSpacing = 8f;
             t.alignment = TextAlignmentOptions.TopLeft;
             LayoutElement le = UISkin.Size(t.gameObject, Inner);
-            le.preferredHeight = t.GetPreferredValues(text, Inner, 0f).y + 4f;
+            // Hauteur mesurée sur le texte tel qu'il sera affiché (langue courante).
+            le.preferredHeight = t.GetPreferredValues(LevelUp.Utils.Loc.T(text), Inner, 0f).y + 4f;
         }
 
         private static void Step(Transform parent, string num, string title, string text)
@@ -232,7 +233,7 @@ namespace LevelUp.UI
             t.alignment = TextAlignmentOptions.TopLeft;
             float w = Inner - 28f - 14f;
             LayoutElement le = UISkin.Size(t.gameObject, w);
-            le.preferredHeight = t.GetPreferredValues(body, w, 0f).y + 4f;
+            le.preferredHeight = t.GetPreferredValues(LevelUp.Utils.Loc.T(body), w, 0f).y + 4f;
         }
 
         public void Show()

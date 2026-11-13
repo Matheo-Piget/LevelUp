@@ -78,6 +78,8 @@ namespace LevelUp.UI
                 () => GameSettings.QualityIndex, v => GameSettings.QualityIndex = v);
             Choice(left.transform, "Fluidité", new[] { "60 I/S", "120 I/S" },
                 () => GameSettings.HighFrameRate ? 1 : 0, v => GameSettings.HighFrameRate = v == 1);
+            Choice(left.transform, "Langue", new[] { "FRANÇAIS", "ENGLISH" },
+                () => LevelUp.Utils.Loc.Language, v => LevelUp.Utils.Loc.Language = v);
             Choice(left.transform, "Interface", new[] { "NORMALE", "GRANDE" },
                 () => GameSettings.UiScale, v => GameSettings.UiScale = v);
             CosmeticRow(left.transform, "Tapis", () => GameSettings.Felt, v => GameSettings.Felt = v,
